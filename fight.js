@@ -58,7 +58,7 @@ const MOVE_MATRIX = {
 };
 
 // GitHub repository base URL for fight images
-// UPDATE THIS with your actual GitHub username and repo name after pushing images
+// NOTE: Repository must be PUBLIC for these URLs to work!
 const GITHUB_REPO = 'https://raw.githubusercontent.com/Moithas/Chat-Stock/main/assets/fight';
 
 // GIF/Image URLs for successful moves (hosted on GitHub for reliability)
