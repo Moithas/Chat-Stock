@@ -7,6 +7,7 @@ const DEFAULT_SETTINGS = {
   enabled: true,
   hackerCooldownMinutes: 60,      // 1 hour cooldown for hacker
   targetCooldownMinutes: 720,     // 12 hours cooldown for target (only if hack succeeds)
+  uniqueTargetsRequired: 3,       // Must hack X unique targets before re-targeting same person
   minStealPercent: 2,             // Minimum % of target's bank that can be stolen
   maxStealPercent: 5,             // Maximum % of target's bank that can be stolen
   minFinePercent: 15,             // Minimum fine as % of potential steal
@@ -29,12 +30,20 @@ function initHack(database) {
       enabled INTEGER DEFAULT 1,
       hacker_cooldown_minutes INTEGER DEFAULT 60,
       target_cooldown_minutes INTEGER DEFAULT 720,
+      unique_targets_required INTEGER DEFAULT 3,
       min_steal_percent INTEGER DEFAULT 2,
       max_steal_percent INTEGER DEFAULT 5,
       min_fine_percent INTEGER DEFAULT 15,
       max_fine_percent INTEGER DEFAULT 20
     )
   `);
+  
+  // Add unique_targets_required column if it doesn't exist (migration)
+  try {
+    db.run(`ALTER TABLE hack_settings ADD COLUMN unique_targets_required INTEGER DEFAULT 3`);
+  } catch (e) {
+    // Column already exists
+  }
   
   // Create hacker cooldown tracker table
   db.run(`
@@ -98,6 +107,7 @@ function getHackSettings(guildId) {
       enabled: row.enabled === 1,
       hackerCooldownMinutes: row.hacker_cooldown_minutes || 60,
       targetCooldownMinutes: row.target_cooldown_minutes || 720,
+      uniqueTargetsRequired: row.unique_targets_required !== undefined ? row.unique_targets_required : 3,
       minStealPercent: row.min_steal_percent || 2,
       maxStealPercent: row.max_steal_percent || 5,
       minFinePercent: row.min_fine_percent || 15,
@@ -120,13 +130,14 @@ function updateHackSettings(guildId, updates) {
   const settings = { ...current, ...updates };
   
   db.run(`
-    INSERT OR REPLACE INTO hack_settings (guild_id, enabled, hacker_cooldown_minutes, target_cooldown_minutes, min_steal_percent, max_steal_percent, min_fine_percent, max_fine_percent)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO hack_settings (guild_id, enabled, hacker_cooldown_minutes, target_cooldown_minutes, unique_targets_required, min_steal_percent, max_steal_percent, min_fine_percent, max_fine_percent)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     guildId,
     settings.enabled ? 1 : 0,
     settings.hackerCooldownMinutes,
     settings.targetCooldownMinutes,
+    settings.uniqueTargetsRequired !== undefined ? settings.uniqueTargetsRequired : 3,
     settings.minStealPercent,
     settings.maxStealPercent,
     settings.minFinePercent,
@@ -222,6 +233,49 @@ function canBeHacked(guildId, targetId) {
   }
   
   return { canBeHacked: true };
+}
+
+// Check if hacker can target this specific person (unique targets requirement)
+function canHackTarget(guildId, hackerId, targetId) {
+  if (!db) return { canHack: true, targetsNeeded: 0 };
+  
+  const settings = getHackSettings(guildId);
+  
+  // If unique targets requirement is 0, no restriction
+  if (!settings.uniqueTargetsRequired || settings.uniqueTargetsRequired === 0) {
+    return { canHack: true, targetsNeeded: 0 };
+  }
+  
+  // Get the last time this hacker targeted this specific person
+  const lastHackResult = db.exec(`
+    SELECT MAX(hack_time) as last_hack FROM hack_history
+    WHERE guild_id = ? AND hacker_id = ? AND target_id = ?
+  `, [guildId, hackerId, targetId]);
+  
+  if (lastHackResult.length === 0 || !lastHackResult[0].values[0][0]) {
+    // Never hacked this person before
+    return { canHack: true, targetsNeeded: 0 };
+  }
+  
+  const lastHackTime = lastHackResult[0].values[0][0];
+  
+  // Count unique targets hacked since last hack of this person
+  const uniqueTargetsResult = db.exec(`
+    SELECT COUNT(DISTINCT target_id) as count FROM hack_history
+    WHERE guild_id = ? AND hacker_id = ? AND target_id != ? AND hack_time > ?
+  `, [guildId, hackerId, targetId, lastHackTime]);
+  
+  const uniqueTargets = uniqueTargetsResult[0]?.values[0][0] || 0;
+  
+  if (uniqueTargets >= settings.uniqueTargetsRequired) {
+    return { canHack: true, targetsNeeded: 0 };
+  }
+  
+  return {
+    canHack: false,
+    targetsNeeded: settings.uniqueTargetsRequired - uniqueTargets,
+    reason: `You must hack **${settings.uniqueTargetsRequired - uniqueTargets}** other unique target(s) before hacking this person again!`
+  };
 }
 
 // Start tracking an active hack
@@ -386,6 +440,7 @@ module.exports = {
   updateHackSettings,
   canHack,
   canBeHacked,
+  canHackTarget,
   startActiveHack,
   endActiveHack,
   recordHackerCooldown,

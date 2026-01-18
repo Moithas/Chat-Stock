@@ -67,6 +67,13 @@ function initRob(database) {
     // New column structure, no migration needed
   }
   
+  // Add unique_targets_required column if it doesn't exist (migration)
+  try {
+    db.run(`ALTER TABLE rob_settings ADD COLUMN unique_targets_required INTEGER DEFAULT 3`);
+  } catch (e) {
+    // Column already exists
+  }
+  
   // Add defense columns if they don't exist (migration for existing databases)
   try {
     db.run(`ALTER TABLE rob_settings ADD COLUMN defenses_enabled INTEGER DEFAULT 1`);
@@ -201,6 +208,7 @@ function getRobSettings(guildId) {
       maxStealPercent: row.max_steal_percent,
       cooldownMinutes: row.cooldown_minutes || 240,
       targetCooldownSeconds: row.target_cooldown_seconds !== undefined ? row.target_cooldown_seconds : 60,
+      uniqueTargetsRequired: row.unique_targets_required !== undefined ? row.unique_targets_required : 3,
       fineMinPercent: row.fine_min_percent || 10,
       fineMaxPercent: row.fine_max_percent || 25,
       defensesEnabled: row.defenses_enabled === 1,
@@ -225,8 +233,8 @@ function updateRobSettings(guildId, updates) {
   const settings = { ...current, ...updates };
   
   db.run(`
-    INSERT OR REPLACE INTO rob_settings (guild_id, enabled, min_steal_percent, max_steal_percent, cooldown_minutes, target_cooldown_seconds, fine_min_percent, fine_max_percent, defenses_enabled, hidecash_success_rate, dodge_success_rate, fightback_success_rate)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO rob_settings (guild_id, enabled, min_steal_percent, max_steal_percent, cooldown_minutes, target_cooldown_seconds, unique_targets_required, fine_min_percent, fine_max_percent, defenses_enabled, hidecash_success_rate, dodge_success_rate, fightback_success_rate)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     guildId,
     settings.enabled ? 1 : 0,
@@ -234,6 +242,7 @@ function updateRobSettings(guildId, updates) {
     settings.maxStealPercent,
     settings.cooldownMinutes,
     settings.targetCooldownSeconds,
+    settings.uniqueTargetsRequired !== undefined ? settings.uniqueTargetsRequired : 3,
     settings.fineMinPercent,
     settings.fineMaxPercent,
     settings.defensesEnabled ? 1 : 0,
@@ -323,6 +332,49 @@ function canBeRobbed(guildId, targetId) {
   }
   
   return { canBeRobbed: true };
+}
+
+// Check if robber can target this specific person (unique targets requirement)
+function canRobTarget(guildId, robberId, targetId) {
+  if (!db) return { canRob: true, targetsNeeded: 0 };
+  
+  const settings = getRobSettings(guildId);
+  
+  // If unique targets requirement is 0, no restriction
+  if (!settings.uniqueTargetsRequired || settings.uniqueTargetsRequired === 0) {
+    return { canRob: true, targetsNeeded: 0 };
+  }
+  
+  // Get the last time this robber targeted this specific person
+  const lastRobResult = db.exec(`
+    SELECT MAX(rob_time) as last_rob FROM rob_history
+    WHERE guild_id = ? AND robber_id = ? AND target_id = ?
+  `, [guildId, robberId, targetId]);
+  
+  if (lastRobResult.length === 0 || !lastRobResult[0].values[0][0]) {
+    // Never robbed this person before
+    return { canRob: true, targetsNeeded: 0 };
+  }
+  
+  const lastRobTime = lastRobResult[0].values[0][0];
+  
+  // Count unique targets robbed since last rob of this person
+  const uniqueTargetsResult = db.exec(`
+    SELECT COUNT(DISTINCT target_id) as count FROM rob_history
+    WHERE guild_id = ? AND robber_id = ? AND target_id != ? AND rob_time > ?
+  `, [guildId, robberId, targetId, lastRobTime]);
+  
+  const uniqueTargets = uniqueTargetsResult[0]?.values[0][0] || 0;
+  
+  if (uniqueTargets >= settings.uniqueTargetsRequired) {
+    return { canRob: true, targetsNeeded: 0 };
+  }
+  
+  return {
+    canRob: false,
+    targetsNeeded: settings.uniqueTargetsRequired - uniqueTargets,
+    reason: `You must rob **${settings.uniqueTargetsRequired - uniqueTargets}** other unique target(s) before robbing this person again!`
+  };
 }
 
 // Record that a target was robbed/targeted
@@ -735,6 +787,7 @@ module.exports = {
   updateRobSettings,
   canRob,
   canBeRobbed,
+  canRobTarget,
   recordTargetRobbed,
   calculateSuccessRate,
   attemptRob,

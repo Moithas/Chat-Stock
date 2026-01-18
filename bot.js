@@ -944,6 +944,7 @@ client.on('interactionCreate', async (interaction) => {
       'rob_target_cooldown', 'modal_rob_target_cooldown',
       'admin_hack', 'hack_toggle', 'hack_edit_settings', 'hack_immunity_settings',
       'hack_add_immune_role', 'hack_clear_immune_roles', 'hack_immunity_role_select',
+      'hack_anti_farm', 'modal_hack_anti_farm',
       'modal_hack_settings', 'back_hack',
       'admin_fight', 'fight_toggle', 'fight_edit_settings', 'fight_view_leaderboard', 'fight_view_history',
       'fight_reset_stats', 'fight_reset_confirm', 'modal_fight_settings', 'back_fight',

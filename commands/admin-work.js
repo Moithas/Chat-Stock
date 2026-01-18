@@ -565,6 +565,12 @@ async function showRobPanel(interaction, guildId) {
     ? `${Math.floor(targetCooldown / 60)}m ${targetCooldown % 60}s`
     : `${targetCooldown}s`;
   
+  // Format unique targets display
+  const uniqueTargets = settings.uniqueTargetsRequired || 0;
+  const uniqueTargetsStr = uniqueTargets > 0 
+    ? `${uniqueTargets} unique targets` 
+    : 'Disabled';
+  
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle('🔓 Rob Settings')
@@ -574,6 +580,7 @@ async function showRobPanel(interaction, guildId) {
       { name: '💰 Steal Range', value: `${settings.minStealPercent}% - ${settings.maxStealPercent}%`, inline: true },
       { name: '⏱️ Robber Cooldown', value: `${settings.cooldownMinutes} minutes`, inline: true },
       { name: '🎯 Target Protection', value: targetCooldownStr, inline: true },
+      { name: '🔄 XP Farm Protection', value: uniqueTargetsStr, inline: true },
       { name: '💸 Fine Range', value: `${settings.fineMinPercent}% - ${settings.fineMaxPercent}%`, inline: true },
       { name: '🛡️ Defenses', value: settings.defensesEnabled ? '✅ Enabled' : '❌ Disabled', inline: true },
       { name: '🛡️ Immune Roles', value: immuneRoles.length > 0 ? immuneRoles.map(r => `<@&${r}>`).join(', ') : 'None', inline: false }
@@ -896,7 +903,7 @@ async function showTargetCooldownModal(interaction, guildId) {
   const settings = getRobSettings(guildId);
   const modal = new ModalBuilder()
     .setCustomId('modal_rob_target_cooldown')
-    .setTitle('Target Protection Cooldown')
+    .setTitle('Target Protection Settings')
     .addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
@@ -906,6 +913,15 @@ async function showTargetCooldownModal(interaction, guildId) {
           .setValue(String(settings.targetCooldownSeconds || 60))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('unique_targets')
+          .setLabel('Unique Targets Required (anti-farm, 0=off)')
+          .setPlaceholder('3')
+          .setValue(String(settings.uniqueTargetsRequired || 0))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
       )
     );
   await interaction.showModal(modal);
@@ -913,14 +929,23 @@ async function showTargetCooldownModal(interaction, guildId) {
 
 async function handleTargetCooldownModal(interaction, guildId) {
   const cooldownSeconds = parseInt(interaction.fields.getTextInputValue('target_cooldown')) || 60;
+  const uniqueTargets = parseInt(interaction.fields.getTextInputValue('unique_targets')) || 0;
   
   // Validate: minimum 0 (no protection), maximum 3600 (1 hour)
   const validatedCooldown = Math.max(0, Math.min(3600, cooldownSeconds));
+  // Validate: minimum 0 (disabled), maximum 10
+  const validatedUnique = Math.max(0, Math.min(10, uniqueTargets));
   
-  updateRobSettings(guildId, { targetCooldownSeconds: validatedCooldown });
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated rob target protection to ${validatedCooldown} seconds`);
+  updateRobSettings(guildId, { 
+    targetCooldownSeconds: validatedCooldown,
+    uniqueTargetsRequired: validatedUnique
+  });
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated rob target protection: ${validatedCooldown}s cooldown, ${validatedUnique} unique targets required`);
   
-  await interaction.reply({ content: `✅ Target protection updated to ${validatedCooldown} seconds!`, flags: 64 });
+  const uniqueMsg = validatedUnique > 0 
+    ? `\n🔄 Anti-farm: Must rob ${validatedUnique} unique targets before re-robbing same person` 
+    : '\n🔄 Anti-farm: Disabled';
+  await interaction.reply({ content: `✅ Target protection updated to ${validatedCooldown} seconds!${uniqueMsg}`, flags: 64 });
   await showRobPanel(interaction, guildId);
 }
 

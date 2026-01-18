@@ -4,6 +4,7 @@ const {
   getHackSettings, 
   canHack, 
   canBeHacked, 
+  canHackTarget,
   startActiveHack, 
   endActiveHack,
   recordHackerCooldown,
@@ -210,6 +211,10 @@ module.exports = {
       });
     }
 
+    // Check if this target counts for XP (anti-farming - still allows hack, just no XP)
+    const uniqueTargetCheck = canHackTarget(guildId, hackerId, targetId);
+    const awardsXp = uniqueTargetCheck.canHack;
+
     // Check for completed training and get skill bonuses
     const trainingResult = checkTrainingComplete(guildId, hackerId, 'hack');
     const hackBonuses = getHackBonuses(guildId, hackerId);
@@ -293,12 +298,18 @@ module.exports = {
         // Fine the hacker
         await applyFine(guildId, hackerId, fine, `Failed hack attempt on ${targetUser.username} (defended)`);
         
-        // Award failure XP
-        const xpResult = addXp(guildId, hackerId, 'hack', 0, false);
+        // Award failure XP (only if unique target)
+        const xpResult = awardsXp 
+          ? addXp(guildId, hackerId, 'hack', 0, false)
+          : { xpGained: 0, levelUp: false };
         
         recordHack(guildId, hackerId, targetId, false, fine, true);
         
         const flavorText = getRandomFlavor(FLAVOR_TEXTS.defenseSuccess).replaceAll('{target}', `**${targetUser.username}**`);
+        
+        const xpFooter = awardsXp 
+          ? `Hacker gained ${xpResult.xpGained} XP • You can attempt to trace the hacker!`
+          : `Hacker gained no XP (must target unique people) • You can attempt to trace the hacker!`;
         
         const defenseEmbed = new EmbedBuilder()
           .setColor(0x2ecc71)
@@ -309,7 +320,7 @@ module.exports = {
             { name: '💸 Hacker Fined', value: `${fine.toLocaleString()} ${CURRENCY}`, inline: true },
             { name: '📊 Hack Progress', value: `${progress}%`, inline: true }
           )
-          .setFooter({ text: `Hacker gained ${xpResult.xpGained} XP • You can attempt to trace the hacker!` })
+          .setFooter({ text: xpFooter })
           .setTimestamp();
         
         const traceRow = createTraceButton(hackerId);
@@ -440,12 +451,18 @@ module.exports = {
           // Keep target on cooldown (successful hack)
           recordTargetHacked(guildId, targetId);
           
-          // Award success XP
-          const xpResult = addXp(guildId, hackerId, 'hack', 0, true, stolenAmount);
+          // Award success XP (only if unique target)
+          const xpResult = awardsXp 
+            ? addXp(guildId, hackerId, 'hack', 0, true, stolenAmount)
+            : { xpGained: 0, levelUp: false };
           
           recordHack(guildId, hackerId, targetId, true, stolenAmount, false);
           
           const flavorText = getRandomFlavor(FLAVOR_TEXTS.hackSuccess).replaceAll('{target}', `**${targetUser.username}**`);
+          
+          const xpFooter = awardsXp 
+            ? `+${xpResult.xpGained} Hack XP${xpResult.levelUp ? ` • LEVEL UP → ${xpResult.newLevel}!` : ''}`
+            : `No XP (target unique people)`;
           
           const successEmbed = new EmbedBuilder()
             .setColor(0x9b59b6)
@@ -456,7 +473,7 @@ module.exports = {
               { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
               { name: '🎲 Roll', value: `${hackRoll.toFixed(1)}%`, inline: true }
             )
-            .setFooter({ text: `+${xpResult.xpGained} Hack XP${xpResult.levelUp ? ` • LEVEL UP → ${xpResult.newLevel}!` : ''}` })
+            .setFooter({ text: xpFooter })
             .setTimestamp();
           
           await hackMessage.edit({
@@ -477,12 +494,18 @@ module.exports = {
           // Clear target cooldown (hack failed)
           clearTargetCooldown(guildId, targetId);
           
-          // Award failure XP
-          const xpResult = addXp(guildId, hackerId, 'hack', 0, false);
+          // Award failure XP (only if unique target)
+          const xpResult = awardsXp 
+            ? addXp(guildId, hackerId, 'hack', 0, false)
+            : { xpGained: 0, levelUp: false };
           
           recordHack(guildId, hackerId, targetId, false, fine, false);
           
           const flavorText = getRandomFlavor(FLAVOR_TEXTS.hackFail).replaceAll('{target}', `**${targetUser.username}**`);
+          
+          const xpFooter = awardsXp 
+            ? `+${xpResult.xpGained} Hack XP • You can trace the hacker for recovery!`
+            : `No XP (target unique people) • You can trace the hacker for recovery!`;
           
           const failEmbed = new EmbedBuilder()
             .setColor(0xe74c3c)
@@ -493,7 +516,7 @@ module.exports = {
               { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
               { name: '🎲 Roll', value: `${hackRoll.toFixed(1)}%`, inline: true }
             )
-            .setFooter({ text: `+${xpResult.xpGained} Hack XP • You can trace the hacker for recovery!` })
+            .setFooter({ text: xpFooter })
             .setTimestamp();
           
           const traceRow = createTraceButton(hackerId);

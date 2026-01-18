@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getBalance, removeMoney, forceRemoveMoney, addMoney, applyFine } = require('../economy');
-const { getRobSettings, canRob, canBeRobbed, recordTargetRobbed, calculateSuccessRate, attemptRob, calculateStolenAmount, calculateFine, recordRob, isUserImmune, hasActiveImmunity } = require('../rob');
+const { getRobSettings, canRob, canBeRobbed, canRobTarget, recordTargetRobbed, calculateSuccessRate, attemptRob, calculateStolenAmount, calculateFine, recordRob, isUserImmune, hasActiveImmunity } = require('../rob');
 const { getRobBonuses, addXp, checkTrainingComplete } = require('../skills');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
@@ -188,6 +188,10 @@ module.exports = {
       });
     }
 
+    // Check if this target counts for XP (anti-farming - still allows rob, just no XP)
+    const uniqueTargetCheck = canRobTarget(guildId, robberId, targetId);
+    const awardsXp = uniqueTargetCheck.canRob;
+
     // Check for completed training and get skill bonuses
     const trainingResult = checkTrainingComplete(guildId, robberId, 'rob');
     const robBonuses = getRobBonuses(guildId, robberId);
@@ -273,7 +277,7 @@ module.exports = {
           await interaction.channel.send({ content: `<@${targetId}> chose to **${defenseResponse}**!` });
 
           // Process defense based on elapsed time
-          await processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseResponse, elapsedSeconds, settings, robBonuses);
+          await processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseResponse, elapsedSeconds, settings, robBonuses, awardsXp);
           return;
         } else {
           // Timeout: lock buttons to avoid late clicks
@@ -297,11 +301,17 @@ module.exports = {
             await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
             recordRob(guildId, robberId, targetId, true, actualStolen);
             
-            // Award success XP
-            const xpResult = addXp(guildId, robberId, 'rob', 0, true, actualStolen);
+            // Award success XP (only if unique target)
+            const xpResult = awardsXp 
+              ? addXp(guildId, robberId, 'rob', 0, true, actualStolen)
+              : { xpGained: 0, levelUp: false };
 
             const stealPercent = Math.round((actualStolen / targetBalance.cash) * 100);
             const flavorText = getRandomFlavor(FLAVOR_TEXTS.robSuccess).replaceAll('{target}', `**${targetUser.username}**`);
+
+            const xpFooter = awardsXp 
+              ? `+${xpResult.xpGained} Rob XP${xpResult.levelUp ? ` • LEVEL UP → ${xpResult.newLevel}!` : ''}`
+              : `No XP (farm target same person less)`;
 
             timeoutEmbed
               .setColor(0x2ecc71)
@@ -312,17 +322,23 @@ module.exports = {
                 { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
                 { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${CURRENCY}`, inline: false }
               )
-              .setFooter({ text: `+${xpResult.xpGained} Rob XP${xpResult.levelUp ? ` • LEVEL UP → ${xpResult.newLevel}!` : ''}` });
+              .setFooter({ text: xpFooter });
           } else {
             const fine = calculateFine(robberBalance.total, settings, robBonuses.fineReduction);
             await applyFine(guildId, robberId, fine, `Failed rob attempt on ${targetUser.username}`);
             recordRob(guildId, robberId, targetId, false, fine);
             
-            // Award failure XP
-            const xpResult = addXp(guildId, robberId, 'rob', 0, false);
+            // Award failure XP (only if unique target)
+            const xpResult = awardsXp 
+              ? addXp(guildId, robberId, 'rob', 0, false)
+              : { xpGained: 0, levelUp: false };
 
             const finePercent = robberBalance.total > 0 ? Math.round((fine / robberBalance.total) * 100) : 0;
             const flavorText = getRandomFlavor(FLAVOR_TEXTS.robFail).replaceAll('{target}', `**${targetUser.username}**`);
+
+            const xpFooter = awardsXp 
+              ? `+${xpResult.xpGained} Rob XP • Better luck next time!`
+              : `No XP (target unique people) • Better luck next time!`;
 
             timeoutEmbed
               .setColor(0xe74c3c)
@@ -333,7 +349,7 @@ module.exports = {
                 { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
                 { name: '💼 Your New Balance', value: `${(robberBalance.total - fine).toLocaleString()} ${CURRENCY}`, inline: false }
               )
-              .setFooter({ text: `+${xpResult.xpGained} Rob XP • Better luck next time!` });
+              .setFooter({ text: xpFooter });
           }
 
           await interaction.channel.send({ embeds: [timeoutEmbed] });
@@ -363,11 +379,17 @@ module.exports = {
       // Record the rob
       recordRob(guildId, robberId, targetId, true, actualStolen);
       
-      // Award success XP
-      const xpResult = addXp(guildId, robberId, 'rob', 0, true, actualStolen);
+      // Award success XP (only if unique target)
+      const xpResult = awardsXp 
+        ? addXp(guildId, robberId, 'rob', 0, true, actualStolen)
+        : { xpGained: 0, levelUp: false };
 
       const stealPercent = Math.round((actualStolen / targetBalance.cash) * 100);
       const flavorText = getRandomFlavor(FLAVOR_TEXTS.robSuccess).replaceAll('{target}', `**${targetUser.username}**`);
+
+      const xpFooter = awardsXp 
+        ? `+${xpResult.xpGained} Rob XP${xpResult.levelUp ? ` • LEVEL UP → ${xpResult.newLevel}!` : ''}`
+        : `No XP (target unique people)`;
 
       embed
         .setColor(0x2ecc71)
@@ -378,7 +400,7 @@ module.exports = {
           { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
           { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${CURRENCY}`, inline: false }
         )
-        .setFooter({ text: `+${xpResult.xpGained} Rob XP${xpResult.levelUp ? ` • LEVEL UP → ${xpResult.newLevel}!` : ''}` });
+        .setFooter({ text: xpFooter });
 
       await interaction.reply({ content: trainingNotification || null, embeds: [embed] });
     } else {
@@ -391,11 +413,17 @@ module.exports = {
       // Record the failed rob
       recordRob(guildId, robberId, targetId, false, fine);
       
-      // Award failure XP
-      const xpResult = addXp(guildId, robberId, 'rob', 0, false);
+      // Award failure XP (only if unique target)
+      const xpResult = awardsXp 
+        ? addXp(guildId, robberId, 'rob', 0, false)
+        : { xpGained: 0, levelUp: false };
 
       const finePercent = robberBalance.total > 0 ? Math.round((fine / robberBalance.total) * 100) : 0;
       const flavorText = getRandomFlavor(FLAVOR_TEXTS.robFail).replaceAll('{target}', `**${targetUser.username}**`);
+
+      const xpFooter = awardsXp 
+        ? `+${xpResult.xpGained} Rob XP • Better luck next time!`
+        : `No XP (target unique people) • Better luck next time!`;
 
       embed
         .setColor(0xe74c3c)
@@ -406,14 +434,14 @@ module.exports = {
           { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
           { name: '💼 Your New Balance', value: `${(robberBalance.total - fine).toLocaleString()} ${CURRENCY}`, inline: false }
         )
-        .setFooter({ text: `+${xpResult.xpGained} Rob XP • Better luck next time!` });
+        .setFooter({ text: xpFooter });
 
       await interaction.reply({ content: trainingNotification || null, embeds: [embed] });
     }
   }
 };
 
-async function processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseType, elapsedSeconds, settings, robBonuses) {
+async function processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseType, elapsedSeconds, settings, robBonuses, awardsXp) {
   const CURRENCY = '<:babybel:1418824333664452608>';
   const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, robBonuses.successRateBonus);
   const stolenAmount = calculateStolenAmount(targetBalance.cash, settings, robBonuses.minStealBonus, robBonuses.maxStealBonus);
@@ -654,13 +682,20 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
     }
   }
 
-  // Award XP to the robber for attempting the rob
-  xpResult = addXp(guildId, robberId, 'rob', robSucceeded, amountForXp);
+  // Award XP to the robber for attempting the rob (only if unique target)
+  xpResult = awardsXp 
+    ? addXp(guildId, robberId, 'rob', robSucceeded, amountForXp)
+    : { xpGained: 0, levelUp: false };
   
   // Add XP info to footer
-  let footerText = `🔓 Rob XP: +${xpResult.xpGained}`;
-  if (xpResult.levelUp) {
-    footerText += ` | 🎉 Level Up! Now Level ${xpResult.newLevel}`;
+  let footerText;
+  if (awardsXp) {
+    footerText = `🔓 Rob XP: +${xpResult.xpGained}`;
+    if (xpResult.levelUp) {
+      footerText += ` | 🎉 Level Up! Now Level ${xpResult.newLevel}`;
+    }
+  } else {
+    footerText = `🔓 No XP (target unique people)`;
   }
   embed.setFooter({ text: footerText });
 

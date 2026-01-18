@@ -10,11 +10,13 @@ const BUTTON_IDS = [
   'admin_hack',
   'hack_toggle', 'hack_edit_settings', 'hack_immunity_settings',
   'hack_add_immune_role', 'hack_clear_immune_roles',
+  'hack_anti_farm',
   'back_hack'
 ];
 
 const MODAL_IDS = [
-  'modal_hack_settings'
+  'modal_hack_settings',
+  'modal_hack_anti_farm'
 ];
 
 const SELECT_IDS = [
@@ -53,6 +55,9 @@ async function handleInteraction(interaction, guildId) {
         await interaction.deferUpdate();
         await handleClearImmuneRoles(interaction, guildId);
         return true;
+      case 'hack_anti_farm':
+        await handleHackAntiFarm(interaction, guildId);
+        return true;
       case 'back_hack':
         await interaction.deferUpdate();
         await showHackPanel(interaction, guildId);
@@ -67,6 +72,9 @@ async function handleInteraction(interaction, guildId) {
     switch (customId) {
       case 'modal_hack_settings':
         await handleHackSettingsModal(interaction, guildId);
+        return true;
+      case 'modal_hack_anti_farm':
+        await handleHackAntiFarmModal(interaction, guildId);
         return true;
     }
   }
@@ -89,6 +97,12 @@ async function showHackPanel(interaction, guildId) {
   const settings = getHackSettings(guildId);
   const immuneRoles = getHackImmuneRoles(guildId);
   
+  // Format unique targets display
+  const uniqueTargets = settings.uniqueTargetsRequired || 0;
+  const uniqueTargetsStr = uniqueTargets > 0 
+    ? `${uniqueTargets} unique targets` 
+    : 'Disabled';
+  
   const embed = new EmbedBuilder()
     .setColor(0x9b59b6)
     .setTitle('💻 Hack Settings')
@@ -99,6 +113,7 @@ async function showHackPanel(interaction, guildId) {
       { name: '🎯 Target Cooldown', value: `${settings.targetCooldownMinutes} minutes (${(settings.targetCooldownMinutes / 60).toFixed(1)} hours)`, inline: true },
       { name: '💰 Steal Range', value: `${settings.minStealPercent}% - ${settings.maxStealPercent}%`, inline: true },
       { name: '💸 Fine Range', value: `${settings.minFinePercent}% - ${settings.maxFinePercent}% of potential steal`, inline: true },
+      { name: '🔄 XP Farm Protection', value: uniqueTargetsStr, inline: true },
       { name: '🛡️ Immune Roles', value: immuneRoles.length > 0 ? immuneRoles.map(r => `<@&${r}>`).join(', ') : 'None', inline: false }
     )
     .setFooter({ text: 'Hack targets bank balances with a progress-based defense system' });
@@ -115,6 +130,12 @@ async function showHackPanel(interaction, guildId) {
     .setStyle(ButtonStyle.Primary)
     .setEmoji('⚙️');
 
+  const antiFarmBtn = new ButtonBuilder()
+    .setCustomId('hack_anti_farm')
+    .setLabel('Anti-Farm')
+    .setStyle(ButtonStyle.Primary)
+    .setEmoji('🔄');
+
   const immunityBtn = new ButtonBuilder()
     .setCustomId('hack_immunity_settings')
     .setLabel('Immunity Settings')
@@ -127,7 +148,7 @@ async function showHackPanel(interaction, guildId) {
     .setStyle(ButtonStyle.Secondary)
     .setEmoji('⬅️');
 
-  const row1 = new ActionRowBuilder().addComponents(toggleBtn, editBtn, immunityBtn);
+  const row1 = new ActionRowBuilder().addComponents(toggleBtn, editBtn, antiFarmBtn, immunityBtn);
   const row2 = new ActionRowBuilder().addComponents(backBtn);
 
   await interaction.editReply({ embeds: [embed], components: [row1, row2] });
@@ -306,6 +327,42 @@ async function handleClearImmuneRoles(interaction, guildId) {
   logAdminAction(guildId, interaction.user.id, interaction.user.username, `Cleared all hack immune roles`);
   
   await showHackImmunityPanel(interaction, guildId);
+}
+
+// ==================== ANTI-FARM SETTINGS ====================
+async function handleHackAntiFarm(interaction, guildId) {
+  const settings = getHackSettings(guildId);
+  const modal = new ModalBuilder()
+    .setCustomId('modal_hack_anti_farm')
+    .setTitle('Anti-Farm Settings')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('unique_targets')
+          .setLabel('Unique Targets Required (0 = disabled)')
+          .setPlaceholder('3')
+          .setValue(String(settings.uniqueTargetsRequired || 0))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+  await interaction.showModal(modal);
+}
+
+async function handleHackAntiFarmModal(interaction, guildId) {
+  const uniqueTargets = parseInt(interaction.fields.getTextInputValue('unique_targets')) || 0;
+  
+  // Validate: minimum 0 (disabled), maximum 10
+  const validatedUnique = Math.max(0, Math.min(10, uniqueTargets));
+  
+  updateHackSettings(guildId, { uniqueTargetsRequired: validatedUnique });
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated hack anti-farm: ${validatedUnique} unique targets required`);
+  
+  const msg = validatedUnique > 0 
+    ? `✅ Anti-farm enabled: Users must hack ${validatedUnique} unique targets before re-hacking the same person`
+    : '✅ Anti-farm disabled';
+  await interaction.reply({ content: msg, flags: 64 });
+  await showHackPanel(interaction, guildId);
 }
 
 // ==================== EXPORTS ====================

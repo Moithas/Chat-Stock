@@ -78,7 +78,10 @@ const GIFS = {
     `${GITHUB_REPO}/takedown3.png`,
     `${GITHUB_REPO}/takedown4.png`,
     `${GITHUB_REPO}/takedown5.png`,
-    `${GITHUB_REPO}/takedown6.png`
+    `${GITHUB_REPO}/takedown6.png`,
+    `${GITHUB_REPO}/takedown7.png`,
+    `${GITHUB_REPO}/takedown8.png`,
+    `${GITHUB_REPO}/takedown9.png`
   ],
   choke: [
     `${GITHUB_REPO}/choke1.png`,
