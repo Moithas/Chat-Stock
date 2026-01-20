@@ -22,6 +22,7 @@ const {
   addXp, 
   checkTrainingComplete 
 } = require('../skills');
+const { hasActiveEffect, getEffectValue, EFFECT_TYPES } = require('../items');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -202,6 +203,14 @@ module.exports = {
         });
       }
     }
+    
+    // Check if target has item-based hack protection (100% = full immunity)
+    const hackProtectionValue = getEffectValue(guildId, targetId, EFFECT_TYPES.HACK_PROTECTION);
+    if (hackProtectionValue >= 100) {
+      return interaction.reply({
+        content: `❌ **${targetUser.username}** has a 🔥 **Firewall** protecting them and cannot be hacked!`
+      });
+    }
 
     // Check if target can be hacked (cooldown + not currently being hacked)
     const targetCooldownCheck = canBeHacked(guildId, targetId);
@@ -240,8 +249,10 @@ module.exports = {
       });
     }
 
-    // Calculate success rate (with skill bonus)
-    const successRate = calculateSuccessRate(targetBalance.bank, hackerBalance.bank, hackBonuses.successRateBonus);
+    // Calculate success rate (with skill bonus and item bonus)
+    const itemSuccessBoost = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_SUCCESS_BOOST);
+    const totalSuccessBonus = hackBonuses.successRateBonus + itemSuccessBoost;
+    const successRate = calculateSuccessRate(targetBalance.bank, hackerBalance.bank, totalSuccessBonus);
 
     // Start tracking this hack
     startActiveHack(guildId, targetId, hackerId);
@@ -291,7 +302,8 @@ module.exports = {
         clearTargetCooldown(guildId, targetId);
         
         const potentialSteal = calculateStealAmount(targetBalance.bank, progress, settings, hackBonuses.maxStealBonus);
-        const fineReduction = hackBonuses.level * 3; // 3% reduction per level (using trace reduction stat)
+        const itemFineReduction = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_FINE_REDUCTION);
+        const fineReduction = (hackBonuses.level * 3) + itemFineReduction; // 3% reduction per level + item
         const baseFine = calculateFine(potentialSteal, settings);
         const fine = Math.floor(baseFine * (1 - fineReduction / 100));
         
@@ -443,7 +455,12 @@ module.exports = {
         
         if (hackSuccess) {
           // Successful hack
-          const stolenAmount = calculateStealAmount(targetBalance.bank, 100, settings, hackBonuses.maxStealBonus);
+          let stolenAmount = calculateStealAmount(targetBalance.bank, 100, settings, hackBonuses.maxStealBonus);
+          
+          // Apply hack protection reduction (if target has partial protection)
+          if (hackProtectionValue > 0 && hackProtectionValue < 100) {
+            stolenAmount = Math.floor(stolenAmount * (1 - hackProtectionValue / 100));
+          }
           
           await removeFromBank(guildId, targetId, stolenAmount, `Hacked by ${interaction.user.username}`);
           await addMoney(guildId, hackerId, stolenAmount, `Hacked ${targetUser.username}`);
@@ -464,12 +481,16 @@ module.exports = {
             ? `+${xpResult.xpGained} Hack XP${xpResult.levelUp ? ` • LEVEL UP → ${xpResult.newLevel}!` : ''}`
             : `No XP (target unique people)`;
           
+          const protectionNote = hackProtectionValue > 0 && hackProtectionValue < 100 
+            ? ` (🔥 ${hackProtectionValue}% protected)`
+            : '';
+          
           const successEmbed = new EmbedBuilder()
             .setColor(0x9b59b6)
             .setTitle('💻 HACK SUCCESSFUL!')
             .setDescription(flavorText)
             .addFields(
-              { name: '💰 Stolen', value: `${stolenAmount.toLocaleString()} ${CURRENCY}`, inline: true },
+              { name: '💰 Stolen', value: `${stolenAmount.toLocaleString()} ${CURRENCY}${protectionNote}`, inline: true },
               { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
               { name: '🎲 Roll', value: `${hackRoll.toFixed(1)}%`, inline: true }
             )
@@ -486,7 +507,8 @@ module.exports = {
           // Failed hack
           const potentialSteal = calculateStealAmount(targetBalance.bank, 100, settings, hackBonuses.maxStealBonus);
           const baseFine = calculateFine(potentialSteal, settings);
-          const fineReduction = hackBonuses.traceReduction; // Use trace reduction for fine reduction too
+          const itemFineReduction = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_FINE_REDUCTION);
+          const fineReduction = hackBonuses.traceReduction + itemFineReduction; // Use trace reduction + item
           const fine = Math.floor(baseFine * (1 - fineReduction / 100));
           
           await applyFine(guildId, hackerId, fine, `Failed hack attempt on ${targetUser.username}`);

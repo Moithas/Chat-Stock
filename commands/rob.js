@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { getBalance, removeMoney, forceRemoveMoney, addMoney, applyFine } = require('../economy');
 const { getRobSettings, canRob, canBeRobbed, canRobTarget, recordTargetRobbed, calculateSuccessRate, attemptRob, calculateStolenAmount, calculateFine, recordRob, isUserImmune, hasActiveImmunity } = require('../rob');
 const { getRobBonuses, addXp, checkTrainingComplete } = require('../skills');
+const { hasActiveEffect, getEffectValue, EFFECT_TYPES } = require('../items');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -179,6 +180,14 @@ module.exports = {
         content: `❌ **${targetUser.username}** has purchased rob protection and cannot be robbed!`
       });
     }
+    
+    // Check if target has item-based rob protection (100% = full immunity)
+    const robProtectionValue = getEffectValue(guildId, targetId, EFFECT_TYPES.ROB_PROTECTION);
+    if (robProtectionValue >= 100) {
+      return interaction.reply({
+        content: `❌ **${targetUser.username}** has a 🛡️ **Bodyguard** protecting them and cannot be robbed!`
+      });
+    }
 
     // Check if target was recently robbed (target cooldown)
     const targetCooldownCheck = canBeRobbed(guildId, targetId);
@@ -217,8 +226,10 @@ module.exports = {
       });
     }
 
-    // Calculate success rate (with skill bonus)
-    const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, robBonuses.successRateBonus);
+    // Calculate success rate (with skill bonus and item bonus)
+    const itemSuccessBoost = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_SUCCESS_BOOST);
+    const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost;
+    const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, totalSuccessBonus);
 
     // Build training notification if applicable
     let trainingNotification = '';
@@ -277,7 +288,7 @@ module.exports = {
           await interaction.channel.send({ content: `<@${targetId}> chose to **${defenseResponse}**!` });
 
           // Process defense based on elapsed time
-          await processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseResponse, elapsedSeconds, settings, robBonuses, awardsXp);
+          await processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseResponse, elapsedSeconds, settings, robBonuses, awardsXp, robProtectionValue);
           return;
         } else {
           // Timeout: lock buttons to avoid late clicks
@@ -295,7 +306,12 @@ module.exports = {
 
           if (timeoutSuccess) {
             const stolenAmount = calculateStolenAmount(targetBalance.cash, settings, robBonuses.minStealBonus, robBonuses.maxStealBonus);
-            const actualStolen = Math.min(stolenAmount, targetBalance.cash);
+            let actualStolen = Math.min(stolenAmount, targetBalance.cash);
+            
+            // Apply rob protection reduction (if target has partial protection)
+            if (robProtectionValue > 0 && robProtectionValue < 100) {
+              actualStolen = Math.floor(actualStolen * (1 - robProtectionValue / 100));
+            }
 
             await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
             await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
@@ -313,18 +329,24 @@ module.exports = {
               ? `+${xpResult.xpGained} Rob XP${xpResult.levelUp ? ` • LEVEL UP → ${xpResult.newLevel}!` : ''}`
               : `No XP (farm target same person less)`;
 
+            const protectionNote = robProtectionValue > 0 && robProtectionValue < 100 
+              ? ` (🛡️ ${robProtectionValue}% protected)`
+              : '';
+
             timeoutEmbed
               .setColor(0x2ecc71)
               .setTitle('💰 Rob Successful!')
               .setDescription(flavorText)
               .addFields(
-                { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY} (${stealPercent}% of their cash)`, inline: true },
+                { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY} (${stealPercent}% of their cash)${protectionNote}`, inline: true },
                 { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
                 { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${CURRENCY}`, inline: false }
               )
               .setFooter({ text: xpFooter });
           } else {
-            const fine = calculateFine(robberBalance.total, settings, robBonuses.fineReduction);
+            const itemFineReduction = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_FINE_REDUCTION);
+            const totalFineReduction = robBonuses.fineReduction + itemFineReduction;
+            const fine = calculateFine(robberBalance.total, settings, totalFineReduction);
             await applyFine(guildId, robberId, fine, `Failed rob attempt on ${targetUser.username}`);
             recordRob(guildId, robberId, targetId, false, fine);
             
@@ -370,7 +392,12 @@ module.exports = {
     if (success) {
       // Calculate stolen amount (with skill bonuses)
       const stolenAmount = calculateStolenAmount(targetBalance.cash, settings, robBonuses.minStealBonus, robBonuses.maxStealBonus);
-      const actualStolen = Math.min(stolenAmount, targetBalance.cash);
+      let actualStolen = Math.min(stolenAmount, targetBalance.cash);
+      
+      // Apply rob protection reduction (if target has partial protection)
+      if (robProtectionValue > 0 && robProtectionValue < 100) {
+        actualStolen = Math.floor(actualStolen * (1 - robProtectionValue / 100));
+      }
 
       // Transfer money
       await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
@@ -391,12 +418,16 @@ module.exports = {
         ? `+${xpResult.xpGained} Rob XP${xpResult.levelUp ? ` • LEVEL UP → ${xpResult.newLevel}!` : ''}`
         : `No XP (target unique people)`;
 
+      const protectionNote = robProtectionValue > 0 && robProtectionValue < 100 
+        ? ` (🛡️ ${robProtectionValue}% protected)`
+        : '';
+
       embed
         .setColor(0x2ecc71)
         .setTitle('💰 Rob Successful!')
         .setDescription(flavorText)
         .addFields(
-          { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY} (${stealPercent}% of their cash)`, inline: true },
+          { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY} (${stealPercent}% of their cash)${protectionNote}`, inline: true },
           { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
           { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${CURRENCY}`, inline: false }
         )
@@ -404,8 +435,10 @@ module.exports = {
 
       await interaction.reply({ content: trainingNotification || null, embeds: [embed] });
     } else {
-      // Rob failed - calculate fine (with skill reduction)
-      const fine = calculateFine(robberBalance.total, settings, robBonuses.fineReduction);
+      // Rob failed - calculate fine (with skill reduction and item reduction)
+      const itemFineReduction2 = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_FINE_REDUCTION);
+      const totalFineReduction2 = robBonuses.fineReduction + itemFineReduction2;
+      const fine = calculateFine(robberBalance.total, settings, totalFineReduction2);
 
       // Apply fine (can put user into negative balance)
       await applyFine(guildId, robberId, fine, `Failed rob attempt on ${targetUser.username}`);
@@ -441,12 +474,22 @@ module.exports = {
   }
 };
 
-async function processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseType, elapsedSeconds, settings, robBonuses, awardsXp) {
+async function processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseType, elapsedSeconds, settings, robBonuses, awardsXp, robProtectionValue = 0) {
   const CURRENCY = '<:babybel:1418824333664452608>';
-  const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, robBonuses.successRateBonus);
+  const itemSuccessBoost = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_SUCCESS_BOOST);
+  const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost;
+  const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, totalSuccessBonus);
   const stolenAmount = calculateStolenAmount(targetBalance.cash, settings, robBonuses.minStealBonus, robBonuses.maxStealBonus);
-  const actualStolen = Math.min(stolenAmount, targetBalance.cash);
-  const fine = calculateFine(robberBalance.total, settings, robBonuses.fineReduction);
+  let actualStolen = Math.min(stolenAmount, targetBalance.cash);
+  
+  // Apply rob protection reduction (if target has partial protection)
+  if (robProtectionValue > 0 && robProtectionValue < 100) {
+    actualStolen = Math.floor(actualStolen * (1 - robProtectionValue / 100));
+  }
+  
+  const itemFineReduction = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_FINE_REDUCTION);
+  const totalFineReduction = robBonuses.fineReduction + itemFineReduction;
+  const fine = calculateFine(robberBalance.total, settings, totalFineReduction);
   
   // Variable to track XP result for footer
   let xpResult = null;
@@ -501,12 +544,16 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
         await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
         await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
 
+        const protectionNote = robProtectionValue > 0 && robProtectionValue < 100 
+          ? ` (🛡️ ${robProtectionValue}% protected)`
+          : '';
+
         embed
           .setColor(0xe74c3c)
           .setTitle('🙈 Hide Cash - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY}`, inline: true },
+            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY}${protectionNote}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
             { name: '📊 Rob Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
@@ -572,12 +619,16 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
         await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
         await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
 
+        const protectionNoteDodge = robProtectionValue > 0 && robProtectionValue < 100 
+          ? ` (🛡️ ${robProtectionValue}% protected)`
+          : '';
+
         embed
           .setColor(0xe74c3c)
           .setTitle('💨 Dodge - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY}`, inline: true },
+            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY}${protectionNoteDodge}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
             { name: '📊 Rob Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
@@ -644,12 +695,16 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
         await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
         await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
 
+        const protectionNoteFight = robProtectionValue > 0 && robProtectionValue < 100 
+          ? ` (🛡️ ${robProtectionValue}% protected)`
+          : '';
+
         embed
           .setColor(0xe74c3c)
           .setTitle('🥊 Fight Back - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY}`, inline: true },
+            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY}${protectionNoteFight}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
             { name: '📊 Rob Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },

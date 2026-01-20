@@ -152,11 +152,25 @@ function visibleUserId(userId) {
   return userId;
 }
 
+// Get the admin role ID for a guild
+function getAdminRole(guildId) {
+  const settings = getAdminSettings(guildId);
+  return settings.adminRoleId || null;
+}
+
+// Convenience function to check if a user is an admin
+function isAdmin(guildId, userId, member) {
+  if (!member) return false;
+  return hasAdminPermission(member, guildId);
+}
+
 module.exports = {
   initAdmin,
   getAdminSettings,
+  getAdminRole,
   setAdminRole,
   hasAdminPermission,
+  isAdmin,
   logAdminAction,
   getAdminLogs
 };

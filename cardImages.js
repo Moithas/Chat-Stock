@@ -79,18 +79,25 @@ function getCardBackUrl() {
   return 'https://deckofcardsapi.com/static/img/back.png';
 }
 
-// Load image with caching
+// Load image with caching and timeout
 async function loadCardImage(url) {
   if (imageCache.has(url)) {
     return imageCache.get(url);
   }
   
   try {
-    const img = await loadImage(url);
+    // Add a timeout wrapper around loadImage
+    const timeoutMs = 5000; // 5 second timeout
+    const img = await Promise.race([
+      loadImage(url),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Image load timeout')), timeoutMs)
+      )
+    ]);
     imageCache.set(url, img);
     return img;
   } catch (error) {
-    console.error('Error loading card image:', error);
+    console.error('Error loading card image:', error.message);
     return null;
   }
 }
@@ -157,6 +164,8 @@ async function generateHandImage(hand, hideSecond = false) {
 
 // Generate a combined image showing both hands (dealer on top, player on bottom)
 async function generateBlackjackImage(playerHand, dealerHand, hideDealer = false) {
+  let failedImages = 0; // Track failed image loads
+  
   // Calculate dimensions with larger cards and smart spacing
   const playerCards = playerHand.length;
   const dealerCards = dealerHand.length;
@@ -233,6 +242,8 @@ async function generateBlackjackImage(playerHand, dealerHand, hideDealer = false
       ctx.restore();
       
       ctx.shadowColor = 'transparent';
+    } else {
+      failedImages++;
     }
   }
   
@@ -271,7 +282,14 @@ async function generateBlackjackImage(playerHand, dealerHand, hideDealer = false
       ctx.restore();
       
       ctx.shadowColor = 'transparent';
+    } else {
+      failedImages++;
     }
+  }
+  
+  // If any images failed to load, throw an error so the game can be refunded
+  if (failedImages > 0) {
+    throw new Error(`Failed to load ${failedImages} card image(s)`);
   }
   
   return canvas.toBuffer('image/png');

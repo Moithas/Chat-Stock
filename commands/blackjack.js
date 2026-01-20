@@ -63,42 +63,52 @@ module.exports = {
     await removeFromTotal(guildId, userId, bet, 'Blackjack bet');
     const game = startBlackjackGame(userId, bet, guildId);
 
-    // Check for immediate win/push (natural blackjack)
-    if (game.status === 'blackjack') {
-      const winnings = Math.floor(bet * 2.5); // Blackjack pays 3:2
-      await addMoney(guildId, userId, winnings, 'Blackjack win');
-      updateBlackjackStats(userId, 'blackjack', winnings - bet);
+    try {
+      // Check for immediate win/push (natural blackjack)
+      if (game.status === 'blackjack') {
+        const winnings = Math.floor(bet * 2.5); // Blackjack pays 3:2
+        await addMoney(guildId, userId, winnings, 'Blackjack win');
+        updateBlackjackStats(userId, 'blackjack', winnings - bet);
+        endBlackjackGame(userId);
+
+        const { embed, attachment } = await createGameEmbed(game, interaction.user, true, winnings - bet);
+        return interaction.editReply({ embeds: [embed], files: [attachment] });
+      }
+
+      if (game.status === 'push') {
+        await addMoney(guildId, userId, bet, 'Blackjack push'); // Return bet
+        updateBlackjackStats(userId, 'push', 0);
+        endBlackjackGame(userId);
+
+        const { embed, attachment } = await createGameEmbed(game, interaction.user, true, 0);
+        return interaction.editReply({ embeds: [embed], files: [attachment] });
+      }
+
+      // Check if insurance is being offered
+      if (game.status === 'insurance') {
+        const { embed, attachment } = await createInsuranceEmbed(game, interaction.user);
+        const maxInsurance = Math.floor(bet / 2);
+        const balance = balanceData.total; // Use total balance for button check
+        const buttons = createInsuranceButtons(maxInsurance, balance >= maxInsurance);
+        return interaction.editReply({ embeds: [embed], files: [attachment], components: [buttons] });
+      }
+
+      // Normal game - show buttons
+      const { embed, attachment } = await createGameEmbed(game, interaction.user, false);
+      const canDouble = balanceData.total >= bet;
+      const canSplit = balanceData.total >= bet && canSplitHand(game.playerHand);
+      const buttons = createGameButtons(game, canDouble, canSplit);
+      
+      await interaction.editReply({ embeds: [embed], files: [attachment], components: [buttons] });
+    } catch (error) {
+      // If anything fails (like image loading), refund the bet and clean up
+      console.error('Blackjack game error, refunding bet:', error);
+      await addMoney(guildId, userId, bet, 'Blackjack refund (error)');
       endBlackjackGame(userId);
-
-      const { embed, attachment } = await createGameEmbed(game, interaction.user, true, winnings - bet);
-      return interaction.editReply({ embeds: [embed], files: [attachment] });
+      return interaction.editReply({
+        content: `❌ Something went wrong starting the game. Your bet of **${bet.toLocaleString()}** ${CURRENCY} has been refunded.`
+      });
     }
-
-    if (game.status === 'push') {
-      await addMoney(guildId, userId, bet, 'Blackjack push'); // Return bet
-      updateBlackjackStats(userId, 'push', 0);
-      endBlackjackGame(userId);
-
-      const { embed, attachment } = await createGameEmbed(game, interaction.user, true, 0);
-      return interaction.editReply({ embeds: [embed], files: [attachment] });
-    }
-
-    // Check if insurance is being offered
-    if (game.status === 'insurance') {
-      const { embed, attachment } = await createInsuranceEmbed(game, interaction.user);
-      const maxInsurance = Math.floor(bet / 2);
-      const balance = balanceData.total; // Use total balance for button check
-      const buttons = createInsuranceButtons(maxInsurance, balance >= maxInsurance);
-      return interaction.editReply({ embeds: [embed], files: [attachment], components: [buttons] });
-    }
-
-    // Normal game - show buttons
-    const { embed, attachment } = await createGameEmbed(game, interaction.user, false);
-    const canDouble = balanceData.total >= bet;
-    const canSplit = balanceData.total >= bet && canSplitHand(game.playerHand);
-    const buttons = createGameButtons(game, canDouble, canSplit);
-    
-    await interaction.editReply({ embeds: [embed], files: [attachment], components: [buttons] });
   }
 };
 

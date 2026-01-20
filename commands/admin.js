@@ -13,6 +13,7 @@ const adminWealthTax = require('./admin-wealth-tax');
 const adminBank = require('./admin-bank');
 const adminDividends = require('./admin-dividends');
 const adminSkills = require('./admin-skills');
+const adminItems = require('./admin-items');
 
 // ==================== MAIN DASHBOARD ====================
 async function showDashboard(interaction) {
@@ -49,7 +50,8 @@ async function showDashboard(interaction) {
         { label: 'Rob', value: 'rob', emoji: '🔓', description: 'Rob & immunity settings' },
         { label: 'Hack', value: 'hack', emoji: '💻', description: 'Bank hacking settings' },
         { label: 'Fight', value: 'fight', emoji: '🥊', description: 'PvP cage fighting' },
-        { label: 'Skills', value: 'skills', emoji: '🎓', description: 'XP, training & level bonuses' }
+        { label: 'Skills', value: 'skills', emoji: '🎓', description: 'XP, training & level bonuses' },
+        { label: 'Item Shop', value: 'items', emoji: '🛒', description: 'Shop items & effects' }
       )
   );
 
@@ -107,6 +109,7 @@ module.exports.handleAdminInteraction = async function(interaction) {
         case 'hack': await adminHack.showHackPanel(interaction, guildId); break;
         case 'fight': await adminFight.showFightPanel(interaction, guildId); break;
         case 'skills': await adminSkills.showSkillsPanel(interaction, guildId); break;
+        case 'items': await adminItems.showItemsPanel(interaction, guildId); break;
       }
       return;
     }
@@ -123,6 +126,7 @@ module.exports.handleAdminInteraction = async function(interaction) {
     if (await adminDividends.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Dividends'); return; }
     if (await adminBank.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Bank'); return; }
     if (await adminSkills.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Skills'); return; }
+    if (await adminItems.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Items'); return; }
     console.log('[Admin] No handler matched for:', interaction.customId);
 
     // Back to dashboard button

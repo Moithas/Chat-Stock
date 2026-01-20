@@ -187,14 +187,25 @@ async function handleTickets(interaction, guildId, userId) {
     });
   }
 
-  const ticketList = tickets.map((t, i) => 
+  // Paginate tickets if there are too many (each ticket line is ~30 chars, limit to ~100 per page)
+  const TICKETS_PER_PAGE = 100;
+  const totalPages = Math.ceil(tickets.length / TICKETS_PER_PAGE);
+  
+  // For now, just show first page with a note about total
+  const displayTickets = tickets.slice(0, TICKETS_PER_PAGE);
+  const ticketList = displayTickets.map((t, i) => 
     `**Ticket ${i + 1}:** ${t.numbers.join(' - ')}`
   ).join('\n');
+
+  let description = ticketList;
+  if (tickets.length > TICKETS_PER_PAGE) {
+    description += `\n\n*...and ${tickets.length - TICKETS_PER_PAGE} more tickets*`;
+  }
 
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle('🎟️ Your Lottery Tickets')
-    .setDescription(ticketList)
+    .setDescription(description)
     .addFields(
       { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${CURRENCY}`, inline: true },
       { name: '🎫 Total Tickets', value: `**${tickets.length}**`, inline: true }

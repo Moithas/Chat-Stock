@@ -5,6 +5,7 @@ const { getCrimeSettings, canCrime, attemptCrime, calculateCrimeReward, calculat
 const { getDividendSettings, canCollectPassiveIncome, calculatePassiveIncome, recordPassiveIncomeCollection, getTotalPassiveIncomeCollected, getCollectableRoleIncomes, recordRoleIncomeCollection, getTotalRoleIncomeCollected } = require('../dividends');
 const { calculateStockPrice, getUser, getDb } = require('../database');
 const { addMoney, removeMoney, getBalance, applyFine } = require('../economy');
+const { getEffectValue, EFFECT_TYPES } = require('../items');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -291,8 +292,15 @@ async function executeWork(interaction, guildId, userId) {
   
   await interaction.deferUpdate();
   
-  const amount = calculateWorkReward(settings);
+  const baseAmount = calculateWorkReward(settings);
   const flavorText = getRandomFlavorText(settings);
+  
+  // Apply item boost
+  const workBoost = getEffectValue(guildId, userId, EFFECT_TYPES.WORK_BOOST);
+  const amount = workBoost > 0 
+    ? Math.floor(baseAmount * (1 + workBoost / 100))
+    : baseAmount;
+  const boosted = workBoost > 0;
   
   // Record the work FIRST to set cooldown (prevents spam exploit)
   recordWork(guildId, userId, amount, flavorText);
@@ -313,7 +321,9 @@ async function executeWork(interaction, guildId, userId) {
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .addFields({
       name: '💰 You Earned',
-      value: `**+${amount.toLocaleString()}** ${CURRENCY}`,
+      value: boosted 
+        ? `**+${amount.toLocaleString()}** ${CURRENCY} ⚡ (+${workBoost}% boost!)`
+        : `**+${amount.toLocaleString()}** ${CURRENCY}`,
       inline: true
     })
     .setFooter({ text: `Total earned: ${totalEarned.toLocaleString()} | Jobs completed: ${workCount} | ${interaction.user.displayName}` })
@@ -342,8 +352,15 @@ async function executeSlut(interaction, guildId, userId) {
   const success = attemptSlut(settings);
   
   if (success) {
-    const amount = calculateSlutReward(settings);
+    const baseAmount = calculateSlutReward(settings);
     const flavorText = getRandomSuccessText(settings);
+    
+    // Apply item boost
+    const slutBoost = getEffectValue(guildId, userId, EFFECT_TYPES.SLUT_BOOST);
+    const amount = slutBoost > 0 
+      ? Math.floor(baseAmount * (1 + slutBoost / 100))
+      : baseAmount;
+    const boosted = slutBoost > 0;
     
     // Record FIRST to set cooldown (prevents spam exploit)
     recordSlut(guildId, userId, true, amount, flavorText);
@@ -359,7 +376,9 @@ async function executeSlut(interaction, guildId, userId) {
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
       .addFields({
         name: '💰 You Earned',
-        value: `**+${amount.toLocaleString()}** ${CURRENCY}`,
+        value: boosted 
+          ? `**+${amount.toLocaleString()}** ${CURRENCY} ⚡ (+${slutBoost}% boost!)`
+          : `**+${amount.toLocaleString()}** ${CURRENCY}`,
         inline: true
       })
       .setFooter({ text: `Success rate: ${Math.round((stats.successes / (stats.successes + stats.failures)) * 100)}% | Net profit: ${netProfit >= 0 ? '+' : ''}${netProfit.toLocaleString()} | ${interaction.user.displayName}` })
@@ -422,8 +441,15 @@ async function executeCrime(interaction, guildId, userId) {
   const success = attemptCrime(settings);
   
   if (success) {
-    const amount = calculateCrimeReward(settings);
+    const baseAmount = calculateCrimeReward(settings);
     const flavorText = getCrimeSuccessText(settings);
+    
+    // Apply item boost
+    const crimeBoost = getEffectValue(guildId, userId, EFFECT_TYPES.CRIME_BOOST);
+    const amount = crimeBoost > 0 
+      ? Math.floor(baseAmount * (1 + crimeBoost / 100))
+      : baseAmount;
+    const boosted = crimeBoost > 0;
     
     // Record FIRST to set cooldown (prevents spam exploit)
     recordCrime(guildId, userId, true, amount, flavorText);
@@ -439,7 +465,9 @@ async function executeCrime(interaction, guildId, userId) {
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
       .addFields({
         name: '💰 You Earned',
-        value: `**+${amount.toLocaleString()}** ${CURRENCY}`,
+        value: boosted 
+          ? `**+${amount.toLocaleString()}** ${CURRENCY} ⚡ (+${crimeBoost}% boost!)`
+          : `**+${amount.toLocaleString()}** ${CURRENCY}`,
         inline: true
       })
       .setFooter({ text: `Success rate: ${Math.round((stats.successes / (stats.successes + stats.failures)) * 100)}% | Net profit: ${netProfit >= 0 ? '+' : ''}${netProfit.toLocaleString()} | ${interaction.user.displayName}` })
@@ -455,7 +483,12 @@ async function executeCrime(interaction, guildId, userId) {
       console.error('Error fetching balance:', err);
     }
     
-    const fine = calculateCrimeFine(settings, totalBalance);
+    // Apply item fine reduction
+    const itemFineReduction = getEffectValue(guildId, userId, EFFECT_TYPES.CRIME_FINE_REDUCTION);
+    const baseFine = calculateCrimeFine(settings, totalBalance);
+    const fine = itemFineReduction > 0 
+      ? Math.floor(baseFine * (1 - itemFineReduction / 100))
+      : baseFine;
     const flavorText = getCrimeFailText(settings);
     
     // Record FIRST to set cooldown (prevents spam exploit)
@@ -465,6 +498,10 @@ async function executeCrime(interaction, guildId, userId) {
     const stats = getCrimeStats(guildId, userId);
     const netProfit = stats.totalGained - stats.totalLost;
     
+    const fineText = itemFineReduction > 0 
+      ? `**-${fine.toLocaleString()}** ${CURRENCY} ⚖️ (-${itemFineReduction}% from Lawyer!)`
+      : `**-${fine.toLocaleString()}** ${CURRENCY}`;
+    
     const embed = new EmbedBuilder()
       .setColor(0x8b0000)
       .setTitle('🚓 Busted!')
@@ -472,7 +509,7 @@ async function executeCrime(interaction, guildId, userId) {
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
       .addFields({
         name: '💸 Fine',
-        value: `**-${fine.toLocaleString()}** ${CURRENCY}`,
+        value: fineText,
         inline: true
       })
       .setFooter({ text: `Success rate: ${Math.round((stats.successes / Math.max(1, stats.successes + stats.failures)) * 100)}% | Net profit: ${netProfit >= 0 ? '+' : ''}${netProfit.toLocaleString()} | ${interaction.user.displayName}` })

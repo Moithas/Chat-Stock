@@ -20,6 +20,7 @@ const { initBank, startBankScheduler } = require('./bank');
 const { addMoney } = require('./economy');
 const { initWealthTax, getWealthTaxSettings, collectWealthTax, getLotteryInfo: getWealthTaxLotteryInfo } = require('./wealth-tax');
 const { initSkills } = require('./skills');
+const { initItems } = require('./items');
 const fs = require('fs');
 const path = require('path');
 
@@ -303,6 +304,9 @@ client.once('clientReady', async () => {
   // Initialize wealth tax system
   initWealthTax(getDb());
 
+  // Initialize items/shop system
+  initItems(getDb());
+
   // Start lottery auto-draw scheduler
   startLotteryScheduler(client);
 
@@ -495,6 +499,23 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Handle service ticket buttons (complete/close)
+  if (interaction.isButton() && interaction.customId.startsWith('ticket_')) {
+    try {
+      const { handleTicketButton } = require('./commands/inventory');
+      await handleTicketButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
+      console.error('Error handling ticket button:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
   // Handle scratcher panel buttons
   if (interaction.isButton() && interaction.customId.startsWith('scratcher_')) {
     try {
@@ -571,6 +592,23 @@ client.on('interactionCreate', async (interaction) => {
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
       console.error('Error handling stock modal:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle lottery ticket modal (from inventory item)
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('lottery_ticket_modal_')) {
+    try {
+      const { handleLotteryTicketModal } = require('./commands/inventory');
+      await handleLotteryTicketModal(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
+      console.error('Error handling lottery ticket modal:', error);
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -960,7 +998,19 @@ client.on('interactionCreate', async (interaction) => {
       'wealth_tax_add_tier_modal', 'wealth_tax_last_collection',
       'admin_skills', 'admin_skills_edit_xp', 'admin_skills_edit_hack', 'admin_skills_edit_rob',
       'admin_skills_view_levels', 'back_admin_skills',
-      'modal_admin_skills_xp', 'modal_admin_skills_hack', 'modal_admin_skills_rob'
+      'modal_admin_skills_xp', 'modal_admin_skills_hack', 'modal_admin_skills_rob',
+      'admin_items', 'items_toggle', 'items_add', 'items_manage', 'items_stats',
+      'items_init_defaults', 'items_prev', 'items_next', 'back_items',
+      'items_fulfillments', 'items_fulfill_prev', 'items_fulfill_next', 'items_ticket_settings',
+      'items_create_continue', 'items_create_cancel',
+      'items_give', 'items_give_confirm', 'items_give_cancel',
+      'items_give_user', 'items_give_item',
+      'items_take', 'items_take_confirm', 'items_take_cancel',
+      'items_take_user', 'items_take_item',
+      'items_select', 'items_category_filter', 'items_effect_select',
+      'items_ticket_category', 'items_ticket_log',
+      'items_create_category', 'items_create_effect',
+      'modal_items_add', 'modal_items_edit', 'modal_items_create', 'modal_items_give_qty', 'modal_items_take_qty'
     ];
     
     // Check for exact match OR dynamic card/property edit IDs
@@ -1011,8 +1061,16 @@ client.on('interactionCreate', async (interaction) => {
                                interaction.customId.startsWith('wealth_tax_tier_modal_');
     const isDynamicScratch = interaction.customId.startsWith('modal_scratch_') ||
                              interaction.customId.startsWith('scratch_edit_');
+    const isDynamicItems = interaction.customId.startsWith('items_edit_') ||
+                           interaction.customId.startsWith('items_delete_') ||
+                           interaction.customId.startsWith('items_toggle_') ||
+                           interaction.customId.startsWith('items_usable_') ||
+                           interaction.customId.startsWith('modal_items_edit_') ||
+                           interaction.customId.startsWith('items_complete_') ||
+                           interaction.customId.startsWith('items_cancel_') ||
+                           interaction.customId.startsWith('items_refund_');
     
-    if (adminCustomIds.includes(interaction.customId) || isDynamicCardId || isDynamicPropId || isDynamicGiveCard || isDynamicMsgPage || isDynamicRoleIncome || isDynamicBank || isDynamicRob || isDynamicWealthTax || isDynamicScratch) {
+    if (adminCustomIds.includes(interaction.customId) || isDynamicCardId || isDynamicPropId || isDynamicGiveCard || isDynamicMsgPage || isDynamicRoleIncome || isDynamicBank || isDynamicRob || isDynamicWealthTax || isDynamicScratch || isDynamicItems) {
       try {
         const { handleAdminInteraction } = require('./commands/admin');
         await handleAdminInteraction(interaction);
@@ -1027,6 +1085,19 @@ client.on('interactionCreate', async (interaction) => {
       }
       return;
     }
+  }
+
+  // Handle autocomplete interactions
+  if (interaction.isAutocomplete()) {
+    const command = client.commands.get(interaction.commandName);
+    if (!command || !command.autocomplete) return;
+    
+    try {
+      await command.autocomplete(interaction);
+    } catch (error) {
+      console.error(`Autocomplete error for /${interaction.commandName}:`, error);
+    }
+    return;
   }
 
   if (!interaction.isChatInputCommand()) return;

@@ -312,18 +312,17 @@ async function collectWealthTax(guildId) {
           const sharesToSell = Math.floor(amountTaken / stock.currentPrice);
           
           if (sharesToSell > 0) {
-            // Remove shares from portfolio
+            // Remove shares from stocks table
             const db = require('./database').getDb();
             db.run(
-              'UPDATE portfolio SET shares = shares - ? WHERE user_id = ? AND stock_user_id = ?',
+              'UPDATE stocks SET shares = shares - ? WHERE owner_id = ? AND stock_user_id = ?',
               [sharesToSell, user.userId, stock.stock_user_id]
             );
             
-            // Add proceeds to cash
+            // Calculate actual proceeds from the shares sold
             const proceeds = sharesToSell * stock.currentPrice;
-            const { addMoney } = require('./economy');
-            await addMoney(guildId, user.userId, proceeds, 'Forced Stock Liquidation (Tax Debt)');
             
+            // The proceeds go directly to paying the tax (not to user's cash)
             remaining -= proceeds;
             
             stocksSold.push({
