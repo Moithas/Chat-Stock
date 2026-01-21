@@ -1,11 +1,12 @@
 // Admin System Panel - Fees, Anti-Spam, Market, Ticker, Events settings (Fully Modular)
-const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelSelectMenuBuilder, ChannelType } = require('discord.js');
+const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelSelectMenuBuilder, ChannelType, StringSelectMenuBuilder } = require('discord.js');
 const { logAdminAction } = require('../admin');
 const { getGuildSettings, setFeesEnabled, updateBuyFee, updateSellFee } = require('../fees');
 const { getSpamSettings, setAntiSpamEnabled, updateCooldown, updateMinLength } = require('../antispam');
 const { getMarketSettings, updateSellCooldown, updatePriceImpactDelay, updateCapitalGainsTax } = require('../market');
 const { getTickerChannel, setTickerChannel, getDashboardSettings, updateDashboardSettings, setDashboardChannel, updateDashboard } = require('../ticker');
 const { getEventSettings, updateEventSettings, triggerEvent } = require('../events');
+const { getTrackerSettings, saveTrackerSettings, updateTrackerSettings, setTrackerChannel, setTrackerEnabled, startCooldownTracker, stopCooldownTracker, updateCooldownTracker } = require('../cooldown-tracker');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -24,6 +25,8 @@ const BUTTON_IDS = [
   // Events
   'events_toggle', 'events_edit_settings', 'events_edit_weights', 'events_set_channel',
   'events_force_spawn',
+  // Cooldown Tracker
+  'tracker_toggle', 'tracker_edit_settings', 'tracker_set_channel', 'tracker_refresh',
   // Back buttons
   'back_ticker'
 ];
@@ -34,11 +37,12 @@ const MODAL_IDS = [
   'modal_market_cooldown', 'modal_market_capital_gains',
   'modal_ticker_threshold',
   'modal_dashboard_settings',
-  'modal_events_settings', 'modal_events_weights'
+  'modal_events_settings', 'modal_events_weights',
+  'modal_tracker_settings'
 ];
 
 const SELECT_IDS = [
-  'ticker_channel_select', 'events_channel_select', 'dashboard_channel_select'
+  'ticker_channel_select', 'events_channel_select', 'dashboard_channel_select', 'tracker_channel_select'
 ];
 
 // ==================== MAIN INTERACTION HANDLER ====================
@@ -122,8 +126,19 @@ async function handleInteraction(interaction, guildId) {
       case 'events_force_spawn':
         await handleForceMarketEvent(interaction, guildId);
         return true;
-      case 'vault_force_spawn':
-        await handleForceVaultSpawn(interaction, guildId);
+        
+      // Cooldown Tracker buttons
+      case 'tracker_toggle':
+        await handleTrackerToggle(interaction, guildId);
+        return true;
+      case 'tracker_edit_settings':
+        await handleTrackerEditSettings(interaction, guildId);
+        return true;
+      case 'tracker_set_channel':
+        await showTrackerChannelSelect(interaction, guildId);
+        return true;
+      case 'tracker_refresh':
+        await handleTrackerRefresh(interaction, guildId);
         return true;
     }
   }
@@ -160,6 +175,9 @@ async function handleInteraction(interaction, guildId) {
       case 'modal_events_weights':
         await handleEventsWeightsModal(interaction, guildId);
         return true;
+      case 'modal_tracker_settings':
+        await handleTrackerSettingsModal(interaction, guildId);
+        return true;
     }
   }
   
@@ -177,6 +195,14 @@ async function handleInteraction(interaction, guildId) {
     }
     if (customId === 'events_channel_select') {
       await handleEventsChannelSelect(interaction, guildId);
+      return true;
+    }
+  }
+  
+  // Handle string select menus (tracker uses StringSelectMenu for channels)
+  if (interaction.isStringSelectMenu()) {
+    if (customId === 'tracker_channel_select') {
+      await handleTrackerChannelSelect(interaction, guildId);
       return true;
     }
   }
@@ -1130,6 +1156,168 @@ function createEventsWeightsModal(settings) {
     );
 }
 
+// ==================== COOLDOWN TRACKER ====================
+async function showTrackerPanel(interaction, guildId) {
+  const settings = getTrackerSettings(guildId);
+  
+  const embed = new EmbedBuilder()
+    .setTitle('⏱️ Cooldown Tracker Settings')
+    .setColor(settings.enabled ? 0x00FF00 : 0xFF0000)
+    .addFields(
+      { name: 'Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+      { name: 'Channel', value: settings.channelId ? `<#${settings.channelId}>` : 'Not set', inline: true },
+      { name: 'Update Interval', value: `${settings.updateIntervalSeconds || 30} seconds`, inline: true }
+    )
+    .setDescription('The cooldown tracker displays a live-updating embed showing who is currently on cooldown for rob and hack.')
+    .setFooter({ text: 'Configure the tracker settings below' });
+  
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('tracker_toggle')
+      .setLabel(settings.enabled ? 'Disable Tracker' : 'Enable Tracker')
+      .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success)
+      .setEmoji(settings.enabled ? '🔴' : '🟢'),
+    new ButtonBuilder()
+      .setCustomId('tracker_edit_settings')
+      .setLabel('Edit Settings')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('⚙️'),
+    new ButtonBuilder()
+      .setCustomId('tracker_set_channel')
+      .setLabel('Set Channel')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('📺'),
+    new ButtonBuilder()
+      .setCustomId('tracker_refresh')
+      .setLabel('Refresh Now')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('🔄')
+      .setDisabled(!settings.enabled || !settings.channelId),
+    new ButtonBuilder()
+      .setCustomId('back_dashboard')
+      .setLabel('◀️ Back')
+      .setStyle(ButtonStyle.Secondary)
+  );
+  
+  await interaction.editReply({ embeds: [embed], components: [row1] });
+}
+
+async function showTrackerChannelSelect(interaction, guildId) {
+  const channels = interaction.guild.channels.cache
+    .filter(c => c.type === 0)
+    .map(c => ({
+      label: `#${c.name}`,
+      value: c.id,
+      description: c.parent?.name || 'No category'
+    }))
+    .slice(0, 25);
+  
+  if (channels.length === 0) {
+    await interaction.reply({ content: '❌ No text channels found.', flags: 64 });
+    return;
+  }
+  
+  const selectRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('tracker_channel_select')
+      .setPlaceholder('Select a channel for the cooldown tracker')
+      .addOptions(channels)
+  );
+  
+  await interaction.reply({ content: 'Select a channel for the cooldown tracker:', components: [selectRow], flags: 64 });
+}
+
+async function handleTrackerToggle(interaction, guildId) {
+  const settings = getTrackerSettings(guildId);
+  const newEnabled = !settings.enabled;
+  
+  saveTrackerSettings(guildId, { enabled: newEnabled });
+  
+  if (newEnabled && settings.channelId) {
+    startCooldownTracker(guildId);
+  } else {
+    stopCooldownTracker(guildId);
+  }
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, `${newEnabled ? 'Enabled' : 'Disabled'} cooldown tracker`);
+  await interaction.deferUpdate();
+  await showTrackerPanel(interaction, guildId);
+}
+
+async function handleTrackerEditSettings(interaction, guildId) {
+  const settings = getTrackerSettings(guildId);
+  
+  const modal = new ModalBuilder()
+    .setCustomId('modal_tracker_settings')
+    .setTitle('Cooldown Tracker Settings')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('update_interval')
+          .setLabel('Update Interval (seconds)')
+          .setPlaceholder('30')
+          .setValue(String(settings.updateIntervalSeconds || 30))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+  
+  await interaction.showModal(modal);
+}
+
+async function handleTrackerRefresh(interaction, guildId) {
+  const settings = getTrackerSettings(guildId);
+  
+  if (!settings.enabled || !settings.channelId) {
+    await interaction.reply({ content: '❌ Tracker must be enabled and have a channel set.', flags: 64 });
+    return;
+  }
+  
+  await updateCooldownTracker(guildId);
+  await interaction.reply({ content: '✅ Cooldown tracker refreshed!', flags: 64 });
+}
+
+async function handleTrackerSettingsModal(interaction, guildId) {
+  const updateInterval = parseInt(interaction.fields.getTextInputValue('update_interval')) || 30;
+  
+  if (updateInterval < 10) {
+    await interaction.reply({ content: '❌ Update interval must be at least 10 seconds.', flags: 64 });
+    return;
+  }
+  if (updateInterval > 300) {
+    await interaction.reply({ content: '❌ Update interval cannot exceed 300 seconds (5 minutes).', flags: 64 });
+    return;
+  }
+  
+  saveTrackerSettings(guildId, { updateIntervalSeconds: updateInterval });
+  
+  // Restart tracker with new interval if enabled
+  const settings = getTrackerSettings(guildId);
+  if (settings.enabled && settings.channelId) {
+    stopCooldownTracker(guildId);
+    startCooldownTracker(guildId);
+  }
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated tracker interval to ${updateInterval}s`);
+  await interaction.reply({ content: `✅ Tracker update interval set to ${updateInterval} seconds.`, flags: 64 });
+}
+
+async function handleTrackerChannelSelect(interaction, guildId) {
+  const channelId = interaction.values[0];
+  
+  saveTrackerSettings(guildId, { channelId: channelId });
+  
+  // Restart tracker if enabled
+  const settings = getTrackerSettings(guildId);
+  if (settings.enabled) {
+    stopCooldownTracker(guildId);
+    startCooldownTracker(guildId);
+  }
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set tracker channel to <#${channelId}>`);
+  await interaction.update({ content: `✅ Cooldown tracker channel set to <#${channelId}>. Refreshing panel...`, components: [] });
+}
+
 // ==================== EXPORTS ====================
 module.exports = {
   handleInteraction,
@@ -1137,6 +1325,7 @@ module.exports = {
   showMarketPanel,
   showTickerPanel,
   showEventsPanel,
+  showTrackerPanel,
   createBuyFeeModal,
   createSellFeeModal,
   createAntiSpamModal,

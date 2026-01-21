@@ -1,6 +1,7 @@
 // Admin Dashboard - Main Router (Modular Design)
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { hasAdminPermission, logAdminAction } = require('../admin');
+const { getDb, saveDatabase } = require('../database');
 
 // Import modular handlers
 const adminProperty = require('./admin-property');
@@ -46,12 +47,14 @@ async function showDashboard(interaction) {
         { label: 'Market', value: 'market', emoji: '📊', description: 'Fees, taxes & cooldowns' },
         { label: 'Ticker', value: 'ticker', emoji: '📰', description: 'Stock ticker channel' },
         { label: 'Events', value: 'events', emoji: '📅', description: 'Market event config' },
+        { label: 'Cooldown Tracker', value: 'tracker', emoji: '⏱️', description: 'Live cooldown display' },
         { label: 'Income', value: 'income', emoji: '💵', description: 'Work, crime, slut settings' },
         { label: 'Rob', value: 'rob', emoji: '🔓', description: 'Rob & immunity settings' },
         { label: 'Hack', value: 'hack', emoji: '💻', description: 'Bank hacking settings' },
         { label: 'Fight', value: 'fight', emoji: '🥊', description: 'PvP cage fighting' },
         { label: 'Skills', value: 'skills', emoji: '🎓', description: 'XP, training & level bonuses' },
-        { label: 'Item Shop', value: 'items', emoji: '🛒', description: 'Shop items & effects' }
+        { label: 'Item Shop', value: 'items', emoji: '🛒', description: 'Shop items & effects' },
+        { label: '⚠️ Reset Game', value: 'reset_game', emoji: '🔄', description: 'DANGER: Reset all player data' }
       )
   );
 
@@ -104,12 +107,14 @@ module.exports.handleAdminInteraction = async function(interaction) {
         case 'market': await adminSystem.showMarketPanel(interaction, guildId); break;
         case 'ticker': await adminSystem.showTickerPanel(interaction, guildId); break;
         case 'events': await adminSystem.showEventsPanel(interaction, guildId); break;
+        case 'tracker': await adminSystem.showTrackerPanel(interaction, guildId); break;
         case 'income': await adminWork.showIncomePanel(interaction, guildId); break;
         case 'rob': await adminWork.showRobPanel(interaction, guildId); break;
         case 'hack': await adminHack.showHackPanel(interaction, guildId); break;
         case 'fight': await adminFight.showFightPanel(interaction, guildId); break;
         case 'skills': await adminSkills.showSkillsPanel(interaction, guildId); break;
         case 'items': await adminItems.showItemsPanel(interaction, guildId); break;
+        case 'reset_game': await showResetGamePanel(interaction, guildId); break;
       }
       return;
     }
@@ -135,6 +140,23 @@ module.exports.handleAdminInteraction = async function(interaction) {
       await showDashboard(interaction);
       return;
     }
+    
+    // Reset game handlers
+    if (interaction.isButton() && interaction.customId === 'reset_game_confirm') {
+      await showResetConfirmModal(interaction);
+      return;
+    }
+    
+    if (interaction.isButton() && interaction.customId === 'reset_game_cancel') {
+      await interaction.deferUpdate();
+      await showDashboard(interaction);
+      return;
+    }
+    
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_reset_game_confirm') {
+      await handleResetGameConfirm(interaction, guildId);
+      return;
+    }
 
   } catch (error) {
     console.error('[Admin] Interaction error:', error);
@@ -145,3 +167,200 @@ module.exports.handleAdminInteraction = async function(interaction) {
     } catch {}
   }
 };
+// ==================== RESET GAME PANEL ====================
+async function showResetGamePanel(interaction, guildId) {
+  const embed = new EmbedBuilder()
+    .setColor(0xff0000)
+    .setTitle('⚠️ DANGER ZONE - Reset Game')
+    .setDescription(
+      '**This action will permanently delete ALL player data!**\n\n' +
+      'The following will be reset:\n' +
+      '• 💰 All cash and bank balances\n' +
+      '• 📈 All stock holdings and transactions\n' +
+      '• 🏠 All owned properties and cards\n' +
+      '• 🎓 All skill levels and XP\n' +
+      '• 🥊 All fight records and stats\n' +
+      '• 💬 All chat history affecting stock prices\n' +
+      '• 🎰 All gambling stats and lottery tickets\n' +
+      '• 🔓 All rob/hack history and cooldowns\n' +
+      '• 🎒 All user inventories and active effects\n\n' +
+      '**Settings will NOT be reset** (fees, cooldowns, etc.)\n\n' +
+      '⚠️ **THIS CANNOT BE UNDONE!**'
+    )
+    .setFooter({ text: 'Think carefully before proceeding!' });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('reset_game_confirm')
+      .setLabel('🔴 Reset Everything')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId('reset_game_cancel')
+      .setLabel('Cancel')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  await interaction.editReply({ embeds: [embed], components: [row] });
+}
+
+async function showResetConfirmModal(interaction) {
+  const modal = new ModalBuilder()
+    .setCustomId('modal_reset_game_confirm')
+    .setTitle('⚠️ Final Confirmation');
+
+  const confirmInput = new TextInputBuilder()
+    .setCustomId('reset_confirm_text')
+    .setLabel('Type RESET to confirm')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('RESET')
+    .setRequired(true)
+    .setMinLength(5)
+    .setMaxLength(5);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(confirmInput));
+  await interaction.showModal(modal);
+}
+
+async function handleResetGameConfirm(interaction, guildId) {
+  const confirmText = interaction.fields.getTextInputValue('reset_confirm_text').trim();
+  
+  if (confirmText !== 'RESET') {
+    return interaction.reply({ 
+      content: '❌ Reset cancelled. You must type "RESET" exactly to confirm.', 
+      ephemeral: true 
+    });
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    const db = getDb();
+    if (!db) {
+      return interaction.editReply({ content: '❌ Database not available.' });
+    }
+
+    // Tables to DELETE all data from (player data)
+    const playerDataTables = [
+      // Core economy
+      'balances',
+      'economy_transactions',
+      
+      // Stocks
+      'users',
+      'stocks',
+      'transactions',
+      'price_history',
+      'stock_purchases',
+      'pending_impacts',
+      
+      // Properties
+      'owned_properties',
+      'user_cards',
+      'card_cooldowns',
+      
+      // Skills
+      'user_skills',
+      
+      // Fight
+      'fighter_stats',
+      'fight_history',
+      'fight_opponent_history',
+      'fight_spectator_bets',
+      
+      // Rob
+      'rob_tracker',
+      'rob_target_tracker',
+      'rob_history',
+      'rob_user_immunity',
+      'rob_immunity_history',
+      
+      // Hack
+      'hack_tracker',
+      'hack_target_tracker',
+      'hack_history',
+      
+      // Work/Slut
+      'work_tracker',
+      'work_history',
+      'slut_tracker',
+      'slut_history',
+      
+      // Gambling
+      'gambling_stats',
+      'lottery_tickets',
+      'lottery_history',
+      'scratch_tickets',
+      'scratch_stats',
+      
+      // Items
+      'user_inventory',
+      'active_effects',
+      'item_purchase_history',
+      'item_fulfillment_requests',
+      'effect_use_cooldowns',
+      'temporary_role_grants',
+      
+      // Dividends/Income tracking
+      'dividend_history',
+      'split_history',
+      'dividend_tracker',
+      'passive_income_tracker',
+      'self_dividend_history',
+      'passive_income_history',
+      'role_income_tracker',
+      'role_income_history',
+      
+      // Wealth tax
+      'wealth_tax_history',
+      
+      // Events
+      'message_counters',
+      'event_history',
+      'cheese_truck_history',
+      'active_market_events'
+    ];
+
+    let deletedCount = 0;
+    let errors = [];
+
+    for (const table of playerDataTables) {
+      try {
+        db.run(`DELETE FROM ${table} WHERE 1=1`);
+        deletedCount++;
+      } catch (e) {
+        // Table might not exist, that's okay
+        if (!e.message.includes('no such table')) {
+          errors.push(`${table}: ${e.message}`);
+        }
+      }
+    }
+
+    // Reset lottery pool
+    try {
+      db.run(`UPDATE lottery SET pool = 0, last_winner_id = NULL, last_winner_amount = 0 WHERE 1=1`);
+    } catch (e) {
+      // Ignore if table doesn't exist
+    }
+
+    // Save the database
+    saveDatabase();
+
+    logAdminAction(guildId, interaction.user.id, interaction.user.username, 'GAME_RESET', 
+      `Reset all player data. ${deletedCount} tables cleared.`);
+
+    let resultMsg = `✅ **Game Reset Complete!**\n\n` +
+      `Cleared ${deletedCount} data tables.\n` +
+      `All player data has been wiped.\n\n` +
+      `Settings remain intact - only player progress was reset.`;
+
+    if (errors.length > 0) {
+      resultMsg += `\n\n⚠️ Some errors occurred:\n${errors.slice(0, 5).join('\n')}`;
+    }
+
+    await interaction.editReply({ content: resultMsg });
+
+  } catch (error) {
+    console.error('Error resetting game:', error);
+    await interaction.editReply({ content: `❌ Error resetting game: ${error.message}` });
+  }
+}

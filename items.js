@@ -32,6 +32,9 @@ const EFFECT_TYPES = {
   EARNINGS_PENALTY: 'earnings_penalty',   // Reduces all earnings
   ROBBERY_VULNERABILITY: 'robbery_vulnerability', // Increases chance of being robbed
   
+  // Role grant (automatic - grants a Discord role)
+  ROLE_GRANT: 'role_grant',               // Grants a Discord role (effect_value = role ID, duration_hours = 0 for permanent)
+  
   // Cosmetic/Service items (require admin fulfillment)
   SERVICE_CUSTOM_EMOJI: 'service_custom_emoji',     // Admin adds a custom emoji for the user
   SERVICE_NICKNAME: 'service_nickname',              // Admin changes user's nickname
@@ -62,6 +65,7 @@ const EFFECT_TYPE_NAMES = {
   [EFFECT_TYPES.COOLDOWN_REDUCTION]: 'Cooldown Reduction',
   [EFFECT_TYPES.EARNINGS_PENALTY]: 'Earnings Penalty',
   [EFFECT_TYPES.ROBBERY_VULNERABILITY]: 'Robbery Vulnerability',
+  [EFFECT_TYPES.ROLE_GRANT]: 'Role Grant',
   [EFFECT_TYPES.COSMETIC]: 'Cosmetic',
 };
 
@@ -203,6 +207,13 @@ function initItems(database) {
     // Column already exists
   }
   
+  // Add effect_value_text column for storing large IDs like Discord snowflakes (role IDs)
+  try {
+    db.run('ALTER TABLE shop_items ADD COLUMN effect_value_text TEXT');
+  } catch (e) {
+    // Column already exists
+  }
+  
   // Create user inventory table
   db.run(`
     CREATE TABLE IF NOT EXISTS user_inventory (
@@ -313,6 +324,24 @@ function initItems(database) {
     )
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_effect_cooldowns_guild_user ON effect_use_cooldowns(guild_id, user_id)`);
+  
+  // Create temporary role grants table (tracks roles granted by items that need to be removed later)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS temporary_role_grants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role_id TEXT NOT NULL,
+      source_item_id INTEGER,
+      source_item_name TEXT,
+      granted_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      is_permanent INTEGER DEFAULT 0,
+      UNIQUE(guild_id, user_id, role_id)
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_temp_roles_guild ON temporary_role_grants(guild_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_temp_roles_expires ON temporary_role_grants(expires_at)`);
   
   console.log('🛒 Item shop system initialized');
 }
@@ -437,10 +466,16 @@ function addShopItem(guildId, itemData) {
   if (!db) return null;
   
   try {
+    // For role_grant items, store the role ID in effect_value_text to preserve large snowflake IDs
+    console.log('[addShopItem Debug] effect_type:', itemData.effect_type, 'effect_value:', itemData.effect_value);
+    const effectValueText = itemData.effect_type === 'role_grant' ? String(itemData.effect_value) : null;
+    const effectValueInt = itemData.effect_type === 'role_grant' ? 0 : (itemData.effect_value || 0);
+    console.log('[addShopItem Debug] effectValueText:', effectValueText, 'effectValueInt:', effectValueInt);
+    
     db.run(`
       INSERT INTO shop_items 
-      (guild_id, name, description, price, category, effect_type, effect_value, duration_hours, max_stack, enabled, emoji, use_cooldown_hours, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (guild_id, name, description, price, category, effect_type, effect_value, effect_value_text, duration_hours, max_stack, enabled, emoji, use_cooldown_hours, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       guildId,
       itemData.name,
@@ -448,7 +483,8 @@ function addShopItem(guildId, itemData) {
       itemData.price || 1000,
       itemData.category || 'utility',
       itemData.effect_type || null,
-      itemData.effect_value || 0,
+      effectValueInt,
+      effectValueText,
       itemData.duration_hours || 24,
       itemData.max_stack || 1,
       itemData.enabled !== false ? 1 : 0,
@@ -484,7 +520,20 @@ function updateShopItem(guildId, itemId, updates) {
   if (updates.price !== undefined) { fields.push('price = ?'); values.push(updates.price); }
   if (updates.category !== undefined) { fields.push('category = ?'); values.push(updates.category); }
   if (updates.effect_type !== undefined) { fields.push('effect_type = ?'); values.push(updates.effect_type); }
-  if (updates.effect_value !== undefined) { fields.push('effect_value = ?'); values.push(updates.effect_value); }
+  if (updates.effect_value !== undefined) { 
+    // For role_grant, store in effect_value_text to preserve snowflake IDs
+    // Check both the update's effect_type AND the existing item's effect_type
+    const isRoleGrant = (updates.effect_type === 'role_grant') || (updates.effect_type === undefined && item.effect_type === 'role_grant');
+    if (isRoleGrant) {
+      fields.push('effect_value_text = ?'); 
+      values.push(String(updates.effect_value));
+      fields.push('effect_value = ?');
+      values.push(0);
+    } else {
+      fields.push('effect_value = ?'); 
+      values.push(updates.effect_value); 
+    }
+  }
   if (updates.duration_hours !== undefined) { fields.push('duration_hours = ?'); values.push(updates.duration_hours); }
   if (updates.max_stack !== undefined) { fields.push('max_stack = ?'); values.push(updates.max_stack); }
   if (updates.enabled !== undefined) { fields.push('enabled = ?'); values.push(updates.enabled ? 1 : 0); }
@@ -981,6 +1030,8 @@ function getEffectTypeName(effectType) {
     [EFFECT_TYPES.COOLDOWN_REDUCTION]: 'Cooldown Reduction',
     [EFFECT_TYPES.EARNINGS_PENALTY]: 'Earnings Penalty',
     [EFFECT_TYPES.ROBBERY_VULNERABILITY]: 'Robbery Vulnerability',
+    // Role grant
+    [EFFECT_TYPES.ROLE_GRANT]: '🏷️ Role Grant',
     // Service/Cosmetic types
     [EFFECT_TYPES.SERVICE_CUSTOM_EMOJI]: '🎨 Custom Emoji (Service)',
     [EFFECT_TYPES.SERVICE_NICKNAME]: '📝 Nickname Change (Service)',
@@ -1000,6 +1051,108 @@ function isServiceItem(effectType) {
 // Check if an effect type is cosmetic (no gameplay effect)
 function isCosmeticItem(effectType) {
   return effectType === EFFECT_TYPES.COSMETIC || isServiceItem(effectType);
+}
+
+// Check if an effect type is a role grant item
+function isRoleGrantItem(effectType) {
+  return effectType === EFFECT_TYPES.ROLE_GRANT;
+}
+
+// ==================== ROLE GRANT FUNCTIONS ====================
+
+// Record a temporary role grant in the database
+function recordRoleGrant(guildId, userId, roleId, itemId, itemName, durationHours) {
+  if (!db) return null;
+  
+  const now = Date.now();
+  const isPermanent = !durationHours || durationHours <= 0;
+  const expiresAt = isPermanent ? null : now + (durationHours * 60 * 60 * 1000);
+  
+  try {
+    db.run(`
+      INSERT OR REPLACE INTO temporary_role_grants 
+      (guild_id, user_id, role_id, source_item_id, source_item_name, granted_at, expires_at, is_permanent)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [guildId, userId, roleId, itemId, itemName, now, expiresAt, isPermanent ? 1 : 0]);
+    
+    return { success: true, isPermanent, expiresAt };
+  } catch (error) {
+    console.error('Error recording role grant:', error);
+    return null;
+  }
+}
+
+// Get all expired role grants that need to be removed
+function getExpiredRoleGrants() {
+  if (!db) return [];
+  
+  const now = Date.now();
+  const result = db.exec(
+    'SELECT * FROM temporary_role_grants WHERE is_permanent = 0 AND expires_at <= ?',
+    [now]
+  );
+  
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  
+  return result[0].values.map(row => {
+    const cols = result[0].columns;
+    return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
+  });
+}
+
+// Remove an expired role grant record from the database
+function removeRoleGrantRecord(guildId, userId, roleId) {
+  if (!db) return;
+  
+  db.run(
+    'DELETE FROM temporary_role_grants WHERE guild_id = ? AND user_id = ? AND role_id = ?',
+    [guildId, userId, roleId]
+  );
+}
+
+// Get all active role grants for a user
+function getUserRoleGrants(guildId, userId) {
+  if (!db) return [];
+  
+  const result = db.exec(
+    'SELECT * FROM temporary_role_grants WHERE guild_id = ? AND user_id = ?',
+    [guildId, userId]
+  );
+  
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  
+  return result[0].values.map(row => {
+    const cols = result[0].columns;
+    return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
+  });
+}
+
+// Check if user already has a specific role grant from the shop
+function hasRoleGrant(guildId, userId, roleId) {
+  if (!db) return false;
+  
+  const result = db.exec(
+    'SELECT COUNT(*) FROM temporary_role_grants WHERE guild_id = ? AND user_id = ? AND role_id = ?',
+    [guildId, userId, roleId]
+  );
+  
+  return result.length > 0 && result[0].values[0][0] > 0;
+}
+
+// Get all temporary (non-permanent) role grants for cleanup scheduling
+function getAllTemporaryRoleGrants() {
+  if (!db) return [];
+  
+  const result = db.exec(
+    'SELECT * FROM temporary_role_grants WHERE is_permanent = 0'
+  );
+  
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  
+  return result[0].values.map(row => {
+    const cols = result[0].columns;
+    return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
+  });
 }
 
 // ==================== FULFILLMENT REQUEST FUNCTIONS ====================
@@ -1194,10 +1347,20 @@ module.exports = {
   cancelFulfillment,
   getPendingFulfillmentCount,
   
+  // Role grants
+  isRoleGrantItem,
+  recordRoleGrant,
+  getExpiredRoleGrants,
+  removeRoleGrantRecord,
+  getUserRoleGrants,
+  hasRoleGrant,
+  getAllTemporaryRoleGrants,
+  
   // Helpers
   formatDuration,
   getEffectTypeName,
   
   // Constants
+  EFFECT_TYPES,
   EFFECT_TYPE_NAMES
 };

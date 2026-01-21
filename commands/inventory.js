@@ -8,6 +8,9 @@ const {
   EFFECT_TYPES,
   isServiceItem,
   isCosmeticItem,
+  isRoleGrantItem,
+  recordRoleGrant,
+  hasRoleGrant,
   getUserFulfillments,
   getShopItem,
   createFulfillmentRequest,
@@ -60,97 +63,62 @@ function parseEmojiForSelect(emojiStr) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('inventory')
-    .setDescription('View your inventory and active effects')
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('view')
-        .setDescription('View your items or another player\'s items')
-        .addUserOption(option =>
-          option.setName('player')
-            .setDescription('View another player\'s inventory (optional)')
-            .setRequired(false)
-        ))
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('effects')
-        .setDescription('View your active effects'))
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('use')
-        .setDescription('Use an item from your inventory')
-        .addStringOption(option =>
-          option.setName('item')
-            .setDescription('The name of the item to use')
-            .setRequired(true)
-            .setAutocomplete(true)
-        )
+    .setDescription('View your inventory, use items, and check active effects')
+    .addUserOption(option =>
+      option.setName('player')
+        .setDescription('View another player\'s inventory (optional)')
+        .setRequired(false)
     ),
-
-  async autocomplete(interaction) {
-    try {
-      const guildId = interaction.guildId;
-      const userId = interaction.user.id;
-      const focusedValue = interaction.options.getFocused().toLowerCase();
-      
-      // Get user's inventory
-      const inventory = getUserInventory(guildId, userId);
-      
-      // Filter by search term
-      const filtered = inventory
-        .filter(item => item.name.toLowerCase().includes(focusedValue))
-        .slice(0, 25);
-      
-      await interaction.respond(
-        filtered.map(item => ({
-          name: `${item.emoji} ${item.name} (x${item.quantity})`,
-          value: item.item_id.toString()
-        }))
-      );
-    } catch (error) {
-      // Ignore "Unknown interaction" errors - these happen when Discord times out the autocomplete
-      if (error.code !== 10062) {
-        console.error('Autocomplete error:', error);
-      }
-    }
-  },
 
   async execute(interaction) {
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
-    const subcommand = interaction.options.getSubcommand();
+    const targetUser = interaction.options.getUser('player');
+    const targetId = targetUser ? targetUser.id : userId;
+    const targetName = targetUser ? targetUser.username : interaction.user.username;
+    const isOwnInventory = targetId === userId;
     
-    if (subcommand === 'view') {
-      const targetUser = interaction.options.getUser('player');
-      const targetId = targetUser ? targetUser.id : userId;
-      const targetName = targetUser ? targetUser.username : interaction.user.username;
-      const isOwnInventory = targetId === userId;
-      return handleViewInventory(interaction, guildId, targetId, targetName, isOwnInventory);
-    } else if (subcommand === 'effects') {
-      return handleViewEffects(interaction, guildId, userId);
-    } else if (subcommand === 'use') {
-      return handleUseItem(interaction, guildId, userId);
-    }
+    return showInventoryPanel(interaction, guildId, targetId, targetName, isOwnInventory);
   }
 };
 
-async function handleViewInventory(interaction, guildId, targetId, targetName, isOwnInventory) {
+// State tracking for inventory panels
+const inventoryState = new Map();
+
+async function showInventoryPanel(interaction, guildId, targetId, targetName, isOwnInventory, page = 0, tab = 'items') {
   const inventory = getUserInventory(guildId, targetId);
+  const effects = isOwnInventory ? getActiveEffects(guildId, targetId) : [];
   
-  if (inventory.length === 0) {
-    const emptyEmbed = new EmbedBuilder()
-      .setColor(0x95a5a6)
-      .setTitle(`🎒 ${targetName}'s Inventory`)
-      .setDescription(isOwnInventory 
-        ? "Your inventory is empty!\n\nUse `/shop` to browse and buy items."
-        : `**${targetName}** doesn't have any items in their inventory.`)
-      .setFooter({ text: isOwnInventory ? 'Tip: Buy items from the shop to gain powerful effects!' : `Viewing ${targetName}'s inventory` });
-    
-    return interaction.reply({ embeds: [emptyEmbed] });
+  // Build embed based on current tab
+  let embed;
+  if (tab === 'items') {
+    embed = createInventoryEmbed(inventory, page, targetName, isOwnInventory);
+  } else if (tab === 'effects') {
+    embed = createEffectsEmbed(effects, targetName);
   }
   
-  // Create inventory embed
-  const embed = createInventoryEmbed(inventory, 0, targetName);
-  const components = createInventoryComponents(inventory, 0, isOwnInventory);
+  // Build components
+  const components = createInventoryPanelComponents(inventory, effects, page, tab, isOwnInventory);
+  
+  // Store state for this interaction
+  const stateKey = `${interaction.user.id}-${interaction.channelId}`;
+  inventoryState.set(stateKey, {
+    guildId,
+    targetId,
+    targetName,
+    isOwnInventory,
+    page,
+    tab,
+    inventory,
+    effects
+  });
+  
+  // Clean up old states after 5 minutes
+  setTimeout(() => inventoryState.delete(stateKey), 300000);
+  
+  if (interaction.replied || interaction.deferred) {
+    return interaction.editReply({ embeds: [embed], components });
+  }
   
   const response = await interaction.reply({ 
     embeds: [embed], 
@@ -158,283 +126,143 @@ async function handleViewInventory(interaction, guildId, targetId, targetName, i
     fetchReply: true 
   });
   
-  // Create collector for interactions
+  // Create collector for button/select interactions
   const collector = response.createMessageComponentCollector({ 
-    time: 180000 // 3 minutes
+    time: 300000 // 5 minutes
   });
-  
-  let currentPage = 0;
-  const viewerId = interaction.user.id;
   
   collector.on('collect', async (i) => {
     // Only the person who ran the command can interact
-    if (i.user.id !== viewerId) {
-      return i.reply({ content: 'Use `/inventory view` to see your own inventory!', ephemeral: true });
+    if (i.user.id !== interaction.user.id) {
+      return i.reply({ content: 'Use `/inventory` to open your own inventory panel!', ephemeral: true });
+    }
+    
+    const state = inventoryState.get(stateKey);
+    if (!state) {
+      return i.reply({ content: '❌ Session expired. Please use `/inventory` again.', ephemeral: true });
     }
     
     try {
-      if (i.customId === 'inv_prev') {
-        currentPage = Math.max(0, currentPage - 1);
-        const newEmbed = createInventoryEmbed(inventory, currentPage, targetName);
-        const newComponents = createInventoryComponents(inventory, currentPage, isOwnInventory);
-        await i.update({ embeds: [newEmbed], components: newComponents });
-      }
-      else if (i.customId === 'inv_next') {
-        const maxPage = Math.ceil(inventory.length / ITEMS_PER_PAGE) - 1;
-        currentPage = Math.min(maxPage, currentPage + 1);
-        const newEmbed = createInventoryEmbed(inventory, currentPage, targetName);
-        const newComponents = createInventoryComponents(inventory, currentPage, isOwnInventory);
-        await i.update({ embeds: [newEmbed], components: newComponents });
-      }
-      else if (i.customId === 'inv_use_select') {
-        // Only allow using items from own inventory
-        if (!isOwnInventory) {
-          return i.reply({ content: '❌ You can only use items from your own inventory!', ephemeral: true });
-        }
-        
-        const itemId = parseInt(i.values[0]);
-        
-        // Find the item in inventory
-        const item = inventory.find(inv => inv.item_id === itemId);
-        if (!item) {
-          return i.reply({ content: "❌ Item not found in your inventory!", ephemeral: true });
-        }
-        
-        // Check if it's a service or cosmetic item
-        const shopItem = getShopItem(guildId, itemId);
-        if (shopItem && isServiceItem(shopItem.effect_type)) {
-          // Create a ticket channel for the service item
-          await i.deferReply({ ephemeral: true });
-          
-          try {
-            const ticketResult = await createServiceTicket(i.guild, i.user, shopItem, guildId);
-            
-            if (ticketResult.success) {
-              // Remove item from inventory since ticket is created
-              removeFromInventory(guildId, targetId, itemId, 1);
-              
-              // Refresh inventory display
-              const newInventory = getUserInventory(guildId, targetId);
-              if (newInventory.length === 0) {
-                const emptyEmbed = new EmbedBuilder()
-                  .setColor(0x95a5a6)
-                  .setTitle('🎒 Your Inventory')
-                  .setDescription("Your inventory is now empty!\n\nUse `/shop` to browse and buy items.");
-                await response.edit({ embeds: [emptyEmbed], components: [] });
-              } else {
-                currentPage = Math.min(currentPage, Math.ceil(newInventory.length / ITEMS_PER_PAGE) - 1);
-                const newEmbed = createInventoryEmbed(newInventory, currentPage, targetName);
-                const newComponents = createInventoryComponents(newInventory, currentPage, isOwnInventory);
-                await response.edit({ embeds: [newEmbed], components: newComponents });
-              }
-              
-              await i.editReply({ 
-                content: `🎫 **Ticket Created!**\n\nYour service request for **${shopItem.emoji} ${shopItem.name}** has been opened!\n\n👉 Head to ${ticketResult.channel} to discuss with an admin.`
-              });
-            } else {
-              await i.editReply({ content: `❌ ${ticketResult.error}` });
-            }
-          } catch (error) {
-            console.error('Error creating service ticket:', error);
-            await i.editReply({ content: '❌ Failed to create ticket. Please contact an admin.' });
-          }
-          return;
-        }
-        
-        if (shopItem && shopItem.effect_type === 'cosmetic') {
-          return i.reply({ 
-            content: `🏆 **${item.emoji} ${item.name}** is a cosmetic item!\n\nCosmetic items are collectibles and don't have an activatable effect. They're displayed in your inventory as trophies!`, 
-            ephemeral: true 
-          });
-        }
-        
-        // Handle free lottery ticket - show modal for number selection
-        if (shopItem && shopItem.effect_type === 'lottery_free_ticket') {
-          const modal = new ModalBuilder()
-            .setCustomId(`lottery_ticket_modal_${itemId}`)
-            .setTitle('🎟️ Pick Your Lottery Numbers');
-          
-          const num1Input = new TextInputBuilder()
-            .setCustomId('lottery_num1')
-            .setLabel('First Number (0-29)')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Enter a number 0-29')
-            .setRequired(true)
-            .setMinLength(1)
-            .setMaxLength(2);
-          
-          const num2Input = new TextInputBuilder()
-            .setCustomId('lottery_num2')
-            .setLabel('Second Number (0-29)')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Enter a number 0-29')
-            .setRequired(true)
-            .setMinLength(1)
-            .setMaxLength(2);
-          
-          const num3Input = new TextInputBuilder()
-            .setCustomId('lottery_num3')
-            .setLabel('Third Number (0-29)')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Enter a number 0-29')
-            .setRequired(true)
-            .setMinLength(1)
-            .setMaxLength(2);
-          
-          const num4Input = new TextInputBuilder()
-            .setCustomId('lottery_num4')
-            .setLabel('Fourth Number (0-29)')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Enter a number 0-29')
-            .setRequired(true)
-            .setMinLength(1)
-            .setMaxLength(2);
-          
-          modal.addComponents(
-            new ActionRowBuilder().addComponents(num1Input),
-            new ActionRowBuilder().addComponents(num2Input),
-            new ActionRowBuilder().addComponents(num3Input),
-            new ActionRowBuilder().addComponents(num4Input)
-          );
-          
-          return i.showModal(modal);
-        }
-        
-        // Use the item
-        const result = useItem(guildId, targetId, itemId);
-        
-        if (!result.success) {
-          return i.reply({ content: `❌ ${result.error}`, ephemeral: true });
-        }
-        
-        // Success - show result
-        const successEmbed = new EmbedBuilder()
-          .setColor(0x2ecc71)
-          .setTitle('✅ Item Used!')
-          .setDescription(`You used **${result.item.emoji} ${result.item.name}**!`)
-          .addFields(
-            { name: '✨ Effect', value: getEffectTypeName(result.effect.type), inline: true },
-            { name: '📊 Value', value: `+${result.effect.value}%`, inline: true },
-            { name: '⏱️ Duration', value: `${result.effect.durationHours} hours`, inline: true }
-          )
-          .setFooter({ text: 'Use /inventory effects to see all active effects' });
-        
-        await i.reply({ embeds: [successEmbed] });
-        
-        // Refresh inventory display
-        const newInventory = getUserInventory(guildId, targetId);
-        if (newInventory.length === 0) {
-          const emptyEmbed = new EmbedBuilder()
-            .setColor(0x95a5a6)
-            .setTitle('🎒 Your Inventory')
-            .setDescription("Your inventory is now empty!\n\nUse `/shop` to browse and buy items.");
-          
-          await response.edit({ embeds: [emptyEmbed], components: [] });
-        } else {
-          currentPage = Math.min(currentPage, Math.ceil(newInventory.length / ITEMS_PER_PAGE) - 1);
-          const newEmbed = createInventoryEmbed(newInventory, currentPage, targetName);
-          const newComponents = createInventoryComponents(newInventory, currentPage, isOwnInventory);
-          await response.edit({ embeds: [newEmbed], components: newComponents });
-        }
-      }
-      else if (i.customId === 'inv_view_effects') {
-        // Show effects view - always shows viewer's effects
-        const effects = getActiveEffects(guildId, viewerId);
-        const effectsEmbed = createEffectsEmbed(effects, interaction.user.username);
-        const backRow = new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId('inv_back')
-              .setLabel('Back to Inventory')
-              .setStyle(ButtonStyle.Secondary)
-              .setEmoji('◀️')
-          );
-        
-        await i.update({ embeds: [effectsEmbed], components: [backRow] });
-      }
-      else if (i.customId === 'inv_back') {
-        // Back to inventory
-        const refreshedInventory = getUserInventory(guildId, targetId);
-        const newEmbed = createInventoryEmbed(refreshedInventory.length > 0 ? refreshedInventory : [], 0, targetName);
-        const newComponents = refreshedInventory.length > 0 ? createInventoryComponents(refreshedInventory, 0, isOwnInventory) : [];
-        await i.update({ embeds: [newEmbed], components: newComponents });
-      }
+      await handleInventoryInteraction(i, state, stateKey, response);
     } catch (error) {
       console.error('Inventory interaction error:', error);
-      try {
-        await i.reply({ content: '❌ An error occurred. Please try again.', ephemeral: true });
-      } catch (e) {
-        // Interaction may have already been handled
+      if (!i.replied && !i.deferred) {
+        await i.reply({ content: '❌ An error occurred.', ephemeral: true }).catch(() => {});
       }
     }
   });
   
-  collector.on('end', async () => {
-    try {
-      await response.edit({ components: [] });
-    } catch (e) {
-      // Message may have been deleted
-    }
+  collector.on('end', () => {
+    inventoryState.delete(stateKey);
+    // Disable buttons on timeout
+    response.edit({ components: [] }).catch(() => {});
   });
 }
 
-async function handleViewEffects(interaction, guildId, userId) {
-  const effects = getActiveEffects(guildId, userId);
-  const embed = createEffectsEmbed(effects, interaction.user.username);
+async function handleInventoryInteraction(i, state, stateKey, response) {
+  const { guildId, targetId, targetName, isOwnInventory } = state;
   
-  return interaction.reply({ embeds: [embed] });
+  // Tab switching
+  if (i.customId === 'inv_tab_items') {
+    state.tab = 'items';
+    state.page = 0;
+    state.inventory = getUserInventory(guildId, targetId);
+    inventoryState.set(stateKey, state);
+    
+    const embed = createInventoryEmbed(state.inventory, 0, targetName, isOwnInventory);
+    const components = createInventoryPanelComponents(state.inventory, state.effects, 0, 'items', isOwnInventory);
+    return i.update({ embeds: [embed], components });
+  }
+  
+  if (i.customId === 'inv_tab_effects') {
+    if (!isOwnInventory) {
+      return i.reply({ content: '❌ You can only view your own effects!', ephemeral: true });
+    }
+    state.tab = 'effects';
+    state.effects = getActiveEffects(guildId, targetId);
+    inventoryState.set(stateKey, state);
+    
+    const embed = createEffectsEmbed(state.effects, targetName);
+    const components = createInventoryPanelComponents(state.inventory, state.effects, state.page, 'effects', isOwnInventory);
+    return i.update({ embeds: [embed], components });
+  }
+  
+  // Pagination
+  if (i.customId === 'inv_prev') {
+    state.page = Math.max(0, state.page - 1);
+    inventoryState.set(stateKey, state);
+    
+    const embed = createInventoryEmbed(state.inventory, state.page, targetName, isOwnInventory);
+    const components = createInventoryPanelComponents(state.inventory, state.effects, state.page, state.tab, isOwnInventory);
+    return i.update({ embeds: [embed], components });
+  }
+  
+  if (i.customId === 'inv_next') {
+    const maxPage = Math.ceil(state.inventory.length / ITEMS_PER_PAGE) - 1;
+    state.page = Math.min(maxPage, state.page + 1);
+    inventoryState.set(stateKey, state);
+    
+    const embed = createInventoryEmbed(state.inventory, state.page, targetName, isOwnInventory);
+    const components = createInventoryPanelComponents(state.inventory, state.effects, state.page, state.tab, isOwnInventory);
+    return i.update({ embeds: [embed], components });
+  }
+  
+  // Use item from select menu
+  if (i.customId === 'inv_use_select') {
+    if (!isOwnInventory) {
+      return i.reply({ content: '❌ You can only use items from your own inventory!', ephemeral: true });
+    }
+    
+    const itemId = parseInt(i.values[0]);
+    await handleUseItemFromPanel(i, guildId, targetId, itemId, state, stateKey, response, targetName);
+  }
 }
 
-async function handleUseItem(interaction, guildId, userId) {
-  const itemIdStr = interaction.options.getString('item');
-  const itemId = parseInt(itemIdStr);
-  
-  if (isNaN(itemId)) {
-    return interaction.reply({ 
-      content: '❌ Invalid item! Use the autocomplete suggestions.', 
-      ephemeral: true 
-    });
+async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKey, response, targetName) {
+  // Find the item in inventory
+  const item = state.inventory.find(inv => inv.item_id === itemId);
+  if (!item) {
+    return i.reply({ content: "❌ Item not found in your inventory!", ephemeral: true });
   }
   
-  // Check if user has the item first
-  const inventory = getUserInventory(guildId, userId);
-  const inventoryItem = inventory.find(item => item.item_id === itemId);
-  
-  if (!inventoryItem) {
-    return interaction.reply({ 
-      content: '❌ You don\'t have this item in your inventory!', 
-      ephemeral: true 
-    });
-  }
-  
-  // Get the shop item details for special handling
+  // Check if it's a service or cosmetic item
   const shopItem = getShopItem(guildId, itemId);
-  
-  // Handle service items - create ticket
   if (shopItem && isServiceItem(shopItem.effect_type)) {
-    await interaction.deferReply({ ephemeral: true });
+    // Create a ticket channel for the service item
+    await i.deferReply({ ephemeral: true });
     
     try {
-      const ticketResult = await createServiceTicket(interaction.guild, interaction.user, shopItem, guildId);
+      const ticketResult = await createServiceTicket(i.guild, i.user, shopItem, guildId);
       
       if (ticketResult.success) {
+        // Remove item from inventory since ticket is created
         removeFromInventory(guildId, userId, itemId, 1);
-        return interaction.editReply({ 
+        
+        // Refresh inventory display
+        state.inventory = getUserInventory(guildId, userId);
+        state.page = Math.min(state.page, Math.max(0, Math.ceil(state.inventory.length / ITEMS_PER_PAGE) - 1));
+        inventoryState.set(stateKey, state);
+        
+        const embed = createInventoryEmbed(state.inventory, state.page, targetName, true);
+        const components = createInventoryPanelComponents(state.inventory, state.effects, state.page, state.tab, true);
+        await response.edit({ embeds: [embed], components });
+        
+        await i.editReply({ 
           content: `🎫 **Ticket Created!**\n\nYour service request for **${shopItem.emoji} ${shopItem.name}** has been opened!\n\n👉 Head to ${ticketResult.channel} to discuss with an admin.`
         });
       } else {
-        return interaction.editReply({ content: `❌ ${ticketResult.error}` });
+        await i.editReply({ content: `❌ ${ticketResult.error}` });
       }
     } catch (error) {
       console.error('Error creating service ticket:', error);
-      return interaction.editReply({ content: '❌ Failed to create ticket. Please contact an admin.' });
+      await i.editReply({ content: '❌ Failed to create ticket. Please contact an admin.' });
     }
+    return;
   }
   
-  // Handle cosmetic items - can't be "used"
   if (shopItem && shopItem.effect_type === 'cosmetic') {
-    return interaction.reply({ 
-      content: `🏆 **${shopItem.emoji} ${shopItem.name}** is a cosmetic item!\n\nCosmetic items are collectibles and don't have an activatable effect. They're displayed in your inventory as trophies!`, 
+    return i.reply({ 
+      content: `🏆 **${item.emoji} ${item.name}** is a cosmetic item!\n\nCosmetic items are collectibles and don't have an activatable effect. They're displayed in your inventory as trophies!`, 
       ephemeral: true 
     });
   }
@@ -488,52 +316,121 @@ async function handleUseItem(interaction, guildId, userId) {
       new ActionRowBuilder().addComponents(num4Input)
     );
     
-    return interaction.showModal(modal);
+    return i.showModal(modal);
   }
   
-  // Use the item (regular effect items)
+  // Handle role grant items
+  if (shopItem && isRoleGrantItem(shopItem.effect_type)) {
+    await i.deferReply({ ephemeral: true });
+    
+    try {
+      const roleId = shopItem.effect_value_text || String(shopItem.effect_value);
+      console.log('[Role Grant Debug] effect_value_text:', shopItem.effect_value_text, 'effect_value:', shopItem.effect_value, 'roleId:', roleId);
+      const role = i.guild.roles.cache.get(roleId);
+      
+      if (!role) {
+        return i.editReply({ 
+          content: `❌ The role for this item no longer exists! Please contact an admin.`
+        });
+      }
+      
+      if (hasRoleGrant(guildId, userId, roleId)) {
+        return i.editReply({ 
+          content: `❌ You already have the **${role.name}** role from a previous purchase!`
+        });
+      }
+      
+      const member = await i.guild.members.fetch(userId);
+      if (member.roles.cache.has(roleId)) {
+        return i.editReply({ 
+          content: `❌ You already have the **${role.name}** role!`
+        });
+      }
+      
+      try {
+        await member.roles.add(role, `Shop item: ${shopItem.name}`);
+      } catch (roleError) {
+        console.error('Error adding role:', roleError);
+        return i.editReply({ 
+          content: `❌ Failed to add role. The bot may not have permission to assign this role.`
+        });
+      }
+      
+      removeFromInventory(guildId, userId, itemId, 1);
+      recordRoleGrant(guildId, userId, roleId, shopItem.duration_hours);
+      
+      // Refresh inventory
+      state.inventory = getUserInventory(guildId, userId);
+      state.page = Math.min(state.page, Math.max(0, Math.ceil(state.inventory.length / ITEMS_PER_PAGE) - 1));
+      inventoryState.set(stateKey, state);
+      
+      const embed = createInventoryEmbed(state.inventory, state.page, targetName, true);
+      const components = createInventoryPanelComponents(state.inventory, state.effects, state.page, state.tab, true);
+      await response.edit({ embeds: [embed], components });
+      
+      const durationText = shopItem.duration_hours === 0 ? 'permanently' : `for ${shopItem.duration_hours} hours`;
+      return i.editReply({ 
+        content: `✅ **Role Granted!**\n\nYou now have the **${role.name}** role ${durationText}!`
+      });
+      
+    } catch (error) {
+      console.error('Error granting role:', error);
+      return i.editReply({ content: '❌ Failed to grant role. Please contact an admin.' });
+    }
+  }
+  
+  // Use regular effect item
+  await i.deferReply({ ephemeral: true });
+  
   const result = useItem(guildId, userId, itemId);
   
   if (!result.success) {
-    return interaction.reply({ content: `❌ ${result.error}`, ephemeral: true });
+    return i.editReply({ content: `❌ ${result.error}` });
   }
   
-  // Success
-  const successEmbed = new EmbedBuilder()
-    .setColor(0x2ecc71)
-    .setTitle('✅ Item Used!')
-    .setDescription(`You used **${result.item.emoji} ${result.item.name}**!`)
-    .addFields(
-      { name: '✨ Effect', value: getEffectTypeName(result.effect.type), inline: true },
-      { name: '📊 Value', value: `+${result.effect.value}%`, inline: true },
-      { name: '⏱️ Duration', value: `${result.effect.durationHours} hours`, inline: true }
-    )
-    .setTimestamp()
-    .setFooter({ text: 'Use /inventory effects to see all active effects' });
+  // Refresh inventory and effects
+  state.inventory = getUserInventory(guildId, userId);
+  state.effects = getActiveEffects(guildId, userId);
+  state.page = Math.min(state.page, Math.max(0, Math.ceil(state.inventory.length / ITEMS_PER_PAGE) - 1));
+  inventoryState.set(stateKey, state);
   
-  return interaction.reply({ embeds: [successEmbed] });
+  const embed = createInventoryEmbed(state.inventory, state.page, targetName, true);
+  const components = createInventoryPanelComponents(state.inventory, state.effects, state.page, state.tab, true);
+  await response.edit({ embeds: [embed], components });
+  
+  const effectName = getEffectTypeName(result.effectType);
+  const durationStr = formatDuration(result.duration * 60 * 60 * 1000);
+  
+  return i.editReply({ 
+    content: `✅ **Used ${item.emoji} ${item.name}!**\n\n` +
+      `Effect: **${effectName}** (+${result.value}%)\n` +
+      `Duration: ⏱️ ${durationStr}\n\n` +
+      `View your active effects in the **Effects** tab!`
+  });
 }
 
-function createInventoryEmbed(inventory, page, username) {
+function createInventoryEmbed(inventory, page, username, isOwnInventory = true) {
   const totalPages = Math.max(1, Math.ceil(inventory.length / ITEMS_PER_PAGE));
   const startIndex = page * ITEMS_PER_PAGE;
   const pageItems = inventory.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   
   const embed = new EmbedBuilder()
-    .setColor(0x9b59b6)
+    .setColor(0x3498db)
     .setTitle(`🎒 ${username}'s Inventory`)
-    .setFooter({ text: `Page ${page + 1}/${totalPages} • ${inventory.length} items total` });
+    .setFooter({ text: `Page ${page + 1}/${totalPages} • ${inventory.length} item${inventory.length !== 1 ? 's' : ''} total` });
   
   if (inventory.length === 0) {
-    embed.setDescription("Your inventory is empty!\n\nUse `/shop` to browse and buy items.");
+    embed.setDescription(isOwnInventory 
+      ? "Your inventory is empty!\n\nUse `/shop` to browse and buy items."
+      : `**${username}** doesn't have any items.`);
     return embed;
   }
   
   let description = '';
   for (const item of pageItems) {
-    const effectText = item.effect_type 
+    const effectText = item.effect_type && item.effect_type !== 'cosmetic'
       ? `\n   ↳ ${getEffectTypeName(item.effect_type)} (+${item.effect_value}%) for ${item.duration_hours}h`
-      : '';
+      : item.effect_type === 'cosmetic' ? '\n   ↳ 🏆 Cosmetic' : '';
     
     description += `${item.emoji} **${item.name}** x${item.quantity}${effectText}\n`;
   }
@@ -543,55 +440,71 @@ function createInventoryEmbed(inventory, page, username) {
   return embed;
 }
 
-function createInventoryComponents(inventory, page, isOwnInventory = true) {
+function createInventoryPanelComponents(inventory, effects, page, tab, isOwnInventory) {
   const components = [];
-  const totalPages = Math.ceil(inventory.length / ITEMS_PER_PAGE);
-  const startIndex = page * ITEMS_PER_PAGE;
-  const pageItems = inventory.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  const totalPages = Math.max(1, Math.ceil(inventory.length / ITEMS_PER_PAGE));
   
-  // Use item select menu - only show for own inventory
-  if (isOwnInventory && pageItems.length > 0) {
-    const useableItems = pageItems.filter(item => item.effect_type);
+  // Tab buttons row
+  const tabRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('inv_tab_items')
+      .setLabel(`📦 Items (${inventory.length})`)
+      .setStyle(tab === 'items' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('inv_tab_effects')
+      .setLabel(`✨ Effects (${effects.length})`)
+      .setStyle(tab === 'effects' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+      .setDisabled(!isOwnInventory)
+  );
+  components.push(tabRow);
+  
+  // Items tab components
+  if (tab === 'items') {
+    const startIndex = page * ITEMS_PER_PAGE;
+    const pageItems = inventory.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     
-    if (useableItems.length > 0) {
-      const selectRow = new ActionRowBuilder()
-        .addComponents(
-          new StringSelectMenuBuilder()
-            .setCustomId('inv_use_select')
-            .setPlaceholder('🔮 Select an item to use')
-            .addOptions(
-              useableItems.map(item => ({
-                label: `Use ${item.name}`,
-                value: item.item_id.toString(),
-                description: `${item.effect_type} for ${item.duration_hours}h`,
-                emoji: parseEmojiForSelect(item.emoji)
-              }))
-            )
-        );
-      components.push(selectRow);
+    // Use item select menu - only show for own inventory with usable items
+    if (isOwnInventory && pageItems.length > 0) {
+      const useableItems = pageItems.filter(item => item.effect_type);
+      
+      if (useableItems.length > 0) {
+        const selectRow = new ActionRowBuilder()
+          .addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId('inv_use_select')
+              .setPlaceholder('🔮 Select an item to use')
+              .addOptions(
+                useableItems.map(item => ({
+                  label: `Use ${item.name}`,
+                  value: item.item_id.toString(),
+                  description: item.effect_type === 'cosmetic' 
+                    ? 'Cosmetic - Display only' 
+                    : `${getEffectTypeName(item.effect_type)} for ${item.duration_hours}h`,
+                  emoji: parseEmojiForSelect(item.emoji)
+                }))
+              )
+          );
+        components.push(selectRow);
+      }
+    }
+    
+    // Navigation row
+    if (totalPages > 1) {
+      const navRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('inv_prev')
+          .setLabel('◀️ Previous')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(page === 0),
+        new ButtonBuilder()
+          .setCustomId('inv_next')
+          .setLabel('Next ▶️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(page >= totalPages - 1)
+      );
+      components.push(navRow);
     }
   }
-  
-  // Navigation and effects buttons
-  const navRow = new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId('inv_prev')
-        .setLabel('◀️ Previous')
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(page === 0),
-      new ButtonBuilder()
-        .setCustomId('inv_view_effects')
-        .setLabel('View Active Effects')
-        .setStyle(ButtonStyle.Primary)
-        .setEmoji('✨'),
-      new ButtonBuilder()
-        .setCustomId('inv_next')
-        .setLabel('Next ▶️')
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(page >= totalPages - 1)
-    );
-  components.push(navRow);
   
   return components;
 }
@@ -603,7 +516,7 @@ function createEffectsEmbed(effects, username) {
     .setTimestamp();
   
   if (effects.length === 0) {
-    embed.setDescription("You have no active effects!\n\nUse items from your inventory to gain effects.");
+    embed.setDescription("No active effects!\n\nUse items from your inventory to gain effects.");
     return embed;
   }
   
@@ -678,7 +591,7 @@ async function createServiceTicket(guild, user, item, guildId) {
       name: ticketName,
       type: ChannelType.GuildText,
       permissionOverwrites,
-      reason: `Service ticket for ${user.tag} - ${item.name}`
+      reason: `Service ticket for ${user.username} - ${item.name}`
     };
     
     // Add category if configured and bot has permission

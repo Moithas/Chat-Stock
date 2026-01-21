@@ -20,7 +20,8 @@ const { initBank, startBankScheduler } = require('./bank');
 const { addMoney } = require('./economy');
 const { initWealthTax, getWealthTaxSettings, collectWealthTax, getLotteryInfo: getWealthTaxLotteryInfo } = require('./wealth-tax');
 const { initSkills } = require('./skills');
-const { initItems } = require('./items');
+const { initItems, getExpiredRoleGrants, removeRoleGrantRecord } = require('./items');
+const { initCooldownTracker, startAllTrackers } = require('./cooldown-tracker');
 const fs = require('fs');
 const path = require('path');
 
@@ -240,9 +241,61 @@ function startWealthTaxScheduler(client) {
   console.log('💰 Wealth tax scheduler started');
 }
 
+// Role expiration scheduler - removes temporary roles that have expired
+function startRoleExpirationScheduler(client) {
+  setInterval(async () => {
+    try {
+      const expiredGrants = getExpiredRoleGrants();
+      
+      for (const grant of expiredGrants) {
+        try {
+          const guild = client.guilds.cache.get(grant.guild_id);
+          if (!guild) {
+            // Guild no longer accessible, remove record
+            removeRoleGrantRecord(grant.guild_id, grant.user_id, grant.role_id);
+            continue;
+          }
+          
+          const member = await guild.members.fetch(grant.user_id).catch(() => null);
+          if (!member) {
+            // Member left the server, remove record
+            removeRoleGrantRecord(grant.guild_id, grant.user_id, grant.role_id);
+            continue;
+          }
+          
+          const role = guild.roles.cache.get(grant.role_id);
+          if (!role) {
+            // Role was deleted, remove record
+            removeRoleGrantRecord(grant.guild_id, grant.user_id, grant.role_id);
+            continue;
+          }
+          
+          // Remove the role if they still have it
+          if (member.roles.cache.has(grant.role_id)) {
+            await member.roles.remove(role, `Temporary role expired (from shop item: ${grant.source_item_name})`);
+            console.log(`🏷️ Removed expired role ${role.name} from ${member.user.username} in ${guild.name}`);
+          }
+          
+          // Remove the record
+          removeRoleGrantRecord(grant.guild_id, grant.user_id, grant.role_id);
+          
+        } catch (error) {
+          console.error(`Error removing expired role:`, error);
+          // Still remove the record to prevent infinite retry
+          removeRoleGrantRecord(grant.guild_id, grant.user_id, grant.role_id);
+        }
+      }
+    } catch (error) {
+      console.error('Error in role expiration scheduler:', error);
+    }
+  }, 60000); // Check every minute
+  
+  console.log('🏷️ Role expiration scheduler started');
+}
+
 // When bot is ready
 client.once('clientReady', async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`✅ Logged in as ${client.user.username}`);
   
   // Initialize database first
   await initDatabase();
@@ -324,6 +377,13 @@ client.once('clientReady', async () => {
 
   // Initialize stock ticker
   initTicker(client);
+
+  // Initialize cooldown tracker
+  initCooldownTracker(getDb(), client);
+  startAllTrackers();
+  
+  // Start role expiration scheduler (for temporary shop roles)
+  startRoleExpirationScheduler(client);
   
   // Register slash commands
   const commands = [];
@@ -938,6 +998,9 @@ client.on('interactionCreate', async (interaction) => {
       'events_force_spawn',
       'events_channel_select', 'back_ticker',
       'modal_events_settings', 'modal_events_weights',
+      // Cooldown Tracker
+      'tracker_toggle', 'tracker_edit_settings', 'tracker_set_channel', 'tracker_refresh',
+      'tracker_channel_select', 'modal_tracker_settings',
       'vault_panel', 'vault_toggle', 'vault_spawn', 'vault_interval', 
       'vault_reward', 'vault_channel',
       'modal_vault_interval', 'modal_vault_reward',
@@ -1002,7 +1065,7 @@ client.on('interactionCreate', async (interaction) => {
       'admin_items', 'items_toggle', 'items_add', 'items_manage', 'items_stats',
       'items_init_defaults', 'items_prev', 'items_next', 'back_items',
       'items_fulfillments', 'items_fulfill_prev', 'items_fulfill_next', 'items_ticket_settings',
-      'items_create_continue', 'items_create_cancel',
+      'items_create_continue', 'items_create_cancel', 'items_create_role',
       'items_give', 'items_give_confirm', 'items_give_cancel',
       'items_give_user', 'items_give_item',
       'items_take', 'items_take_confirm', 'items_take_cancel',
@@ -1010,7 +1073,9 @@ client.on('interactionCreate', async (interaction) => {
       'items_select', 'items_category_filter', 'items_effect_select',
       'items_ticket_category', 'items_ticket_log',
       'items_create_category', 'items_create_effect',
-      'modal_items_add', 'modal_items_edit', 'modal_items_create', 'modal_items_give_qty', 'modal_items_take_qty'
+      'modal_items_add', 'modal_items_edit', 'modal_items_create', 'modal_items_give_qty', 'modal_items_take_qty',
+      // Reset Game
+      'reset_game_confirm', 'reset_game_cancel', 'modal_reset_game_confirm'
     ];
     
     // Check for exact match OR dynamic card/property edit IDs

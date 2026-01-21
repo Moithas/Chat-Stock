@@ -1,5 +1,5 @@
 // Admin Items Panel - Item Shop management
-const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, UserSelectMenuBuilder } = require('discord.js');
+const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, UserSelectMenuBuilder, RoleSelectMenuBuilder } = require('discord.js');
 const { logAdminAction } = require('../admin');
 const { 
   getItemSettings, 
@@ -12,6 +12,8 @@ const {
   getShopStats,
   initializeDefaultItems,
   addToInventory,
+  getUserInventory,
+  removeFromInventory,
   EFFECT_TYPES,
   ITEM_CATEGORIES,
   getPendingFulfillments,
@@ -81,7 +83,8 @@ const SELECT_IDS = [
   'items_ticket_category', 'items_ticket_log',
   'items_create_category', 'items_create_effect',
   'items_give_user', 'items_give_item',
-  'items_take_user', 'items_take_item'
+  'items_take_user', 'items_take_item',
+  'items_create_role'
 ];
 
 // Track pagination state per guild/user
@@ -155,7 +158,13 @@ async function handleInteraction(interaction, guildId) {
         await showItemCreationPanel(interaction, guildId);
         return true;
       case 'items_create_continue':
-        await showItemCreationModal(interaction, guildId);
+        // Check if this is a role_grant item - need to select role first
+        const createState = itemCreationState.get(interaction.user.id);
+        if (createState && createState.effectType === 'role_grant' && !createState.roleId) {
+          await showRoleSelectForItem(interaction, guildId);
+        } else {
+          await showItemCreationModal(interaction, guildId);
+        }
         return true;
       case 'items_create_cancel':
         itemCreationState.delete(interaction.user.id);
@@ -305,6 +314,14 @@ async function handleInteraction(interaction, guildId) {
     }
     if (customId === 'items_take_user') {
       await handleTakeUserSelect(interaction, guildId);
+      return true;
+    }
+  }
+  
+  // Handle role select menu interactions
+  if (interaction.isRoleSelectMenu()) {
+    if (customId === 'items_create_role') {
+      await handleCreateRoleSelect(interaction, guildId);
       return true;
     }
   }
@@ -690,14 +707,10 @@ async function showItemCreationPanel(interaction, guildId) {
     { label: '📉 Hack Fine Reduction', value: 'hack_fine_reduction', description: 'Reduces fines when caught hacking' },
     { label: '📉 Crime Fine Reduction', value: 'crime_fine_reduction', description: 'Reduces fines when caught' },
     // Special
-    { label: '🎰 Lottery Boost', value: 'lottery_boost', description: 'Extra lottery ticket or bonus' },
-    { label: '�️ Free Lottery Ticket', value: 'lottery_free_ticket', description: 'Instant free lottery ticket (random numbers)' },
-    { label: '�🏦 Bank Interest Boost', value: 'bank_interest_boost', description: 'Increased bank interest' },
-    { label: '⏱️ Cooldown Reduction', value: 'cooldown_reduction', description: 'Reduces command cooldowns' },
+        { label: '�️ Free Lottery Ticket', value: 'lottery_free_ticket', description: 'Instant free lottery ticket (random numbers)' },
+        { label: '⏱️ Cooldown Reduction', value: 'cooldown_reduction', description: 'Reduces command cooldowns' },
     // Debuffs
-    { label: '📉 Earnings Penalty', value: 'earnings_penalty', description: 'Reduces all earnings (curse)' },
-    { label: '⚠️ Robbery Vulnerability', value: 'robbery_vulnerability', description: 'Easier to be robbed (curse)' },
-    // Service items
+            // Service items
     { label: '🎨 Custom Emoji (Service)', value: 'service_custom_emoji', description: 'Admin adds custom emoji' },
     { label: '📝 Nickname Change (Service)', value: 'service_nickname', description: 'Admin changes nickname' },
     { label: '🏷️ Custom Role (Service)', value: 'service_custom_role', description: 'Admin creates custom role' },
@@ -755,10 +768,89 @@ async function handleCreateEffectSelect(interaction, guildId) {
   // Update creation state
   const state = itemCreationState.get(userId) || { category: 'utility', effectType: null, guildId };
   state.effectType = effectType === 'cosmetic' ? null : effectType;
+  // Clear roleId if changing effect type (in case they previously selected role_grant)
+  if (effectType !== 'role_grant') {
+    state.roleId = null;
+  }
   itemCreationState.set(userId, state);
   
   // Update the embed to show current selection
   await updateCreationPanel(interaction, state);
+}
+
+// Show role selector for role_grant items
+async function showRoleSelectForItem(interaction, guildId) {
+  const userId = interaction.user.id;
+  const state = itemCreationState.get(userId);
+  
+  if (!state) {
+    return interaction.reply({ content: '❌ Session expired. Please start over.', ephemeral: true });
+  }
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x9b59b6)
+    .setTitle('🏷️ Select Role to Grant')
+    .setDescription('Select which role this item will grant when used.\n\n**Note:** The duration can be set in the next step. Set duration to 0 for permanent roles.')
+    .addFields(
+      { name: '📁 Category', value: `\`${state.category}\``, inline: true },
+      { name: '⚡ Effect', value: '`🏷️ Role Grant`', inline: true }
+    )
+    .setFooter({ text: 'Step 2 of 3 - Select the role to grant' });
+  
+  const roleRow = new ActionRowBuilder()
+    .addComponents(
+      new RoleSelectMenuBuilder()
+        .setCustomId('items_create_role')
+        .setPlaceholder('Select a role to grant...')
+    );
+  
+  const buttonRow = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId('items_create_cancel')
+        .setLabel('Cancel')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('✖️')
+    );
+  
+  await interaction.deferUpdate();
+  await interaction.editReply({ embeds: [embed], components: [roleRow, buttonRow] });
+}
+
+// Handle role selection for role_grant items
+async function handleCreateRoleSelect(interaction, guildId) {
+  const roleId = interaction.values[0];
+  const role = interaction.guild.roles.cache.get(roleId);
+  const userId = interaction.user.id;
+  
+  const state = itemCreationState.get(userId);
+  if (!state) {
+    return interaction.reply({ content: '❌ Session expired. Please start over.', ephemeral: true });
+  }
+  
+  // Check if bot can manage this role
+  const botMember = interaction.guild.members.me;
+  if (role.position >= botMember.roles.highest.position) {
+    return interaction.reply({ 
+      content: `❌ I cannot grant the role **${role.name}** because it's higher than or equal to my highest role. Please choose a different role or move my role higher.`, 
+      ephemeral: true 
+    });
+  }
+  
+  if (role.managed) {
+    return interaction.reply({ 
+      content: `❌ The role **${role.name}** is managed by an integration (bot/boost) and cannot be manually assigned.`, 
+      ephemeral: true 
+    });
+  }
+  
+  // Store the role ID
+  state.roleId = roleId;
+  state.roleName = role.name;
+  itemCreationState.set(userId, state);
+  
+  // Now show the modal
+  await showItemCreationModal(interaction, guildId);
 }
 
 async function updateCreationPanel(interaction, state) {
@@ -786,6 +878,7 @@ async function updateCreationPanel(interaction, state) {
     'lottery_free_ticket': '🎟️ Free Lottery Ticket',
     'bank_interest_boost': '🏦 Bank Interest Boost',
     'cooldown_reduction': '⏱️ Cooldown Reduction',
+    'role_grant': '🏷️ Role Grant',
     'earnings_penalty': '📉 Earnings Penalty',
     'robbery_vulnerability': '⚠️ Robbery Vulnerability',
     'service_custom_emoji': '🎨 Custom Emoji (Service)',
@@ -839,12 +932,9 @@ async function updateCreationPanel(interaction, state) {
     { label: '📉 Rob Fine Reduction', value: 'rob_fine_reduction', description: 'Reduces fines when caught robbing', default: currentEffect === 'rob_fine_reduction' },
     { label: '📉 Hack Fine Reduction', value: 'hack_fine_reduction', description: 'Reduces fines when caught hacking', default: currentEffect === 'hack_fine_reduction' },
     { label: '📉 Crime Fine Reduction', value: 'crime_fine_reduction', description: 'Reduces fines when caught', default: currentEffect === 'crime_fine_reduction' },
-    { label: '🎰 Lottery Boost', value: 'lottery_boost', description: 'Extra lottery ticket or bonus', default: currentEffect === 'lottery_boost' },
-    { label: '�️ Free Lottery Ticket', value: 'lottery_free_ticket', description: 'Instant free lottery ticket', default: currentEffect === 'lottery_free_ticket' },
-    { label: '�🏦 Bank Interest Boost', value: 'bank_interest_boost', description: 'Increased bank interest', default: currentEffect === 'bank_interest_boost' },
+    { label: '🎟️ Free Lottery Ticket', value: 'lottery_free_ticket', description: 'Instant free lottery ticket', default: currentEffect === 'lottery_free_ticket' },
     { label: '⏱️ Cooldown Reduction', value: 'cooldown_reduction', description: 'Reduces command cooldowns', default: currentEffect === 'cooldown_reduction' },
-    { label: '📉 Earnings Penalty', value: 'earnings_penalty', description: 'Reduces all earnings (curse)', default: currentEffect === 'earnings_penalty' },
-    { label: '⚠️ Robbery Vulnerability', value: 'robbery_vulnerability', description: 'Easier to be robbed (curse)', default: currentEffect === 'robbery_vulnerability' },
+    { label: '🏷️ Role Grant', value: 'role_grant', description: 'Grants a Discord role when used', default: currentEffect === 'role_grant' },
     { label: '🎨 Custom Emoji (Service)', value: 'service_custom_emoji', description: 'Admin adds custom emoji', default: currentEffect === 'service_custom_emoji' },
     { label: '📝 Nickname Change (Service)', value: 'service_nickname', description: 'Admin changes nickname', default: currentEffect === 'service_nickname' },
     { label: '🏷️ Custom Role (Service)', value: 'service_custom_role', description: 'Admin creates custom role', default: currentEffect === 'service_custom_role' },
@@ -889,6 +979,7 @@ async function showItemCreationModal(interaction, guildId) {
   const hasEffect = state.effectType && state.effectType !== 'cosmetic';
   const isServiceItem = state.effectType && state.effectType.startsWith('service_');
   const isLotteryTicket = state.effectType === 'lottery_free_ticket';
+  const isRoleGrant = state.effectType === 'role_grant';
   
   const modal = new ModalBuilder()
     .setCustomId('modal_items_create')
@@ -935,8 +1026,25 @@ async function showItemCreationModal(interaction, guildId) {
     .setRequired(false)
     .setMaxLength(3);
   
+  // Role grant items - only need duration (role already selected)
+  if (isRoleGrant) {
+    const roleDurationInput = new TextInputBuilder()
+      .setCustomId('item_role_duration')
+      .setLabel('Duration in hours (0 = permanent)')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('e.g., 168 (7 days), 720 (30 days), 0 (permanent)')
+      .setValue('168')
+      .setRequired(true);
+    
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(nameInput),
+      new ActionRowBuilder().addComponents(descInput),
+      new ActionRowBuilder().addComponents(priceInput),
+      new ActionRowBuilder().addComponents(roleDurationInput),
+      new ActionRowBuilder().addComponents(maxStackInput)
+    );
   // Only show effect value/duration for items with effects (not service items or lottery tickets)
-  if (hasEffect && !isServiceItem && !isLotteryTicket) {
+  } else if (hasEffect && !isServiceItem && !isLotteryTicket) {
     const effectDetailsInput = new TextInputBuilder()
       .setCustomId('item_effect_details')
       .setLabel('Value:Duration:Cooldown (hours)')
@@ -1012,8 +1120,18 @@ async function handleItemCreationModal(interaction, guildId) {
   const hasEffect = state.effectType && state.effectType !== 'cosmetic';
   const isServiceItem = state.effectType && state.effectType.startsWith('service_');
   const isLotteryTicket = state.effectType === 'lottery_free_ticket';
+  const isRoleGrant = state.effectType === 'role_grant';
   
-  if (hasEffect && !isServiceItem && !isLotteryTicket) {
+  // Handle role grant items - effectValue is the role ID
+  if (isRoleGrant && state.roleId) {
+    effectValue = state.roleId; // Store role ID as effect_value
+    try {
+      durationHours = parseInt(interaction.fields.getTextInputValue('item_role_duration').trim()) || 0;
+      if (durationHours < 0) durationHours = 0;
+    } catch (e) {
+      durationHours = 168; // Default to 7 days
+    }
+  } else if (hasEffect && !isServiceItem && !isLotteryTicket) {
     try {
       const effectDetails = interaction.fields.getTextInputValue('item_effect_details').trim();
       const parts = effectDetails.split(':');
@@ -1051,11 +1169,20 @@ async function handleItemCreationModal(interaction, guildId) {
     return interaction.reply({ content: '❌ Failed to create item. Name may already exist.', ephemeral: true });
   }
   
+  // Build success message
+  let successMsg = `✅ Created item **${emoji} ${name}** for **${price.toLocaleString()}** ${CURRENCY}\n📁 Category: \`${state.category}\`\n⚡ Effect: \`${state.effectType || 'cosmetic'}\``;
+  
+  // Add role info for role_grant items
+  if (isRoleGrant && state.roleId) {
+    const durationText = durationHours === 0 ? 'Permanent' : `${durationHours} hours`;
+    successMsg += `\n🏷️ Role: <@&${state.roleId}> (${durationText})`;
+  }
+  
   logAdminAction(guildId, interaction.user.id, interaction.user.username, 'ITEM_ADD', 
-    `Added item: ${name} (${price} coins, category: ${state.category}, effect: ${state.effectType || 'none'})`);
+    `Added item: ${name} (${price} coins, category: ${state.category}, effect: ${state.effectType || 'none'}${isRoleGrant ? `, role: ${state.roleId}` : ''})`);
   
   await interaction.reply({ 
-    content: `✅ Created item **${emoji} ${name}** for **${price.toLocaleString()}** ${CURRENCY}\n📁 Category: \`${state.category}\`\n⚡ Effect: \`${state.effectType || 'cosmetic'}\``,
+    content: successMsg,
     ephemeral: true 
   });
   
@@ -1552,7 +1679,7 @@ async function handleTakeItemConfirm(interaction, guildId) {
   
   const qtyInput = new TextInputBuilder()
     .setCustomId('take_quantity')
-    .setLabel(`How many ${state.itemEmoji} ${state.itemName} to take? (max: ${state.maxQuantity})`)
+    .setLabel(`Quantity to take (max: ${state.maxQuantity})`)
     .setStyle(TextInputStyle.Short)
     .setPlaceholder(`Enter quantity (1-${state.maxQuantity})`)
     .setValue(state.maxQuantity.toString())
@@ -1770,7 +1897,9 @@ async function showEditItemModal(interaction, guildId, itemId) {
     .setValue(item.price.toString())
     .setRequired(true);
   
-  const effectStr = item.effect_type ? `${item.effect_type}:${item.effect_value}:${item.duration_hours}:${item.use_cooldown_hours || 0}` : '';
+  // For role_grant items, use effect_value_text (which preserves the full role ID)
+  const effectValueForDisplay = item.effect_type === 'role_grant' ? (item.effect_value_text || item.effect_value) : item.effect_value;
+  const effectStr = item.effect_type ? `${item.effect_type}:${effectValueForDisplay}:${item.duration_hours}:${item.use_cooldown_hours || 0}` : '';
   const effectInput = new TextInputBuilder()
     .setCustomId('item_effect')
     .setLabel('Effect (type:value:hours:cooldown)')
@@ -1819,7 +1948,14 @@ async function handleEditItemModal(interaction, guildId, itemId) {
   if (effectStr) {
     const effectParts = effectStr.split(':');
     if (effectParts.length >= 1) effectType = effectParts[0].toLowerCase();
-    if (effectParts.length >= 2) effectValue = parseInt(effectParts[1]) || 0;
+    if (effectParts.length >= 2) {
+      // For role_grant, keep as string to preserve snowflake ID precision
+      if (effectType === 'role_grant') {
+        effectValue = effectParts[1].trim();
+      } else {
+        effectValue = parseInt(effectParts[1]) || 0;
+      }
+    }
     if (effectParts.length >= 3) durationHours = parseInt(effectParts[2]) || 24;
     if (effectParts.length >= 4) useCooldownHours = parseInt(effectParts[3]) || 0;
   }
