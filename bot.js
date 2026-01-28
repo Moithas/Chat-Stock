@@ -22,6 +22,9 @@ const { initWealthTax, getWealthTaxSettings, collectWealthTax, getLotteryInfo: g
 const { initSkills } = require('./skills');
 const { initItems, getExpiredRoleGrants, removeRoleGrantRecord } = require('./items');
 const { initCooldownTracker, startAllTrackers } = require('./cooldown-tracker');
+const { initialize: initInBetween } = require('./inbetween');
+const { initialize: initLetItRide } = require('./letitride');
+const { initialize: initThreeCardPoker } = require('./threecardpoker');
 const fs = require('fs');
 const path = require('path');
 
@@ -247,33 +250,44 @@ function startRoleExpirationScheduler(client) {
     try {
       const expiredGrants = getExpiredRoleGrants();
       
+      if (expiredGrants.length > 0) {
+        console.log(`🏷️ Found ${expiredGrants.length} expired role grant(s) to process`);
+      }
+      
       for (const grant of expiredGrants) {
         try {
-          const guild = client.guilds.cache.get(grant.guild_id);
+          // Use fetch instead of cache to ensure we get fresh data
+          const guild = await client.guilds.fetch(grant.guild_id).catch(() => null);
           if (!guild) {
-            // Guild no longer accessible, remove record
+            console.log(`🏷️ Guild ${grant.guild_id} not accessible, removing record`);
             removeRoleGrantRecord(grant.guild_id, grant.user_id, grant.role_id);
             continue;
           }
           
           const member = await guild.members.fetch(grant.user_id).catch(() => null);
           if (!member) {
-            // Member left the server, remove record
+            console.log(`🏷️ Member ${grant.user_id} not found in ${guild.name}, removing record`);
             removeRoleGrantRecord(grant.guild_id, grant.user_id, grant.role_id);
             continue;
           }
           
-          const role = guild.roles.cache.get(grant.role_id);
+          // Fetch fresh role data
+          const role = await guild.roles.fetch(grant.role_id).catch(() => null);
           if (!role) {
-            // Role was deleted, remove record
+            console.log(`🏷️ Role ${grant.role_id} was deleted, removing record`);
             removeRoleGrantRecord(grant.guild_id, grant.user_id, grant.role_id);
             continue;
           }
           
-          // Remove the role if they still have it
-          if (member.roles.cache.has(grant.role_id)) {
-            await member.roles.remove(role, `Temporary role expired (from shop item: ${grant.source_item_name})`);
+          // Try to remove the role (like bond system does - don't check first, just try)
+          try {
+            await member.roles.remove(grant.role_id, `Temporary role expired (from shop item: ${grant.source_item_name})`);
             console.log(`🏷️ Removed expired role ${role.name} from ${member.user.username} in ${guild.name}`);
+          } catch (roleError) {
+            // Only log if it's not a "user doesn't have role" error
+            if (roleError.code !== 10011) { // Unknown Role error
+              console.error(`🏷️ Failed to remove role ${role.name} from ${member.user.username}: ${roleError.message}`);
+            }
           }
           
           // Remove the record
@@ -359,6 +373,15 @@ client.once('clientReady', async () => {
 
   // Initialize items/shop system
   initItems(getDb());
+
+  // Initialize In Between card game
+  initInBetween(getDb());
+
+  // Initialize Let It Ride card game
+  initLetItRide(getDb());
+
+  // Initialize Three Card Poker game
+  initThreeCardPoker(getDb());
 
   // Start lottery auto-draw scheduler
   startLotteryScheduler(client);
@@ -678,6 +701,98 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Handle In Between buttons and modals
+  if (interaction.isButton() && interaction.customId.startsWith('ib_')) {
+    try {
+      const { handleButton } = require('./commands/inbetween');
+      await handleButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling In Between button:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === 'ib_custom_bet_modal') {
+    try {
+      const { handleModal } = require('./commands/inbetween');
+      await handleModal(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling In Between modal:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle Let It Ride buttons
+  if (interaction.isButton() && interaction.customId.startsWith('lir_')) {
+    try {
+      const { handleButton } = require('./commands/letitride');
+      await handleButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling Let It Ride button:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle Three Card Poker buttons
+  if (interaction.isButton() && interaction.customId.startsWith('tcp_')) {
+    try {
+      const { handleButton } = require('./commands/three-card-poker');
+      const parts = interaction.customId.split('_');
+      const action = parts[1]; // deal, cancel, play, fold, playagain, done
+      const targetUserId = parts[2];
+      // For playagain, parts[3], [4], [5] are ante, pairplus, sixcard bets
+      const extraData = parts.length > 3 ? parts.slice(3) : [];
+      await handleButton(interaction, action, targetUserId, extraData);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling Three Card Poker button:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle Three Card Poker select menus
+  if (interaction.isStringSelectMenu() && (interaction.customId.startsWith('tcp_pairplus_') || interaction.customId.startsWith('tcp_sixcard_'))) {
+    try {
+      const { handleSelectMenu } = require('./commands/three-card-poker');
+      const parts = interaction.customId.split('_');
+      const menuType = parts[1]; // pairplus or sixcard
+      const targetUserId = parts[2];
+      await handleSelectMenu(interaction, menuType, targetUserId);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling Three Card Poker select menu:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
   // Handle blackjack buttons and modals
   if (interaction.isButton() && interaction.customId.startsWith('bj_')) {
     try {
@@ -893,6 +1008,23 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
     
+    // Handle property upgrade selection
+    if (interaction.isStringSelectMenu() && interaction.customId === 'property_upgrade_select') {
+      try {
+        const { handleUpgradeSelect } = require('./commands/property');
+        await handleUpgradeSelect(interaction);
+      } catch (error) {
+        if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
+        console.error('Error handling upgrade select:', error);
+        try {
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: 'An error occurred.', flags: 64 });
+          }
+        } catch (e) { /* Interaction expired */ }
+      }
+      return;
+    }
+    
     // Handle property sell confirm/cancel buttons
     if (interaction.isButton() && interaction.customId.startsWith('property_sell_confirm_')) {
       try {
@@ -982,7 +1114,7 @@ client.on('interactionCreate', async (interaction) => {
       'antispam_toggle', 'antispam_edit_settings',
       'market_edit_cooldown', 'market_edit_tax',
       'property_toggle', 'property_fee', 'property_limit', 'property_rent', 'property_cards',
-      'property_edit_settings', 'property_manage_cards',
+      'property_edit_settings', 'property_manage_cards', 'property_manage_names',
       'property_editcards', 'property_editprops', 'property_role_panel', 'property_clear_role',
       'property_set_role', 'property_set_register_price',
       'property_givecard', 'property_takecard', 'givecard_select', 'takecard_select', 'takecard_selectuser',
@@ -1010,14 +1142,18 @@ client.on('interactionCreate', async (interaction) => {
       'modal_market_cooldown', 'modal_market_capital_gains',
       'modal_property_fee', 'modal_property_limit', 'modal_property_rentpercent', 'modal_property_cards',
       'modal_property_register_price', 'modal_property_settings', 'modal_add_card', 'modal_tier_weights',
-      'property_role_select', 'cards_view_positive', 'cards_view_negative', 'cards_view_neutral', 
+      'property_role_select', 'property_name_select', 'cards_view_positive', 'cards_view_negative', 'cards_view_neutral', 
       'cards_add_card', 'back_property', 'property_edit_weights',
       'gambling_decks', 'gambling_settings', 'push_cards',
       'gambling_edit_blackjack', 'gambling_lottery_settings', 'gambling_toggle_scratch', 'gambling_scratch_config',
-      'gambling_scratch_stats',
+      'gambling_scratch_stats', 'gambling_inbetween_settings', 'gambling_letitride_settings', 'gambling_threecardpoker_settings',
       'lottery_toggle_auto', 'lottery_edit_schedule', 'lottery_edit_prizes', 'lottery_set_channel', 'lottery_edit_ticket_price',
       'vault_toggle', 'vault_spawn', 'vault_reward', 'vault_channel', 'vault_force_spawn', 'back_gambling',
+      'inbetween_toggle', 'inbetween_edit_settings', 'inbetween_reset_pot',
+      'letitride_toggle', 'letitride_edit_settings',
+      'threecardpoker_toggle', 'threecardpoker_edit_settings',
       'modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_vault_spawn', 'modal_vault_reward',
+      'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings',
       'scratch_select_card', 'lottery_channel_select', 'vault_channel_select',
       'lottery_draw_now', 'lottery_schedule', 'lottery_prizes',
       'scratch_toggle', 'scratch_config', 'scratch_config_cheese', 'scratch_config_cash', 
@@ -1084,7 +1220,8 @@ client.on('interactionCreate', async (interaction) => {
                             interaction.customId.startsWith('card_select_') ||
                             interaction.customId.startsWith('modal_edit_card_');
     const isDynamicPropId = interaction.customId.startsWith('prop_edit_') || 
-                            interaction.customId.startsWith('modal_prop_');
+                            interaction.customId.startsWith('modal_prop_') ||
+                            interaction.customId.startsWith('modal_edit_property_name_');
     const isDynamicGiveCard = interaction.customId.startsWith('givecard_') ||
                               interaction.customId.startsWith('takecard_') ||
                               interaction.customId.startsWith('modal_givecard_');

@@ -5,7 +5,8 @@ const {
   getUserProperties, 
   getUserPropertyCount,
   getTotalPropertyValue,
-  buyRandomProperty, 
+  buyRandomProperty,
+  buyLevel1Property,
   sellProperty,
   getUserCards,
   useCard,
@@ -14,7 +15,15 @@ const {
   getAllPropertyCooldowns,
   calculateCardEffect,
   getTierName,
-  getTierEmoji
+  getTierEmoji,
+  // Upgrade system
+  getUpgradeCosts,
+  getPropertyUpgradeStatus,
+  startUpgradeStage,
+  completeUpgradeStage,
+  performPropertyUpgrade,
+  getEffectivePropertyValue,
+  UPGRADE_STAGES
 } = require('../property');
 const { getPortfolio, calculateStockPrice } = require('../database');
 
@@ -79,17 +88,28 @@ module.exports = {
       if (action === 'back') {
         return showPropertyPanel(interaction, guildId, userId, settings, true);
       }
+      if (action === 'upgrades') {
+        return showUpgradesPanel(interaction, guildId, userId, settings);
+      }
       // Rent button for specific property: property_panel_rent_<propertyId>
       if (action.startsWith('rent_')) {
         const propertyId = parseInt(action.replace('rent_', ''));
         return handleRentButton(interaction, guildId, userId, settings, propertyId);
+      }
+      // Upgrade buttons: property_panel_upgrade_<stage>_<ownedPropertyId>
+      if (action.startsWith('upgrade_')) {
+        const parts = action.replace('upgrade_', '').split('_');
+        const stage = parts[0];
+        const ownedPropertyId = parseInt(parts[1]);
+        return handleUpgradeButton(interaction, guildId, userId, settings, stage, ownedPropertyId);
       }
     }
   },
   handleRentSelect,
   handleSellSelect,
   handleSellConfirm,
-  handleSellCancel
+  handleSellCancel,
+  handleUpgradeSelect
 };
 
 // Format remaining time as human-readable string
@@ -237,6 +257,12 @@ async function showPropertyPanel(interaction, guildId, userId, settings, isUpdat
       .setEmoji('🏠')
       .setStyle(ButtonStyle.Primary)
       .setDisabled(userProperties.length >= settings.propertyLimit),
+    new ButtonBuilder()
+      .setCustomId('property_panel_upgrades')
+      .setLabel('Upgrades')
+      .setEmoji('🔨')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(userProperties.length === 0),
     new ButtonBuilder()
       .setCustomId('property_panel_sell')
       .setLabel('Sell Property')
@@ -399,8 +425,8 @@ async function handleBuyButton(interaction, guildId, userId, settings) {
   // Deduct fee from cash
   await economy.removeMoney(guildId, userId, settings.purchaseFee, 'Property purchase');
   
-  // Buy random property
-  const property = buyRandomProperty(guildId, userId);
+  // Buy Level 1 property (always starts at Rusty Trailer)
+  const property = buyLevel1Property(guildId, userId);
   
   if (!property) {
     // Refund if something went wrong
@@ -427,7 +453,7 @@ async function handleBuyButton(interaction, guildId, userId, settings) {
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71)
     .setTitle('🏠 Property Purchased!')
-    .setDescription(`**${interaction.user.displayName}** is now the proud owner of **${property.name}**!`)
+    .setDescription(`**${interaction.user.displayName}** is now the proud owner of **${property.name}**!\n\n💡 *Tip: Use the **Upgrades** button to improve your property!*`)
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .addFields(
       { name: 'Tier', value: `${getTierEmoji(property.tier)} ${getTierName(property.tier)}`, inline: true },
@@ -603,6 +629,266 @@ async function handleSellCancel(interaction) {
   
   // Just go back to the panel
   return showPropertyPanel(interaction, guildId, userId, settings, true);
+}
+
+// ============ UPGRADE SYSTEM ============
+
+// Format time as human-readable
+function formatUpgradeTime(hours) {
+  if (hours < 1) {
+    return `${Math.round(hours * 60)}m`;
+  } else if (hours < 24) {
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  } else {
+    const days = Math.floor(hours / 24);
+    const h = Math.round(hours % 24);
+    return h > 0 ? `${days}d ${h}h` : `${days}d`;
+  }
+}
+
+// Get stage emoji
+function getStageEmoji(stage) {
+  const emojis = {
+    renovate: '🔧',
+    remodel: '🏗️',
+    expand: '📐',
+    upgrade: '⬆️'
+  };
+  return emojis[stage] || '❓';
+}
+
+// Get stage display name
+function getStageName(stage) {
+  const names = {
+    renovate: 'Renovate',
+    remodel: 'Remodel',
+    expand: 'Expand',
+    upgrade: 'Upgrade'
+  };
+  return names[stage] || stage;
+}
+
+// Show the upgrades panel with all properties and their upgrade status
+async function showUpgradesPanel(interaction, guildId, userId, settings, isUpdate = false) {
+  const userProperties = getUserProperties(guildId, userId);
+  
+  let balanceData = { cash: 0, bank: 0, total: 0 };
+  if (isEconomyEnabled()) {
+    balanceData = await economy.getBalance(guildId, userId);
+  }
+  
+  const embed = new EmbedBuilder()
+    .setColor(0xf39c12)
+    .setTitle('🔨 Property Upgrades')
+    .setDescription('Select a property to upgrade. Each stage costs currency and time.\n\n' +
+      '**Stages:** 🔧 Renovate → 🏗️ Remodel → 📐 Expand → ⬆️ Upgrade\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━')
+    .setFooter({ text: `💰 Balance: ${Math.round(balanceData.total).toLocaleString()} ` })
+    .setTimestamp();
+  
+  // Build property list with upgrade status
+  const propertyList = userProperties.map((prop, index) => {
+    const status = getPropertyUpgradeStatus(guildId, userId, prop.id);
+    const effectiveValue = getEffectivePropertyValue(guildId, userId, prop.id, prop.value);
+    const { costs, times } = getUpgradeCosts(prop.property_id);
+    
+    let statusText = '';
+    if (status.isInProgress) {
+      const remainingMs = status.stageCompletesAt - Date.now();
+      const remainingHours = remainingMs / (1000 * 60 * 60);
+      statusText = `⏳ ${getStageName(status.currentStage)} in progress (${formatUpgradeTime(remainingHours)} left)`;
+    } else if (status.nextStage) {
+      const nextCost = costs[status.nextStage];
+      const nextTime = times[status.nextStage];
+      if (status.nextStage === 'upgrade' && prop.property_id >= 15) {
+        statusText = `✅ **MAX LEVEL** - Fully upgraded!`;
+      } else {
+        statusText = `${getStageEmoji(status.nextStage)} Ready: **${getStageName(status.nextStage)}** — ${nextCost.toLocaleString()} ${CURRENCY} / ${formatUpgradeTime(nextTime)}`;
+      }
+    } else {
+      statusText = '✅ All stages complete!';
+    }
+    
+    // Show completed stages
+    const stages = [];
+    if (status.renovateComplete) stages.push('🔧');
+    if (status.remodelComplete) stages.push('🏗️');
+    if (status.expandComplete) stages.push('📐');
+    const stageProgress = stages.length > 0 ? stages.join('') : '○○○';
+    
+    const remodelBonus = status.remodelValueBonus > 0 ? ` (+${status.remodelValueBonus.toLocaleString()})` : '';
+    const taxShelter = status.expandComplete ? ' 🛡️' : '';
+    
+    return `**${index + 1}.** ${getTierEmoji(prop.tier)} **${prop.name}** [${stageProgress}]${taxShelter}\n` +
+           `   💵 ${effectiveValue.toLocaleString()}${remodelBonus} ${CURRENCY}\n` +
+           `   ${statusText}`;
+  }).join('\n\n');
+  
+  embed.addFields({ name: 'Your Properties', value: propertyList || 'No properties owned' });
+  
+  // Build select menu for choosing property to upgrade
+  const rows = [];
+  
+  if (userProperties.length > 0) {
+    const upgradeOptions = userProperties
+      .filter(prop => {
+        const status = getPropertyUpgradeStatus(guildId, userId, prop.id);
+        // Can upgrade if not in progress and has a next stage (unless max level upgrade)
+        return !status.isInProgress && status.nextStage && 
+               !(status.nextStage === 'upgrade' && prop.property_id >= 15);
+      })
+      .slice(0, 25)
+      .map(prop => {
+        const status = getPropertyUpgradeStatus(guildId, userId, prop.id);
+        const { costs, times } = getUpgradeCosts(prop.property_id);
+        const nextCost = costs[status.nextStage];
+        const nextTime = times[status.nextStage];
+        
+        return {
+          label: `${prop.name} - ${getStageName(status.nextStage)}`,
+          description: `${nextCost.toLocaleString()} ${CURRENCY} / ${formatUpgradeTime(nextTime)}`,
+          value: `${status.nextStage}_${prop.id}`,
+          emoji: getStageEmoji(status.nextStage)
+        };
+      });
+    
+    if (upgradeOptions.length > 0) {
+      const selectRow = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('property_upgrade_select')
+          .setPlaceholder('🔨 Select an upgrade to start...')
+          .addOptions(upgradeOptions)
+      );
+      rows.push(selectRow);
+    }
+  }
+  
+  // Back button
+  const backRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('property_panel_back')
+      .setLabel('Back to Properties')
+      .setEmoji('◀️')
+      .setStyle(ButtonStyle.Secondary)
+  );
+  rows.push(backRow);
+  
+  if (isUpdate) {
+    await interaction.update({ embeds: [embed], components: rows });
+  } else {
+    await interaction.update({ embeds: [embed], components: rows });
+  }
+}
+
+// Handle upgrade select menu
+async function handleUpgradeSelect(interaction) {
+  const guildId = interaction.guildId;
+  const userId = interaction.user.id;
+  const settings = getPropertySettings(guildId);
+  
+  const [stage, ownedPropertyIdStr] = interaction.values[0].split('_');
+  const ownedPropertyId = parseInt(ownedPropertyIdStr);
+  
+  // Get the property
+  const userProperties = getUserProperties(guildId, userId);
+  const property = userProperties.find(p => p.id === ownedPropertyId);
+  
+  if (!property) {
+    return interaction.reply({ content: '❌ Property not found.', flags: 64 });
+  }
+  
+  // Get costs
+  const { costs, times } = getUpgradeCosts(property.property_id);
+  const cost = costs[stage];
+  const time = times[stage];
+  
+  // Check balance
+  if (!isEconomyEnabled()) {
+    return interaction.reply({ content: '❌ Currency system not available.', flags: 64 });
+  }
+  
+  const balanceData = await economy.getBalance(guildId, userId);
+  if (balanceData.total < cost) {
+    return interaction.reply({
+      content: `❌ Insufficient funds! You need **${cost.toLocaleString()}** ${CURRENCY} but only have **${Math.round(balanceData.total).toLocaleString()}** ${CURRENCY}.`,
+      flags: 64
+    });
+  }
+  
+  // Deduct cost
+  await economy.removeFromTotal(guildId, userId, cost, `Property ${stage}: ${property.name}`);
+  
+  // Start the upgrade
+  const result = startUpgradeStage(guildId, userId, ownedPropertyId, stage, property.property_id);
+  
+  if (!result.success) {
+    // Refund
+    await economy.addMoney(guildId, userId, cost, `Upgrade refund: ${property.name}`);
+    return interaction.reply({ content: `❌ ${result.error}`, flags: 64 });
+  }
+  
+  // Get benefit description
+  let benefitText = '';
+  if (stage === 'renovate') {
+    benefitText = 'Unlocks Remodel stage';
+  } else if (stage === 'remodel') {
+    const properties = getProperties(guildId);
+    const nextProp = properties.find(p => p.id === property.property_id + 1);
+    if (nextProp) {
+      const bonus = Math.floor((nextProp.value - property.value) * 0.5);
+      benefitText = `+${bonus.toLocaleString()} ${CURRENCY} property value`;
+    } else {
+      const bonus = Math.floor(property.value * 0.15);
+      benefitText = `+${bonus.toLocaleString()} ${CURRENCY} property value (15%)`;
+    }
+  } else if (stage === 'expand') {
+    benefitText = 'Property excluded from wealth tax';
+  } else if (stage === 'upgrade') {
+    const properties = getProperties(guildId);
+    const nextProp = properties.find(p => p.id === property.property_id + 1);
+    benefitText = nextProp ? `Upgrades to ${nextProp.name}` : 'Unknown';
+  }
+  
+  const embed = new EmbedBuilder()
+    .setColor(0xf39c12)
+    .setTitle(`${getStageEmoji(stage)} ${getStageName(stage)} Started!`)
+    .setDescription(`**${property.name}** is now being upgraded.`)
+    .addFields(
+      { name: '💰 Cost', value: `${cost.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '⏱️ Time', value: formatUpgradeTime(time), inline: true },
+      { name: '✨ Benefit', value: benefitText, inline: true }
+    )
+    .setFooter({ text: `Completes at: ${new Date(result.completesAt).toLocaleString()}` })
+    .setTimestamp();
+  
+  await interaction.update({ embeds: [embed], components: [] });
+  
+  // Auto-complete after timer (schedule completion check)
+  setTimeout(async () => {
+    const completeResult = completeUpgradeStage(guildId, userId, ownedPropertyId, property.property_id);
+    
+    // If it was an upgrade stage, perform the actual property upgrade
+    if (completeResult.success && stage === 'upgrade') {
+      performPropertyUpgrade(guildId, userId, ownedPropertyId, property.property_id);
+    }
+  }, time * 60 * 60 * 1000 + 1000); // Add 1 second buffer
+  
+  // After 3 seconds, show the upgrades panel again
+  setTimeout(async () => {
+    try {
+      await showUpgradesPanel(interaction, guildId, userId, settings, false);
+    } catch (e) {
+      // Interaction may have expired
+    }
+  }, 3000);
+}
+
+// Handle upgrade button click (from property buttons - not currently used)
+async function handleUpgradeButton(interaction, guildId, userId, settings, stage, ownedPropertyId) {
+  // This is called from button clicks - redirect to the select menu flow
+  return showUpgradesPanel(interaction, guildId, userId, settings, true);
 }
 
 async function handleList(interaction, guildId, targetUserId, targetUser) {

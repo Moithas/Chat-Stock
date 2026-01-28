@@ -357,7 +357,7 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
       }
       
       removeFromInventory(guildId, userId, itemId, 1);
-      recordRoleGrant(guildId, userId, roleId, shopItem.duration_hours);
+      recordRoleGrant(guildId, userId, roleId, shopItem.id, shopItem.name, shopItem.duration_hours);
       
       // Refresh inventory
       state.inventory = getUserInventory(guildId, userId);
@@ -398,12 +398,12 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
   const components = createInventoryPanelComponents(state.inventory, state.effects, state.page, state.tab, true);
   await response.edit({ embeds: [embed], components });
   
-  const effectName = getEffectTypeName(result.effectType);
-  const durationStr = formatDuration(result.duration * 60 * 60 * 1000);
+  const effectName = getEffectTypeName(result.effect.type);
+  const durationStr = formatDuration(result.effect.durationHours * 60 * 60 * 1000);
   
   return i.editReply({ 
     content: `✅ **Used ${item.emoji} ${item.name}!**\n\n` +
-      `Effect: **${effectName}** (+${result.value}%)\n` +
+      `Effect: **${effectName}** (+${result.effect.value}%)\n` +
       `Duration: ⏱️ ${durationStr}\n\n` +
       `View your active effects in the **Effects** tab!`
   });

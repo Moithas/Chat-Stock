@@ -5,6 +5,16 @@ let db = null;
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
+// Lazy-load items module to avoid circular dependency
+function getXpBoostValue(guildId, userId) {
+  try {
+    const { getEffectValue } = require('./items');
+    return getEffectValue(guildId, userId, 'xp_boost') || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
 // Level thresholds (XP needed to reach each level)
 const LEVEL_THRESHOLDS = [
   0,       // Level 0: 0 XP
@@ -323,7 +333,7 @@ function addXp(guildId, userId, skill, amount, success, amountStolen = 0) {
   const settings = getSkillSettings(guildId);
   const userSkills = getUserSkills(guildId, userId);
   
-  // Calculate XP to award
+  // Calculate base XP to award
   let xpGained = 0;
   if (success) {
     xpGained = settings.successXpBase;
@@ -331,6 +341,12 @@ function addXp(guildId, userId, skill, amount, success, amountStolen = 0) {
     xpGained += bonus;
   } else {
     xpGained = settings.failureXp;
+  }
+  
+  // Apply XP boost from items (if active)
+  const xpBoostPercent = getXpBoostValue(guildId, userId);
+  if (xpBoostPercent > 0) {
+    xpGained = Math.floor(xpGained * (1 + xpBoostPercent / 100));
   }
   
   const currentXp = skill === 'hack' ? userSkills.hackXp : userSkills.robXp;
@@ -352,7 +368,8 @@ function addXp(guildId, userId, skill, amount, success, amountStolen = 0) {
     xpGained,
     levelUp: newLevel > currentLevel,
     newLevel,
-    totalXp: newXp
+    totalXp: newXp,
+    xpBoostPercent
   };
 }
 

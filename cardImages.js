@@ -581,10 +581,867 @@ async function generateBlackjackTableImage(game) {
   return canvas.toBuffer('image/png');
 }
 
+// Generate In Between game image showing pole cards and optional third card
+async function generateInBetweenImage(pole1, pole2, thirdCard, playerName, isResolved = false) {
+  const safePlayerName = sanitizeDisplayName(playerName);
+  
+  // Layout dimensions
+  const cardWidth = 120;
+  const cardHeight = 168;
+  const spacing = 40;
+  const questionMarkWidth = 80;
+  
+  // Calculate total width based on whether we have a third card
+  const hasThird = thirdCard !== null;
+  const totalWidth = hasThird 
+    ? PADDING * 2 + cardWidth * 3 + spacing * 2 
+    : PADDING * 2 + cardWidth * 2 + spacing + questionMarkWidth + spacing;
+  
+  const labelHeight = 35;
+  const totalHeight = PADDING * 2 + labelHeight + cardHeight + 30;
+  
+  const canvas = createCanvas(totalWidth, totalHeight);
+  const ctx = canvas.getContext('2d');
+  
+  // Dark background with rounded corners
+  ctx.fillStyle = '#36393f';
+  roundRect(ctx, 0, 0, totalWidth, totalHeight, 12);
+  ctx.fill();
+  
+  // Title
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 22px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('IN BETWEEN', totalWidth / 2, PADDING + 20);
+  
+  // Card Y position
+  const cardY = PADDING + labelHeight + 10;
+  
+  // Draw pole 1
+  const pole1X = PADDING;
+  const pole1Url = getCardImageUrl(pole1);
+  const pole1Img = await loadCardImage(pole1Url);
+  if (pole1Img) {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 3;
+    ctx.shadowOffsetY = 3;
+    
+    ctx.save();
+    roundRect(ctx, pole1X, cardY, cardWidth, cardHeight, 6);
+    ctx.clip();
+    ctx.drawImage(pole1Img, pole1X, cardY, cardWidth, cardHeight);
+    ctx.restore();
+    ctx.shadowColor = 'transparent';
+  }
+  
+  // Draw third card or question mark in center
+  const centerX = pole1X + cardWidth + spacing;
+  
+  if (hasThird) {
+    // Draw the revealed third card
+    const thirdUrl = getCardImageUrl(thirdCard);
+    const thirdImg = await loadCardImage(thirdUrl);
+    if (thirdImg) {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetX = 3;
+      ctx.shadowOffsetY = 3;
+      
+      // Highlight the third card
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 3;
+      roundRect(ctx, centerX - 2, cardY - 2, cardWidth + 4, cardHeight + 4, 8);
+      ctx.stroke();
+      
+      ctx.save();
+      roundRect(ctx, centerX, cardY, cardWidth, cardHeight, 6);
+      ctx.clip();
+      ctx.drawImage(thirdImg, centerX, cardY, cardWidth, cardHeight);
+      ctx.restore();
+      ctx.shadowColor = 'transparent';
+    }
+  } else {
+    // Draw question mark placeholder
+    const qmX = centerX + (cardWidth - questionMarkWidth) / 2;
+    ctx.fillStyle = '#2f3136';
+    roundRect(ctx, qmX, cardY + 20, questionMarkWidth, cardHeight - 40, 8);
+    ctx.fill();
+    
+    ctx.strokeStyle = '#5865f2';
+    ctx.lineWidth = 2;
+    roundRect(ctx, qmX, cardY + 20, questionMarkWidth, cardHeight - 40, 8);
+    ctx.stroke();
+    
+    ctx.fillStyle = '#5865f2';
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('?', qmX + questionMarkWidth / 2, cardY + cardHeight / 2 + 15);
+  }
+  
+  // Draw pole 2
+  const pole2X = hasThird ? centerX + cardWidth + spacing : centerX + questionMarkWidth + spacing;
+  const pole2Url = getCardImageUrl(pole2);
+  const pole2Img = await loadCardImage(pole2Url);
+  if (pole2Img) {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 3;
+    ctx.shadowOffsetY = 3;
+    
+    ctx.save();
+    roundRect(ctx, pole2X, cardY, cardWidth, cardHeight, 6);
+    ctx.clip();
+    ctx.drawImage(pole2Img, pole2X, cardY, cardWidth, cardHeight);
+    ctx.restore();
+    ctx.shadowColor = 'transparent';
+  }
+  
+  // Player name at bottom
+  ctx.fillStyle = '#99aab5';
+  ctx.font = '14px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(safePlayerName, totalWidth / 2, totalHeight - 10);
+  
+  return canvas.toBuffer('image/png');
+}
+
+// ==================== LET IT RIDE TABLE ====================
+
+async function generateLetItRideImage(playerCards, communityCards, revealedCommunity, betAmount, bet1, bet2, bet3, playerName, result = null) {
+  const safePlayerName = sanitizeDisplayName(playerName);
+  
+  // Table dimensions - larger for better visibility
+  const TABLE_WIDTH = 950;
+  const TABLE_HEIGHT = 950;
+  
+  // Much larger cards for better visibility
+  const LIR_CARD_WIDTH = 180;
+  const LIR_CARD_HEIGHT = 252;
+  
+  const canvas = createCanvas(TABLE_WIDTH, TABLE_HEIGHT);
+  const ctx = canvas.getContext('2d');
+  
+  // Draw table background with green felt texture
+  drawLetItRideFelt(ctx, TABLE_WIDTH, TABLE_HEIGHT);
+  
+  // Draw payout table on the left side
+  drawPayoutTable(ctx, 20, 30);
+  
+  // Draw community cards area (top center)
+  const communityY = 80;
+  const communitySpacing = LIR_CARD_WIDTH + 40;
+  const communityStartX = TABLE_WIDTH / 2 - communitySpacing / 2;
+  
+  // Label for community cards
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('COMMUNITY CARDS', TABLE_WIDTH / 2, communityY - 20);
+  
+  for (let i = 0; i < 2; i++) {
+    const x = communityStartX + (i * communitySpacing) - LIR_CARD_WIDTH / 2;
+    if (i < revealedCommunity) {
+      // Show face-up card
+      await drawCardScaled(ctx, communityCards[i], x, communityY, LIR_CARD_WIDTH, LIR_CARD_HEIGHT);
+    } else {
+      // Show face-down card
+      await drawCardBackScaled(ctx, x, communityY, LIR_CARD_WIDTH, LIR_CARD_HEIGHT);
+    }
+  }
+  
+  // Draw player's 3 cards in the middle area
+  const playerCardY = communityY + LIR_CARD_HEIGHT + 80;
+  const playerCardSpacing = LIR_CARD_WIDTH + 25;
+  const playerStartX = TABLE_WIDTH / 2 - playerCardSpacing;
+  
+  // Label for player cards
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('YOUR CARDS', TABLE_WIDTH / 2, playerCardY - 20);
+  
+  for (let i = 0; i < playerCards.length; i++) {
+    const card = playerCards[i];
+    const x = playerStartX + (i * playerCardSpacing) - LIR_CARD_WIDTH / 2;
+    await drawCardScaled(ctx, card, x, playerCardY, LIR_CARD_WIDTH, LIR_CARD_HEIGHT);
+  }
+  
+  // Draw betting circles - positioned halfway between player cards and original bottom position
+  const playerCardsBottom = playerCardY + LIR_CARD_HEIGHT;
+  const originalCircleY = TABLE_HEIGHT - 120;
+  const circleY = playerCardsBottom + (originalCircleY - playerCardsBottom) / 2;
+  const circleSpacing = 140;
+  const startX = TABLE_WIDTH / 2 - circleSpacing;
+  
+  // Bet circle labels and positions (from left to right: $, 2, 1)
+  const betCircles = [
+    { x: startX, label: '$', active: bet3, betNum: 3 },           // Always required
+    { x: startX + circleSpacing, label: '2', active: bet2, betNum: 2 },
+    { x: startX + circleSpacing * 2, label: '1', active: bet1, betNum: 1 }
+  ];
+  
+  for (const circle of betCircles) {
+    drawBetCircle(ctx, circle.x, circleY, circle.label, circle.active, betAmount);
+  }
+  
+  // Draw result if game is resolved
+  if (result) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    roundRect(ctx, TABLE_WIDTH / 2 - 180, TABLE_HEIGHT / 2 - 35, 360, 70, 12);
+    ctx.fill();
+    
+    ctx.fillStyle = result.payout > 0 ? '#4CAF50' : '#F44336';
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(result.rank, TABLE_WIDTH / 2, TABLE_HEIGHT / 2 + 10);
+  }
+  
+  // Player name at bottom
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '32px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(safePlayerName, TABLE_WIDTH / 2, TABLE_HEIGHT - 20);
+  
+  return canvas.toBuffer('image/png');
+}
+
+function drawLetItRideFelt(ctx, width, height) {
+  // Base green felt
+  const gradient = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width / 2);
+  gradient.addColorStop(0, '#1B5E20');  // Lighter center
+  gradient.addColorStop(0.7, '#145214'); // Medium
+  gradient.addColorStop(1, '#0D3B0D');   // Darker edges
+  
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+  
+  // Add subtle texture pattern
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < width; i += 20) {
+    ctx.beginPath();
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i, height);
+    ctx.stroke();
+  }
+  for (let i = 0; i < height; i += 20) {
+    ctx.beginPath();
+    ctx.moveTo(0, i);
+    ctx.lineTo(width, i);
+    ctx.stroke();
+  }
+  
+  // Table border/rail
+  ctx.strokeStyle = '#3E2723';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, width - 8, height - 8);
+  
+  ctx.strokeStyle = '#5D4037';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(8, 8, width - 16, height - 16);
+}
+
+function drawPayoutTable(ctx, x, y) {
+  const payouts = [
+    ['Royal Flush', '1000 to 1'],
+    ['Straight Flush', '200 to 1'],
+    ['Four of a Kind', '50 to 1'],
+    ['Full House', '11 to 1'],
+    ['Flush', '8 to 1'],
+    ['Straight', '5 to 1'],
+    ['Three of a Kind', '3 to 1'],
+    ['Two Pair', '2 to 1'],
+    ['10s or Better', '1 to 1']
+  ];
+  
+  // Background panel (40% larger: 170->238, row height 22->31, padding 30->42)
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.fillRect(x, y, 238, payouts.length * 31 + 42);
+  
+  // Title (40% larger font: 14->20)
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 22px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('PAYOUT TABLE', x + 119, y + 26);
+  
+  // Payouts (40% larger font: 12->17)
+  ctx.font = '20px Arial';
+  ctx.textAlign = 'left';
+  
+  for (let i = 0; i < payouts.length; i++) {
+    const [hand, payout] = payouts[i];
+    const rowY = y + 54 + (i * 31);
+    
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(hand, x + 11, rowY);
+    
+    ctx.textAlign = 'right';
+    ctx.fillText(payout, x + 227, rowY);
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawBetCircle(ctx, x, y, label, isActive, betAmount) {
+  const radius = 50;
+  
+  // Outer circle border
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = isActive ? '#FFD700' : '#666666';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  
+  // Inner fill based on active state
+  if (isActive) {
+    ctx.fillStyle = 'rgba(30, 60, 30, 0.8)';
+  } else {
+    ctx.fillStyle = 'rgba(40, 40, 40, 0.8)';
+  }
+  ctx.fill();
+  
+  if (isActive && betAmount > 0) {
+    // Draw flat top-down chip stack inside the circle
+    drawFlatChipStack(ctx, x, y, betAmount, radius - 10);
+  } else {
+    // Empty circle with label when bet is pulled
+    ctx.fillStyle = '#666666';
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x, y);
+    ctx.textBaseline = 'alphabetic';
+    
+    // Show "PULLED" text below circle
+    ctx.fillStyle = '#FF5252';
+    ctx.font = 'bold 18px Arial';
+    ctx.fillText('PULLED', x, y + radius + 22);
+  }
+  
+  // Circle label below (when active)
+  if (isActive) {
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('BET ' + label, x, y + radius + 22);
+    
+    // Amount below label
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px Arial';
+    ctx.fillText(betAmount.toLocaleString(), x, y + radius + 44);
+  }
+}
+
+function drawFlatChipStack(ctx, x, y, amount, maxRadius) {
+  // Determine chip breakdown
+  const chips = getChipBreakdown(amount);
+  
+  // Draw chips from top-down view, stacked with slight offset for 3D effect
+  const baseRadius = Math.min(maxRadius, 38);
+  const offsetStep = 2; // Slight offset for each chip layer
+  
+  // Calculate total chips to display (max 8 for visual clarity)
+  let totalChips = 0;
+  for (const chip of chips) {
+    totalChips += Math.min(chip.count, 3);
+  }
+  totalChips = Math.min(totalChips, 8);
+  
+  // Draw chips from bottom of stack to top
+  let chipIndex = 0;
+  const chipsToRender = [];
+  
+  // Collect chips to render (reversed so highest value on top)
+  for (let i = chips.length - 1; i >= 0; i--) {
+    const chip = chips[i];
+    for (let j = 0; j < Math.min(chip.count, 3) && chipsToRender.length < 8; j++) {
+      chipsToRender.push(chip);
+    }
+  }
+  
+  // Draw from bottom to top
+  for (let i = 0; i < chipsToRender.length; i++) {
+    const chip = chipsToRender[i];
+    const offsetY = (chipsToRender.length - 1 - i) * offsetStep;
+    drawFlatChip(ctx, x, y + offsetY, baseRadius, chip.color, chip.edgeColor, chip.value);
+  }
+}
+
+function getChipBreakdown(amount) {
+  const chipValues = [
+    { value: 100000, color: '#E040FB', edgeColor: '#AA00FF' },  // Purple/Magenta - 100k
+    { value: 25000, color: '#FFD700', edgeColor: '#FFA000' },   // Gold - 25k
+    { value: 5000, color: '#E91E63', edgeColor: '#C2185B' },    // Pink - 5k
+    { value: 1000, color: '#FF9800', edgeColor: '#F57C00' },    // Orange - 1k
+    { value: 500, color: '#9C27B0', edgeColor: '#7B1FA2' },     // Purple - 500
+    { value: 100, color: '#212121', edgeColor: '#000000' },     // Black - 100
+    { value: 25, color: '#4CAF50', edgeColor: '#388E3C' },      // Green - 25
+    { value: 5, color: '#F44336', edgeColor: '#D32F2F' },       // Red - 5
+    { value: 1, color: '#FFFFFF', edgeColor: '#BDBDBD' }        // White - 1
+  ];
+  
+  const chips = [];
+  let remaining = amount;
+  
+  for (const chipType of chipValues) {
+    if (remaining >= chipType.value) {
+      const count = Math.floor(remaining / chipType.value);
+      chips.push({ ...chipType, count });
+      remaining -= count * chipType.value;
+    }
+  }
+  
+  return chips;
+}
+
+function drawFlatChip(ctx, x, y, radius, color, edgeColor, value) {
+  // Outer edge/shadow for depth
+  ctx.beginPath();
+  ctx.arc(x, y, radius + 2, 0, Math.PI * 2);
+  ctx.fillStyle = edgeColor;
+  ctx.fill();
+  
+  // Main chip face (circular, top-down view)
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  
+  // Edge pattern - alternating colored segments around the rim
+  const segmentColor = color === '#FFFFFF' ? '#BDBDBD' : '#FFFFFF';
+  const numSegments = 8;
+  const innerRadius = radius * 0.82;
+  const outerRadius = radius * 0.98;
+  
+  for (let i = 0; i < numSegments; i++) {
+    const startAngle = (i / numSegments) * Math.PI * 2 - Math.PI / 2;
+    const endAngle = startAngle + (Math.PI / numSegments) * 0.7;
+    
+    ctx.beginPath();
+    ctx.arc(x, y, outerRadius, startAngle, endAngle);
+    ctx.arc(x, y, innerRadius, endAngle, startAngle, true);
+    ctx.closePath();
+    ctx.fillStyle = segmentColor;
+    ctx.fill();
+  }
+  
+  // Inner decorative ring
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.55, 0, Math.PI * 2);
+  ctx.strokeStyle = segmentColor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  
+  // Center circle with value indicator
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.35, 0, Math.PI * 2);
+  ctx.fillStyle = edgeColor;
+  ctx.fill();
+  
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.3, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  
+  // Value text in center (abbreviated)
+  const valueText = value >= 1000 ? Math.floor(value / 1000) + 'K' : value.toString();
+  ctx.fillStyle = color === '#FFFFFF' ? '#333333' : '#FFFFFF';
+  ctx.font = `bold ${radius * 0.35}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(valueText, x, y);
+  ctx.textBaseline = 'alphabetic';
+}
+
+async function drawCard(ctx, card, x, y) {
+  try {
+    const cardImage = await getCardImage(card);
+    ctx.drawImage(cardImage, x, y, CARD_WIDTH, CARD_HEIGHT);
+  } catch (err) {
+    // Fallback: draw a simple card representation
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(x, y, CARD_WIDTH, CARD_HEIGHT);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, CARD_WIDTH, CARD_HEIGHT);
+    
+    const suitSymbols = { 'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣' };
+    const suitColors = { 'S': '#000000', 'H': '#FF0000', 'D': '#FF0000', 'C': '#000000' };
+    
+    ctx.fillStyle = suitColors[card.suit];
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${card.rank}${suitSymbols[card.suit]}`, x + CARD_WIDTH / 2, y + CARD_HEIGHT / 2);
+  }
+}
+
+async function drawCardScaled(ctx, card, x, y, width, height) {
+  try {
+    const cardImage = await getCardImage(card);
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    
+    ctx.save();
+    roundRect(ctx, x, y, width, height, 6);
+    ctx.clip();
+    ctx.drawImage(cardImage, x, y, width, height);
+    ctx.restore();
+    
+    ctx.shadowColor = 'transparent';
+  } catch (err) {
+    // Fallback: draw a simple card representation
+    ctx.fillStyle = '#FFFFFF';
+    roundRect(ctx, x, y, width, height, 6);
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    roundRect(ctx, x, y, width, height, 6);
+    ctx.stroke();
+    
+    const suitSymbols = { 'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣' };
+    const suitColors = { 'S': '#000000', 'H': '#FF0000', 'D': '#FF0000', 'C': '#000000' };
+    
+    ctx.fillStyle = suitColors[card.suit];
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${card.rank}${suitSymbols[card.suit]}`, x + width / 2, y + height / 2 + 5);
+  }
+}
+
+async function drawCardBack(ctx, x, y) {
+  // Draw card back design
+  ctx.fillStyle = '#1565C0';
+  ctx.fillRect(x, y, CARD_WIDTH, CARD_HEIGHT);
+  
+  // Border
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(x + 5, y + 5, CARD_WIDTH - 10, CARD_HEIGHT - 10);
+  
+  // Pattern
+  ctx.fillStyle = '#1976D2';
+  const patternSize = 15;
+  for (let px = x + 10; px < x + CARD_WIDTH - 10; px += patternSize) {
+    for (let py = y + 10; py < y + CARD_HEIGHT - 10; py += patternSize) {
+      if ((Math.floor((px - x) / patternSize) + Math.floor((py - y) / patternSize)) % 2 === 0) {
+        ctx.fillRect(px, py, patternSize - 2, patternSize - 2);
+      }
+    }
+  }
+  
+  // Center diamond
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.moveTo(x + CARD_WIDTH / 2, y + CARD_HEIGHT / 2 - 20);
+  ctx.lineTo(x + CARD_WIDTH / 2 + 15, y + CARD_HEIGHT / 2);
+  ctx.lineTo(x + CARD_WIDTH / 2, y + CARD_HEIGHT / 2 + 20);
+  ctx.lineTo(x + CARD_WIDTH / 2 - 15, y + CARD_HEIGHT / 2);
+  ctx.closePath();
+  ctx.fill();
+}
+
+async function drawCardBackScaled(ctx, x, y, width, height) {
+  // Draw card back design with shadow
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+  ctx.shadowBlur = 5;
+  ctx.shadowOffsetX = 2;
+  ctx.shadowOffsetY = 2;
+  
+  ctx.fillStyle = '#1565C0';
+  roundRect(ctx, x, y, width, height, 6);
+  ctx.fill();
+  
+  ctx.shadowColor = 'transparent';
+  
+  // Border
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 2;
+  roundRect(ctx, x + 4, y + 4, width - 8, height - 8, 4);
+  ctx.stroke();
+  
+  // Pattern
+  ctx.fillStyle = '#1976D2';
+  const patternSize = Math.min(12, width / 8);
+  for (let px = x + 8; px < x + width - 8; px += patternSize) {
+    for (let py = y + 8; py < y + height - 8; py += patternSize) {
+      if ((Math.floor((px - x) / patternSize) + Math.floor((py - y) / patternSize)) % 2 === 0) {
+        ctx.fillRect(px, py, patternSize - 2, patternSize - 2);
+      }
+    }
+  }
+  
+  // Center diamond
+  const diamondSize = Math.min(12, width / 8);
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.moveTo(x + width / 2, y + height / 2 - diamondSize);
+  ctx.lineTo(x + width / 2 + diamondSize, y + height / 2);
+  ctx.lineTo(x + width / 2, y + height / 2 + diamondSize);
+  ctx.lineTo(x + width / 2 - diamondSize, y + height / 2);
+  ctx.closePath();
+  ctx.fill();
+}
+
+async function getCardImage(card) {
+  const key = `${card.rank}${card.suit}`;
+  
+  if (imageCache.has(key)) {
+    return imageCache.get(key);
+  }
+  
+  // Try to load from API
+  const suitMap = { 'S': 'S', 'H': 'H', 'D': 'D', 'C': 'C' };
+  const rankMap = { 
+    'A': 'A', '2': '2', '3': '3', '4': '4', '5': '5', 
+    '6': '6', '7': '7', '8': '8', '9': '9', '10': '0', 
+    'J': 'J', 'Q': 'Q', 'K': 'K' 
+  };
+  
+  const code = rankMap[card.rank] + suitMap[card.suit];
+  const url = `https://deckofcardsapi.com/static/img/${code}.png`;
+  
+  try {
+    const image = await loadImage(url);
+    imageCache.set(key, image);
+    return image;
+  } catch (err) {
+    throw new Error(`Failed to load card image: ${key}`);
+  }
+}
+
+// ==================== THREE CARD POKER TABLE ====================
+
+async function generateThreeCardPokerImage(playerCards, dealerCards, revealDealer, anteBet, pairPlusBet, sixCardBet, anteResolved, playBet, playerName, result = null) {
+  const safePlayerName = sanitizeDisplayName(playerName);
+  
+  // Table dimensions
+  const TABLE_WIDTH = 900;
+  const TABLE_HEIGHT = 800;
+  
+  // Card dimensions
+  const TCP_CARD_WIDTH = 160;
+  const TCP_CARD_HEIGHT = 224;
+  
+  const canvas = createCanvas(TABLE_WIDTH, TABLE_HEIGHT);
+  const ctx = canvas.getContext('2d');
+  
+  // Draw table background with green felt
+  drawThreeCardPokerFelt(ctx, TABLE_WIDTH, TABLE_HEIGHT);
+  
+  // Draw payout tables on sides
+  drawTCPPayoutTable(ctx, 15, 30, 'PAIR PLUS', [
+    ['Straight Flush', '40:1'],
+    ['Three of a Kind', '30:1'],
+    ['Straight', '6:1'],
+    ['Flush', '4:1'],
+    ['Pair', '1:1']
+  ]);
+  
+  drawTCPPayoutTable(ctx, TABLE_WIDTH - 215, 30, '6-CARD BONUS', [
+    ['Royal Flush', '1000:1'],
+    ['Straight Flush', '200:1'],
+    ['Four of a Kind', '50:1'],
+    ['Full House', '25:1'],
+    ['Flush', '20:1'],
+    ['Straight', '10:1'],
+    ['Three of a Kind', '5:1']
+  ]);
+  
+  // Draw dealer area (top center)
+  const dealerY = 80;
+  const cardSpacing = TCP_CARD_WIDTH + 20;
+  const dealerStartX = TABLE_WIDTH / 2 - cardSpacing;
+  
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 22px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('DEALER', TABLE_WIDTH / 2, dealerY - 15);
+  
+  // Dealer qualifying text
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '14px Arial';
+  ctx.fillText('Dealer qualifies with Queen-high or better', TABLE_WIDTH / 2, dealerY + TCP_CARD_HEIGHT + 25);
+  
+  // Draw dealer cards
+  for (let i = 0; i < 3; i++) {
+    const x = dealerStartX + (i * cardSpacing) - TCP_CARD_WIDTH / 2;
+    if (revealDealer) {
+      await drawCardScaled(ctx, dealerCards[i], x, dealerY, TCP_CARD_WIDTH, TCP_CARD_HEIGHT);
+    } else {
+      await drawCardBackScaled(ctx, x, dealerY, TCP_CARD_WIDTH, TCP_CARD_HEIGHT);
+    }
+  }
+  
+  // Draw player area (middle)
+  const playerCardY = dealerY + TCP_CARD_HEIGHT + 80;
+  const playerStartX = TABLE_WIDTH / 2 - cardSpacing;
+  
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 22px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('YOUR HAND', TABLE_WIDTH / 2, playerCardY - 15);
+  
+  // Draw player cards
+  for (let i = 0; i < playerCards.length; i++) {
+    const x = playerStartX + (i * cardSpacing) - TCP_CARD_WIDTH / 2;
+    await drawCardScaled(ctx, playerCards[i], x, playerCardY, TCP_CARD_WIDTH, TCP_CARD_HEIGHT);
+  }
+  
+  // Draw betting circles at bottom
+  const circleY = TABLE_HEIGHT - 120;
+  const circleSpacing = 160;
+  const startX = TABLE_WIDTH / 2 - circleSpacing * 1.5;
+  
+  // Bet circles (left to right: 6-Card, Pair Plus, Ante, Play)
+  const betCircles = [
+    { x: startX, label: '6-CARD', amount: sixCardBet, active: sixCardBet > 0 },
+    { x: startX + circleSpacing, label: 'PAIR+', amount: pairPlusBet, active: pairPlusBet > 0 },
+    { x: startX + circleSpacing * 2, label: 'ANTE', amount: anteBet, active: true },
+    { x: startX + circleSpacing * 3, label: 'PLAY', amount: playBet ? anteBet : 0, active: playBet }
+  ];
+  
+  for (const circle of betCircles) {
+    drawTCPBetCircle(ctx, circle.x, circleY, circle.label, circle.active, circle.amount);
+  }
+  
+  // Draw result overlay if resolved
+  if (result) {
+    const resultText = result.totalResult > 0 ? `+${result.totalResult.toLocaleString()}` : 
+                       result.totalResult < 0 ? result.totalResult.toLocaleString() : 'PUSH';
+    const resultColor = result.totalResult > 0 ? '#4CAF50' : result.totalResult < 0 ? '#F44336' : '#FFC107';
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    roundRect(ctx, TABLE_WIDTH / 2 - 150, TABLE_HEIGHT / 2 - 30, 300, 60, 12);
+    ctx.fill();
+    
+    ctx.fillStyle = resultColor;
+    ctx.font = 'bold 36px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(resultText, TABLE_WIDTH / 2, TABLE_HEIGHT / 2 + 12);
+  }
+  
+  // Player name at bottom
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '18px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(safePlayerName, TABLE_WIDTH / 2, TABLE_HEIGHT - 15);
+  
+  return canvas.toBuffer('image/png');
+}
+
+function drawThreeCardPokerFelt(ctx, width, height) {
+  // Base green felt
+  const gradient = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width / 2);
+  gradient.addColorStop(0, '#1B5E20');
+  gradient.addColorStop(0.7, '#145214');
+  gradient.addColorStop(1, '#0D3B0D');
+  
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+  
+  // Subtle texture
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < width; i += 20) {
+    ctx.beginPath();
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i, height);
+    ctx.stroke();
+  }
+  for (let i = 0; i < height; i += 20) {
+    ctx.beginPath();
+    ctx.moveTo(0, i);
+    ctx.lineTo(width, i);
+    ctx.stroke();
+  }
+  
+  // Table border
+  ctx.strokeStyle = '#3E2723';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, width - 8, height - 8);
+  
+  ctx.strokeStyle = '#5D4037';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(8, 8, width - 16, height - 16);
+}
+
+function drawTCPPayoutTable(ctx, x, y, title, payouts) {
+  const width = 200;
+  const rowHeight = 55; // Two lines per payout entry
+  const height = payouts.length * rowHeight + 50;
+  
+  // Background
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  roundRect(ctx, x, y, width, height, 10);
+  ctx.fill();
+  
+  // Title
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 22px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(title, x + width / 2, y + 30);
+  
+  // Payouts - two lines each (hand name, then payout)
+  for (let i = 0; i < payouts.length; i++) {
+    const [hand, payout] = payouts[i];
+    const rowY = y + 55 + (i * rowHeight);
+    
+    // Hand name (white, centered)
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(hand, x + width / 2, rowY);
+    
+    // Payout ratio (gold, centered, below hand name)
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText(payout, x + width / 2, rowY + 26);
+  }
+}
+
+function drawTCPBetCircle(ctx, x, y, label, isActive, amount) {
+  const radius = 45;
+  
+  // Outer circle
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = isActive ? '#FFD700' : '#666666';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  
+  // Inner fill
+  ctx.fillStyle = isActive ? 'rgba(30, 60, 30, 0.8)' : 'rgba(40, 40, 40, 0.8)';
+  ctx.fill();
+  
+  if (isActive && amount > 0) {
+    // Draw chips
+    drawFlatChipStack(ctx, x, y, amount, radius - 8);
+  }
+  
+  // Label below circle
+  ctx.fillStyle = isActive ? '#FFD700' : '#666666';
+  ctx.font = 'bold 14px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, x, y + radius + 18);
+  
+  // Amount below label
+  if (amount > 0) {
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 12px Arial';
+    ctx.fillText(amount.toLocaleString(), x, y + radius + 34);
+  }
+}
+
 module.exports = {
   generateHandImage,
   generateBlackjackImage,
   generateBlackjackTableImage,
+  generateInBetweenImage,
+  generateLetItRideImage,
+  generateThreeCardPokerImage,
   CARD_WIDTH,
   CARD_HEIGHT
 };
+

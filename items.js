@@ -1139,6 +1139,28 @@ function hasRoleGrant(guildId, userId, roleId) {
   return result.length > 0 && result[0].values[0][0] > 0;
 }
 
+// Manually add a role grant record (for fixing orphaned grants)
+function addManualRoleGrant(guildId, userId, roleId, itemName, durationHours) {
+  if (!db) return null;
+  
+  const now = Date.now();
+  const isPermanent = !durationHours || durationHours <= 0;
+  const expiresAt = isPermanent ? null : now + (durationHours * 60 * 60 * 1000);
+  
+  try {
+    db.run(`
+      INSERT OR REPLACE INTO temporary_role_grants 
+      (guild_id, user_id, role_id, source_item_id, source_item_name, granted_at, expires_at, is_permanent)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [guildId, userId, roleId, 0, itemName || 'Manual Grant', now, expiresAt, isPermanent ? 1 : 0]);
+    
+    return { success: true, isPermanent, expiresAt };
+  } catch (error) {
+    console.error('Error adding manual role grant:', error);
+    return null;
+  }
+}
+
 // Get all temporary (non-permanent) role grants for cleanup scheduling
 function getAllTemporaryRoleGrants() {
   if (!db) return [];
@@ -1354,6 +1376,7 @@ module.exports = {
   removeRoleGrantRecord,
   getUserRoleGrants,
   hasRoleGrant,
+  addManualRoleGrant,
   getAllTemporaryRoleGrants,
   
   // Helpers

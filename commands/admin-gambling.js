@@ -7,12 +7,15 @@ const CURRENCY = '<:babybel:1418824333664452608>';
 // IDs this module handles
 const BUTTON_IDS = [
   'gambling_edit_blackjack', 'gambling_lottery_settings', 'gambling_toggle_scratch', 'gambling_scratch_config',
-  'gambling_scratch_stats',
+  'gambling_scratch_stats', 'gambling_inbetween_settings', 'gambling_letitride_settings', 'gambling_threecardpoker_settings',
   'lottery_toggle_auto', 'lottery_edit_schedule', 'lottery_edit_prizes', 'lottery_edit_ticket_price', 'lottery_set_channel',
   'vault_toggle', 'vault_spawn', 'vault_reward', 'vault_channel', 'vault_force_spawn',
+  'inbetween_toggle', 'inbetween_edit_settings', 'inbetween_reset_pot',
+  'letitride_toggle', 'letitride_edit_settings',
+  'threecardpoker_toggle', 'threecardpoker_edit_settings',
   'back_gambling'
 ];
-const MODAL_IDS = ['modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_vault_spawn', 'modal_vault_reward'];
+const MODAL_IDS = ['modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_vault_spawn', 'modal_vault_reward', 'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings'];
 const SELECT_IDS = ['scratch_select_card', 'lottery_channel_select', 'vault_channel_select'];
 
 // Scratch card modal IDs are dynamic: modal_scratch_cheese, modal_scratch_cash, etc.
@@ -134,6 +137,76 @@ async function handleInteraction(interaction, guildId) {
       }
       else if (customId === 'vault_force_spawn') {
         await handleForceVaultSpawn(interaction, guildId);
+      }
+      // In Between buttons
+      else if (customId === 'gambling_inbetween_settings') {
+        await interaction.deferUpdate();
+        await showInBetweenPanel(interaction, guildId);
+      }
+      else if (customId === 'inbetween_toggle') {
+        const { getSettings, updateSettings } = require('../inbetween');
+        const settings = getSettings(guildId);
+        updateSettings(guildId, { enabled: !settings.enabled });
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Toggled In Between ${!settings.enabled ? 'ON' : 'OFF'}`);
+        await interaction.deferUpdate();
+        await showInBetweenPanel(interaction, guildId);
+      }
+      else if (customId === 'inbetween_edit_settings') {
+        const { getSettings } = require('../inbetween');
+        const settings = getSettings(guildId);
+        const modal = createInBetweenSettingsModal(settings);
+        await interaction.showModal(modal);
+      }
+      else if (customId === 'inbetween_reset_pot') {
+        const { getSettings, getPot } = require('../inbetween');
+        const settings = getSettings(guildId);
+        const currentPot = getPot(guildId);
+        const modal = createInBetweenResetPotModal(currentPot, settings.potFloor);
+        await interaction.showModal(modal);
+      }
+      // Let It Ride buttons
+      else if (customId === 'gambling_letitride_settings') {
+        await interaction.deferUpdate();
+        await showLetItRidePanel(interaction, guildId);
+      }
+      else if (customId === 'letitride_toggle') {
+        const { getSettings, updateSettings, clearSettingsCache } = require('../letitride');
+        const oldSettings = getSettings(guildId);
+        const newEnabled = !oldSettings.enabled;
+        console.log(`[Let It Ride] Toggling enabled: ${oldSettings.enabled} -> ${newEnabled}`);
+        clearSettingsCache(guildId); // Clear cache before update
+        const updatedSettings = updateSettings(guildId, { enabled: newEnabled });
+        console.log(`[Let It Ride] After update, enabled = ${updatedSettings.enabled}`);
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Toggled Let It Ride ${newEnabled ? 'ON' : 'OFF'}`);
+        await interaction.deferUpdate();
+        await showLetItRidePanel(interaction, guildId);
+      }
+      else if (customId === 'letitride_edit_settings') {
+        const { getSettings } = require('../letitride');
+        const settings = getSettings(guildId);
+        const modal = createLetItRideSettingsModal(settings);
+        await interaction.showModal(modal);
+      }
+      // Three Card Poker buttons
+      else if (customId === 'gambling_threecardpoker_settings') {
+        await interaction.deferUpdate();
+        await showThreeCardPokerPanel(interaction, guildId);
+      }
+      else if (customId === 'threecardpoker_toggle') {
+        const { getSettings, updateSettings, clearSettingsCache } = require('../threecardpoker');
+        const oldSettings = getSettings(guildId);
+        const newEnabled = !oldSettings.enabled;
+        clearSettingsCache(guildId);
+        updateSettings(guildId, { ...oldSettings, enabled: newEnabled });
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Toggled Three Card Poker ${newEnabled ? 'ON' : 'OFF'}`);
+        await interaction.deferUpdate();
+        await showThreeCardPokerPanel(interaction, guildId);
+      }
+      else if (customId === 'threecardpoker_edit_settings') {
+        const { getSettings } = require('../threecardpoker');
+        const settings = getSettings(guildId);
+        const modal = createThreeCardPokerSettingsModal(settings);
+        await interaction.showModal(modal);
       }
       // Back button
       else if (customId === 'back_gambling') {
@@ -333,6 +406,71 @@ async function handleInteraction(interaction, guildId) {
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated ${cardType} scratch card settings`);
         await interaction.reply({ content: `✅ ${cardType} scratch card settings updated!`, flags: 64 });
       }
+      // In Between settings modal
+      else if (customId === 'modal_inbetween_settings') {
+        const { updateSettings } = require('../inbetween');
+        const ante = parseInt(interaction.fields.getTextInputValue('ante_amount'));
+        const floor = parseInt(interaction.fields.getTextInputValue('pot_floor'));
+        const cooldown = parseInt(interaction.fields.getTextInputValue('cooldown_seconds'));
+        const playTimer = parseInt(interaction.fields.getTextInputValue('play_timer_seconds'));
+        
+        if ([ante, floor, cooldown, playTimer].some(isNaN) || ante < 1 || floor < 1 || cooldown < 0 || playTimer < 10) {
+          await interaction.reply({ content: '❌ Invalid values. Ante and floor must be at least 1, cooldown must be 0+, timer must be at least 10 seconds.', flags: 64 });
+          return true;
+        }
+        
+        updateSettings(guildId, { anteAmount: ante, potFloor: floor, cooldownSeconds: cooldown, playTimerSeconds: playTimer });
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated In Between settings: Ante=${ante}, Floor=${floor}, Cooldown=${cooldown}s, Timer=${playTimer}s`);
+        await interaction.reply({ content: `✅ In Between settings updated!\n• Ante: **${ante.toLocaleString()}** ${CURRENCY}\n• Pot Floor: **${floor.toLocaleString()}** ${CURRENCY}\n• Cooldown: **${cooldown}s**\n• Play Timer: **${playTimer}s**`, flags: 64 });
+      }
+      // In Between reset pot modal
+      else if (customId === 'modal_inbetween_reset_pot') {
+        const { setPot, getSettings } = require('../inbetween');
+        const newPot = parseInt(interaction.fields.getTextInputValue('new_pot_amount'));
+        const settings = getSettings(guildId);
+        
+        if (isNaN(newPot) || newPot < settings.potFloor) {
+          await interaction.reply({ content: `❌ Pot amount must be at least **${settings.potFloor.toLocaleString()}** (the pot floor).`, flags: 64 });
+          return true;
+        }
+        
+        setPot(guildId, newPot);
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Reset In Between pot to ${newPot}`);
+        await interaction.reply({ content: `✅ In Between pot set to **${newPot.toLocaleString()}** ${CURRENCY}!`, flags: 64 });
+      }
+      // Let It Ride settings modal
+      else if (customId === 'modal_letitride_settings') {
+        const { updateSettings } = require('../letitride');
+        const minBet = parseInt(interaction.fields.getTextInputValue('min_bet'));
+        const maxBet = parseInt(interaction.fields.getTextInputValue('max_bet'));
+        const timer = parseInt(interaction.fields.getTextInputValue('decision_timer'));
+        
+        if ([minBet, maxBet, timer].some(isNaN) || minBet < 100 || maxBet < minBet || timer < 5) {
+          await interaction.reply({ content: '❌ Invalid values. Min bet must be at least 100, max must be >= min, timer must be at least 5 seconds.', flags: 64 });
+          return true;
+        }
+        
+        updateSettings(guildId, { minBet, maxBet, timerSeconds: timer });
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated Let It Ride settings: Min=${minBet}, Max=${maxBet}, Timer=${timer}s`);
+        await interaction.reply({ content: `✅ Let It Ride settings updated!\n• Min Bet: **${minBet.toLocaleString()}** ${CURRENCY}\n• Max Bet: **${maxBet.toLocaleString()}** ${CURRENCY}\n• Decision Timer: **${timer}s**`, flags: 64 });
+      }
+      // Three Card Poker settings modal
+      else if (customId === 'modal_threecardpoker_settings') {
+        const { getSettings, updateSettings } = require('../threecardpoker');
+        const minBet = parseInt(interaction.fields.getTextInputValue('min_bet'));
+        const maxBet = parseInt(interaction.fields.getTextInputValue('max_bet'));
+        const timer = parseInt(interaction.fields.getTextInputValue('decision_timer'));
+        
+        if ([minBet, maxBet, timer].some(isNaN) || minBet < 100 || maxBet < minBet || timer < 5) {
+          await interaction.reply({ content: '❌ Invalid values. Min bet must be at least 100, max must be >= min, timer must be at least 5 seconds.', flags: 64 });
+          return true;
+        }
+        
+        const currentSettings = getSettings(guildId);
+        updateSettings(guildId, { ...currentSettings, minBet, maxBet, timerSeconds: timer });
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated Three Card Poker settings: Min=${minBet}, Max=${maxBet}, Timer=${timer}s`);
+        await interaction.reply({ content: `✅ Three Card Poker settings updated!\n• Min Bet: **${minBet.toLocaleString()}** ${CURRENCY}\n• Max Bet: **${maxBet.toLocaleString()}** ${CURRENCY}\n• Decision Timer: **${timer}s**`, flags: 64 });
+      }
       return true;
     } catch (err) {
       console.error('[Admin-Gambling] Modal error:', err);
@@ -402,13 +540,28 @@ async function showGamblingPanel(interaction, guildId) {
     .setLabel('📊 Stats')
     .setStyle(ButtonStyle.Secondary);
 
+  const inbetweenBtn = new ButtonBuilder()
+    .setCustomId('gambling_inbetween_settings')
+    .setLabel('🃏 In Between')
+    .setStyle(ButtonStyle.Primary);
+
+  const letItRideBtn = new ButtonBuilder()
+    .setCustomId('gambling_letitride_settings')
+    .setLabel('🎰 Let It Ride')
+    .setStyle(ButtonStyle.Primary);
+
+  const threeCardPokerBtn = new ButtonBuilder()
+    .setCustomId('gambling_threecardpoker_settings')
+    .setLabel('🃏 3 Card Poker')
+    .setStyle(ButtonStyle.Primary);
+
   const backBtn = new ButtonBuilder()
     .setCustomId('back_dashboard')
     .setLabel('◀️ Back')
     .setStyle(ButtonStyle.Secondary);
 
-  const row1 = new ActionRowBuilder().addComponents(blackjackBtn, lotteryBtn, scratchToggleBtn);
-  const row2 = new ActionRowBuilder().addComponents(scratchConfigBtn, scratchStatsBtn, backBtn);
+  const row1 = new ActionRowBuilder().addComponents(blackjackBtn, lotteryBtn, inbetweenBtn, letItRideBtn, threeCardPokerBtn);
+  const row2 = new ActionRowBuilder().addComponents(scratchToggleBtn, scratchConfigBtn, scratchStatsBtn, backBtn);
 
   await interaction.editReply({ embeds: [embed], components: [row1, row2] });
 }
@@ -903,11 +1056,284 @@ function createVaultRewardModal(settings) {
     );
 }
 
+// ==================== IN BETWEEN PANEL ====================
+async function showInBetweenPanel(interaction, guildId) {
+  const { getSettings, getPot } = require('../inbetween');
+  let settings;
+  try {
+    settings = getSettings(guildId);
+  } catch {
+    settings = { enabled: true, anteAmount: 1000, potFloor: 1000, cooldownSeconds: 30, playTimerSeconds: 60 };
+  }
+  
+  const currentPot = getPot(guildId);
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x9b59b6)
+    .setTitle('🃏 In Between Settings')
+    .setDescription('Configure the In Between (Acey Deucey) card game')
+    .addFields(
+      { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+      { name: '💰 Current Pot', value: `**${currentPot.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '🏦 Pot Floor', value: `**${settings.potFloor.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '🎫 Ante Amount', value: `**${settings.anteAmount.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '⏱️ Cooldown', value: `**${settings.cooldownSeconds}** seconds`, inline: true },
+      { name: '⏰ Play Timer', value: `**${settings.playTimerSeconds}** seconds`, inline: true }
+    )
+    .setFooter({ text: 'Players bet if the third card will land between two pole cards' });
+
+  const toggleBtn = new ButtonBuilder()
+    .setCustomId('inbetween_toggle')
+    .setLabel(settings.enabled ? 'Disable' : 'Enable')
+    .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success);
+
+  const settingsBtn = new ButtonBuilder()
+    .setCustomId('inbetween_edit_settings')
+    .setLabel('⚙️ Settings')
+    .setStyle(ButtonStyle.Primary);
+
+  const resetPotBtn = new ButtonBuilder()
+    .setCustomId('inbetween_reset_pot')
+    .setLabel('🔄 Reset Pot')
+    .setStyle(ButtonStyle.Secondary);
+
+  const backBtn = new ButtonBuilder()
+    .setCustomId('back_gambling')
+    .setLabel('◀️ Back')
+    .setStyle(ButtonStyle.Secondary);
+
+  const row = new ActionRowBuilder().addComponents(toggleBtn, settingsBtn, resetPotBtn, backBtn);
+
+  await interaction.editReply({ embeds: [embed], components: [row] });
+}
+
+function createInBetweenSettingsModal(settings) {
+  return new ModalBuilder()
+    .setCustomId('modal_inbetween_settings')
+    .setTitle('In Between Settings')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('ante_amount')
+          .setLabel('Ante Amount')
+          .setPlaceholder('1000')
+          .setValue(String(settings.anteAmount || 1000))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('pot_floor')
+          .setLabel('Pot Floor (minimum pot)')
+          .setPlaceholder('1000')
+          .setValue(String(settings.potFloor || 1000))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('cooldown_seconds')
+          .setLabel('Cooldown Between Games (seconds)')
+          .setPlaceholder('30')
+          .setValue(String(settings.cooldownSeconds || 30))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('play_timer_seconds')
+          .setLabel('Play Timer (seconds before auto-fold)')
+          .setPlaceholder('60')
+          .setValue(String(settings.playTimerSeconds || 60))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
+function createInBetweenResetPotModal(currentPot, potFloor) {
+  return new ModalBuilder()
+    .setCustomId('modal_inbetween_reset_pot')
+    .setTitle('Reset In Between Pot')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('new_pot_amount')
+          .setLabel(`New Pot Amount (min: ${potFloor.toLocaleString()})`)
+          .setPlaceholder(String(potFloor))
+          .setValue(String(currentPot))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
+// ==================== LET IT RIDE PANEL ====================
+async function showLetItRidePanel(interaction, guildId) {
+  const { getSettings } = require('../letitride');
+  let settings;
+  try {
+    settings = getSettings(guildId);
+    console.log(`[Let It Ride] showLetItRidePanel got settings: enabled=${settings?.enabled}, minBet=${settings?.minBet}`);
+  } catch (err) {
+    console.error('[Admin-Gambling] Error getting Let It Ride settings:', err);
+    settings = null;
+  }
+  
+  // Use defaults only if settings is completely null/undefined
+  if (!settings) {
+    console.log('[Let It Ride] showLetItRidePanel using defaults because settings is null');
+    settings = { enabled: true, minBet: 1000, maxBet: 100000, timerSeconds: 15 };
+  }
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x27ae60)
+    .setTitle('🎰 Let It Ride Settings')
+    .setDescription('Configure the Let It Ride poker card game')
+    .addFields(
+      { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+      { name: '💰 Min Bet', value: `**${(settings.minBet || 1000).toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '💎 Max Bet', value: `**${(settings.maxBet || 100000).toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '⏱️ Decision Timer', value: `**${settings.timerSeconds || 15}** seconds`, inline: true }
+    )
+    .setFooter({ text: 'Players need 10s or Better to win • 3 equal bets per game' });
+
+  const toggleBtn = new ButtonBuilder()
+    .setCustomId('letitride_toggle')
+    .setLabel(settings.enabled ? 'Disable' : 'Enable')
+    .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success);
+
+  const settingsBtn = new ButtonBuilder()
+    .setCustomId('letitride_edit_settings')
+    .setLabel('⚙️ Settings')
+    .setStyle(ButtonStyle.Primary);
+
+  const backBtn = new ButtonBuilder()
+    .setCustomId('back_gambling')
+    .setLabel('◀️ Back')
+    .setStyle(ButtonStyle.Secondary);
+
+  const row = new ActionRowBuilder().addComponents(toggleBtn, settingsBtn, backBtn);
+
+  await interaction.editReply({ embeds: [embed], components: [row] });
+}
+
+function createLetItRideSettingsModal(settings) {
+  return new ModalBuilder()
+    .setCustomId('modal_letitride_settings')
+    .setTitle('Let It Ride Settings')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('min_bet')
+          .setLabel('Minimum Bet (per spot)')
+          .setPlaceholder('1000')
+          .setValue(String(settings.minBet || 1000))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('max_bet')
+          .setLabel('Maximum Bet (per spot)')
+          .setPlaceholder('100000')
+          .setValue(String(settings.maxBet || 100000))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('decision_timer')
+          .setLabel('Decision Timer (seconds)')
+          .setPlaceholder('15')
+          .setValue(String(settings.timerSeconds || 15))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
+// ==================== THREE CARD POKER PANEL ====================
+async function showThreeCardPokerPanel(interaction, guildId) {
+  const { getSettings } = require('../threecardpoker');
+  const settings = getSettings(guildId);
+  
+  const embed = new EmbedBuilder()
+    .setColor(settings.enabled ? 0x2ecc71 : 0xe74c3c)
+    .setTitle('🃏 Three Card Poker Settings')
+    .setDescription(settings.enabled ? '✅ **ENABLED**' : '❌ **DISABLED**')
+    .addFields(
+      { name: '💵 Minimum Bet', value: `${settings.minBet.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💰 Maximum Bet', value: `${settings.maxBet.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '⏱️ Decision Timer', value: `${settings.timerSeconds} seconds`, inline: true }
+    )
+    .addFields(
+      { name: '📋 Game Info', value: 'Players place Ante + optional Pair Plus & 6-Card Bonus bets. Beat the dealer with Queen-high or better to win!', inline: false }
+    );
+
+  const toggleBtn = new ButtonBuilder()
+    .setCustomId('threecardpoker_toggle')
+    .setLabel(settings.enabled ? '🔴 Disable' : '🟢 Enable')
+    .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success);
+
+  const settingsBtn = new ButtonBuilder()
+    .setCustomId('threecardpoker_edit_settings')
+    .setLabel('⚙️ Edit Settings')
+    .setStyle(ButtonStyle.Primary);
+
+  const backBtn = new ButtonBuilder()
+    .setCustomId('back_gambling')
+    .setLabel('◀️ Back')
+    .setStyle(ButtonStyle.Secondary);
+
+  const row = new ActionRowBuilder().addComponents(toggleBtn, settingsBtn, backBtn);
+
+  await interaction.editReply({ embeds: [embed], components: [row] });
+}
+
+function createThreeCardPokerSettingsModal(settings) {
+  return new ModalBuilder()
+    .setCustomId('modal_threecardpoker_settings')
+    .setTitle('Three Card Poker Settings')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('min_bet')
+          .setLabel('Minimum Bet')
+          .setPlaceholder('100')
+          .setValue(String(settings.minBet || 100))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('max_bet')
+          .setLabel('Maximum Bet')
+          .setPlaceholder('100000')
+          .setValue(String(settings.maxBet || 100000))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('decision_timer')
+          .setLabel('Decision Timer (seconds)')
+          .setPlaceholder('60')
+          .setValue(String(settings.timerSeconds || 60))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
 module.exports = {
   handleInteraction,
   showGamblingPanel,
   showLotteryPanel,
   showScratchConfigPanel,
   showScratchStatsPanel,
-  showVaultPanel
+  showVaultPanel,
+  showInBetweenPanel,
+  showLetItRidePanel,
+  showThreeCardPokerPanel
 };

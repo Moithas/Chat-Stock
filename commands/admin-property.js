@@ -12,13 +12,14 @@ const TIER_EMOJIS = ['', '⚪', '🟢', '🔵', '🟣', '🟡'];
 const BUTTON_IDS = [
   'property_toggle', 'property_edit_settings', 'property_manage_cards', 
   'property_set_role', 'property_edit_weights', 'back_property',
+  'property_manage_names',
   'cards_view_positive', 'cards_view_negative', 'cards_view_neutral', 'cards_add_card',
   'cards_back_to_list', 'cards_give_card', 'cards_take_card', 'takecard_back'
 ];
 const BUTTON_PREFIXES = ['card_edit_', 'card_delete_', 'takecard_remove_'];
 const MODAL_IDS = ['modal_property_settings', 'modal_add_card', 'modal_tier_weights'];
-const MODAL_PREFIXES = ['modal_edit_card_'];
-const SELECT_IDS = ['property_role_select', 'givecard_user_select', 'givecard_card_select', 'takecard_user_select', 'takecard_card_select'];
+const MODAL_PREFIXES = ['modal_edit_card_', 'modal_edit_property_name_'];
+const SELECT_IDS = ['property_role_select', 'givecard_user_select', 'givecard_card_select', 'takecard_user_select', 'takecard_card_select', 'property_name_select'];
 const SELECT_PREFIXES = ['card_select_'];
 
 // ==================== MAIN INTERACTION HANDLER ====================
@@ -74,6 +75,10 @@ async function handleInteraction(interaction, guildId) {
       else if (customId === 'back_property') {
         await interaction.deferUpdate();
         await showPropertyPanel(interaction, guildId);
+      }
+      else if (customId === 'property_manage_names') {
+        await interaction.deferUpdate();
+        await showPropertyNamesPanel(interaction, guildId);
       }
       else if (customId === 'cards_view_positive') {
         await interaction.deferUpdate();
@@ -177,6 +182,16 @@ async function handleInteraction(interaction, guildId) {
         const userId = interaction.values[0];
         await interaction.deferUpdate();
         await showUserCardsToRemove(interaction, guildId, userId);
+      }
+      else if (customId === 'property_name_select') {
+        const propertyId = parseInt(interaction.values[0]);
+        const { getProperties } = require('../property');
+        const properties = getProperties(guildId);
+        const property = properties.find(p => p.id === propertyId);
+        if (property) {
+          const modal = createEditPropertyNameModal(property);
+          await interaction.showModal(modal);
+        }
       }
       return true;
     } catch (err) {
@@ -366,6 +381,27 @@ async function handleInteraction(interaction, guildId) {
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated card #${cardId}: ${cardName}`);
         await interaction.reply({ content: `✅ Updated card: **${cardName}**`, flags: 64 });
       }
+      else if (customId.startsWith('modal_edit_property_name_')) {
+        const { updateProperty, getProperties } = require('../property');
+        const propertyId = parseInt(customId.replace('modal_edit_property_name_', ''));
+        const newName = interaction.fields.getTextInputValue('property_name').trim();
+        
+        if (!newName || newName.length > 50) {
+          await interaction.reply({ content: '❌ Property name must be 1-50 characters.', flags: 64 });
+          return true;
+        }
+        
+        const properties = getProperties(guildId);
+        const property = properties.find(p => p.id === propertyId);
+        
+        if (property) {
+          updateProperty(guildId, propertyId, { name: newName });
+          logAdminAction(guildId, interaction.user.id, interaction.user.username, `Renamed Level ${property.id} property to "${newName}"`);
+          await interaction.reply({ content: `✅ Level ${property.id} property renamed to **${newName}**`, flags: 64 });
+        } else {
+          await interaction.reply({ content: '❌ Property not found.', flags: 64 });
+        }
+      }
       return true;
     } catch (err) {
       console.error('[Admin-Property] Modal error:', err);
@@ -423,6 +459,11 @@ async function showPropertyPanel(interaction, guildId) {
     .setLabel('🃏 Manage Cards')
     .setStyle(ButtonStyle.Primary);
 
+  const namesBtn = new ButtonBuilder()
+    .setCustomId('property_manage_names')
+    .setLabel('🏠 Edit Names')
+    .setStyle(ButtonStyle.Primary);
+
   const roleBtn = new ButtonBuilder()
     .setCustomId('property_set_role')
     .setLabel('🎫 Set Required Role')
@@ -433,9 +474,10 @@ async function showPropertyPanel(interaction, guildId) {
     .setLabel('◀️ Back')
     .setStyle(ButtonStyle.Secondary);
 
-  const row = new ActionRowBuilder().addComponents(toggleBtn, settingsBtn, cardsBtn, roleBtn, backBtn);
+  const row1 = new ActionRowBuilder().addComponents(toggleBtn, settingsBtn, cardsBtn, namesBtn);
+  const row2 = new ActionRowBuilder().addComponents(roleBtn, backBtn);
 
-  await interaction.editReply({ embeds: [embed], components: [row] });
+  await interaction.editReply({ embeds: [embed], components: [row1, row2] });
 }
 
 // ==================== MODAL BUILDERS ====================
@@ -1123,9 +1165,74 @@ function createTierWeightsModal(weights) {
     );
 }
 
+// ==================== PROPERTY NAMES PANEL ====================
+async function showPropertyNamesPanel(interaction, guildId) {
+  const { getProperties } = require('../property');
+  const properties = getProperties(guildId);
+  
+  // Sort by id (which is the level 1-15)
+  const sortedProperties = [...properties].sort((a, b) => a.id - b.id);
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x3498db)
+    .setTitle('🏠 Edit Property Names')
+    .setDescription('Select a property level to rename it. Current property names:');
+  
+  // Display properties in groups
+  const propertyList = sortedProperties.map(p => {
+    const tierEmoji = TIER_EMOJIS[p.tier] || '🏠';
+    return `**Level ${p.id}** ${tierEmoji} ${p.name} - $${p.value.toLocaleString()}`;
+  }).join('\n');
+  
+  embed.addFields({ name: '📋 Properties', value: propertyList || 'No properties configured', inline: false });
+
+  // Create select menu for choosing which property to edit
+  const options = sortedProperties.map(p => ({
+    label: `Level ${p.id}: ${p.name}`,
+    description: `Tier ${p.tier} - $${p.value.toLocaleString()}`,
+    value: String(p.id),
+    emoji: TIER_EMOJIS[p.tier] || '🏠'
+  }));
+
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId('property_name_select')
+    .setPlaceholder('Select a property to rename...')
+    .addOptions(options.slice(0, 25)); // Max 25 options
+
+  const selectRow = new ActionRowBuilder().addComponents(selectMenu);
+
+  const backBtn = new ButtonBuilder()
+    .setCustomId('back_property')
+    .setLabel('◀️ Back')
+    .setStyle(ButtonStyle.Secondary);
+
+  const buttonRow = new ActionRowBuilder().addComponents(backBtn);
+
+  await interaction.editReply({ embeds: [embed], components: [selectRow, buttonRow] });
+}
+
+function createEditPropertyNameModal(property) {
+  return new ModalBuilder()
+    .setCustomId(`modal_edit_property_name_${property.id}`)
+    .setTitle(`Edit Level ${property.id} Property Name`)
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('property_name')
+          .setLabel('Property Name')
+          .setPlaceholder('Enter new property name...')
+          .setValue(property.name)
+          .setStyle(TextInputStyle.Short)
+          .setMaxLength(50)
+          .setRequired(true)
+      )
+    );
+}
+
 module.exports = {
   handleInteraction,
   showPropertyPanel,
   showCardListPanel,
-  showTierWeightsPanel
+  showTierWeightsPanel,
+  showPropertyNamesPanel
 };

@@ -4,29 +4,41 @@ let db = null;
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
-// Default property names by tier
+// Default property names by level (upgrade progression)
 const DEFAULT_PROPERTIES = [
-  // Tier 1 - Common (value: 1000-2500, 1 card/day)
   { id: 1, name: 'Rusty Trailer', tier: 1, value: 1500 },
-  { id: 2, name: 'Studio Apartment', tier: 1, value: 2000 },
-  { id: 3, name: 'Storage Unit', tier: 1, value: 2500 },
-  // Tier 2 - Uncommon (value: 5000-7500, 2 cards/day)
-  { id: 4, name: 'Suburban Duplex', tier: 2, value: 5000 },
-  { id: 5, name: 'Downtown Condo', tier: 2, value: 6000 },
-  { id: 6, name: 'Beach Bungalow', tier: 2, value: 7500 },
-  // Tier 3 - Rare (value: 10000-15000, 3 cards/day)
-  { id: 7, name: 'Victorian House', tier: 3, value: 10000 },
-  { id: 8, name: 'Mountain Cabin', tier: 3, value: 12500 },
-  { id: 9, name: 'City Townhouse', tier: 3, value: 15000 },
-  // Tier 4 - Epic (value: 25000-35000, 4 cards/day)
-  { id: 10, name: 'Lakefront Estate', tier: 4, value: 25000 },
-  { id: 11, name: 'Penthouse Suite', tier: 4, value: 30000 },
-  { id: 12, name: 'Historic Mansion', tier: 4, value: 35000 },
-  // Tier 5 - Legendary (value: 50000-75000, 5 cards/day)
-  { id: 13, name: 'Private Island', tier: 5, value: 50000 },
-  { id: 14, name: 'Mega Yacht', tier: 5, value: 62500 },
-  { id: 15, name: 'Space Station Module', tier: 5, value: 75000 }
+  { id: 2, name: 'Studio Apartment', tier: 1, value: 2500 },
+  { id: 3, name: 'Tiny House', tier: 1, value: 4000 },
+  { id: 4, name: 'Suburban Home', tier: 2, value: 6500 },
+  { id: 5, name: 'Townhouse', tier: 2, value: 10000 },
+  { id: 6, name: 'Beach Bungalow', tier: 2, value: 15000 },
+  { id: 7, name: 'Country Estate', tier: 3, value: 22000 },
+  { id: 8, name: 'Lake House', tier: 3, value: 32000 },
+  { id: 9, name: 'Mountain Cabin', tier: 3, value: 45000 },
+  { id: 10, name: 'Urban Loft', tier: 4, value: 65000 },
+  { id: 11, name: 'Victorian Manor', tier: 4, value: 90000 },
+  { id: 12, name: 'Luxury Condo', tier: 4, value: 120000 },
+  { id: 13, name: 'Penthouse Suite', tier: 5, value: 160000 },
+  { id: 14, name: 'Hilltop Villa', tier: 5, value: 210000 },
+  { id: 15, name: 'Private Island', tier: 5, value: 275000 }
 ];
+
+// Upgrade system constants
+const UPGRADE_STAGES = ['renovate', 'remodel', 'expand', 'upgrade'];
+const UPGRADE_BASE_COSTS = {
+  renovate: 5000,
+  remodel: 7500,
+  expand: 10000,
+  upgrade: 15000
+};
+const UPGRADE_BASE_HOURS = {
+  renovate: 1,
+  remodel: 2,
+  expand: 3,
+  upgrade: 4
+};
+const COST_MULTIPLIER = 1.6;  // Currency scales 1.6x per level
+const TIME_MULTIPLIER = 1.4;  // Time scales 1.4x per level
 
 // Tier drop weights (must sum to 100)
 const TIER_WEIGHTS = {
@@ -149,6 +161,24 @@ function initProperty(database) {
       user_id TEXT NOT NULL,
       property_id INTEGER NOT NULL,
       purchased_at INTEGER NOT NULL
+    );
+  `);
+  
+  // Create property upgrades table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS property_upgrades (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      owned_property_id INTEGER NOT NULL,
+      current_stage TEXT DEFAULT NULL,
+      stage_started_at INTEGER DEFAULT NULL,
+      stage_completes_at INTEGER DEFAULT NULL,
+      renovate_complete INTEGER DEFAULT 0,
+      remodel_complete INTEGER DEFAULT 0,
+      expand_complete INTEGER DEFAULT 0,
+      remodel_value_bonus INTEGER DEFAULT 0,
+      UNIQUE(guild_id, user_id, owned_property_id)
     );
   `);
   
@@ -288,7 +318,8 @@ function getProperties(guildId) {
     return DEFAULT_PROPERTIES;
   }
   
-  return result[0].values.map(row => {
+  // Check if migration is needed (compare level 15 value)
+  const props = result[0].values.map(row => {
     const cols = result[0].columns;
     const obj = cols.reduce((o, col, i) => ({ ...o, [col]: row[i] }), {});
     return {
@@ -298,6 +329,16 @@ function getProperties(guildId) {
       value: obj.value
     };
   });
+  
+  // Check if level 15 has old value (75000) vs new value (275000)
+  const level15 = props.find(p => p.id === 15);
+  if (level15 && level15.value < 100000) {
+    // Old values detected - migrate to new values
+    migratePropertyValues(guildId);
+    return DEFAULT_PROPERTIES;
+  }
+  
+  return props;
 }
 
 function initializeDefaultProperties(guildId) {
@@ -309,6 +350,21 @@ function initializeDefaultProperties(guildId) {
       VALUES (?, ?, ?, ?, ?)
     `, [guildId, prop.id, prop.name, prop.tier, prop.value]);
   }
+}
+
+// Migration: Update existing properties to new values (run once on startup)
+function migratePropertyValues(guildId) {
+  if (!db) return;
+  
+  // Update each property to match DEFAULT_PROPERTIES values
+  for (const prop of DEFAULT_PROPERTIES) {
+    db.run(`
+      UPDATE properties SET name = ?, tier = ?, value = ?
+      WHERE guild_id = ? AND property_id = ?
+    `, [prop.name, prop.tier, prop.value, guildId, prop.id]);
+  }
+  
+  console.log(`🏠 Migrated property values for guild ${guildId}`);
 }
 
 function updateProperty(guildId, propertyId, updates) {
@@ -379,8 +435,40 @@ function getUserPropertyCount(guildId, userId) {
 }
 
 function getTotalPropertyValue(guildId, userId) {
-  const properties = getUserProperties(guildId, userId);
-  return properties.reduce((sum, p) => sum + p.value, 0);
+  if (!db) return 0;
+  
+  // Get total property value including remodel bonuses
+  const result = db.exec(`
+    SELECT SUM(p.value + COALESCE(pu.remodel_value_bonus, 0)) as total_value
+    FROM owned_properties op
+    JOIN properties p ON op.guild_id = p.guild_id AND op.property_id = p.property_id
+    LEFT JOIN property_upgrades pu ON op.guild_id = pu.guild_id AND op.user_id = pu.user_id AND op.id = pu.owned_property_id
+    WHERE op.guild_id = ? AND op.user_id = ?
+  `, [guildId, userId]);
+  
+  if (result.length === 0 || result[0].values.length === 0 || result[0].values[0][0] === null) {
+    return 0;
+  }
+  
+  return result[0].values[0][0];
+}
+
+// Buy a Level 1 property (Rusty Trailer) - new upgrade system
+function buyLevel1Property(guildId, userId) {
+  if (!db) return null;
+  
+  const properties = getProperties(guildId);
+  const property = properties.find(p => p.id === 1); // Always Level 1 (Rusty Trailer)
+  
+  if (!property) return null;
+  
+  // Add to owned
+  db.run(`
+    INSERT INTO owned_properties (guild_id, user_id, property_id, purchased_at)
+    VALUES (?, ?, ?, ?)
+  `, [guildId, userId, property.id, Date.now()]);
+  
+  return property;
 }
 
 function buyRandomProperty(guildId, userId) {
@@ -420,11 +508,12 @@ function buyRandomProperty(guildId, userId) {
 function sellProperty(guildId, userId, ownedPropertyId) {
   if (!db) return null;
   
-  // Get the owned property
+  // Get the owned property with remodel bonus
   const result = db.exec(`
-    SELECT op.*, p.name, p.tier, p.value 
+    SELECT op.*, p.name, p.tier, p.value, COALESCE(pu.remodel_value_bonus, 0) as remodel_bonus
     FROM owned_properties op
     JOIN properties p ON op.guild_id = p.guild_id AND op.property_id = p.property_id
+    LEFT JOIN property_upgrades pu ON op.guild_id = pu.guild_id AND op.user_id = pu.user_id AND op.id = pu.owned_property_id
     WHERE op.id = ? AND op.guild_id = ? AND op.user_id = ?
   `, [ownedPropertyId, guildId, userId]);
   
@@ -432,6 +521,13 @@ function sellProperty(guildId, userId, ownedPropertyId) {
   
   const cols = result[0].columns;
   const property = cols.reduce((obj, col, i) => ({ ...obj, [col]: result[0].values[0][i] }), {});
+  
+  // Add remodel bonus to sale value
+  property.sale_value = property.value + (property.remodel_bonus || 0);
+  
+  // Remove upgrade records
+  db.run('DELETE FROM property_upgrades WHERE guild_id = ? AND user_id = ? AND owned_property_id = ?', 
+    [guildId, userId, ownedPropertyId]);
   
   // Remove from owned
   db.run('DELETE FROM owned_properties WHERE id = ?', [ownedPropertyId]);
@@ -931,6 +1027,328 @@ function scheduleCardDistribution(database) {
   }, msUntilMidnight);
 }
 
+// ============ PROPERTY UPGRADE SYSTEM ============
+
+// Get upgrade costs and times for a specific property level
+function getUpgradeCosts(propertyLevel) {
+  const costs = {};
+  const times = {};
+  
+  for (const stage of UPGRADE_STAGES) {
+    costs[stage] = Math.floor(UPGRADE_BASE_COSTS[stage] * Math.pow(COST_MULTIPLIER, propertyLevel - 1));
+    times[stage] = UPGRADE_BASE_HOURS[stage] * Math.pow(TIME_MULTIPLIER, propertyLevel - 1);
+  }
+  
+  return { costs, times };
+}
+
+// Get the upgrade status for a specific owned property
+function getPropertyUpgradeStatus(guildId, userId, ownedPropertyId) {
+  if (!db) return null;
+  
+  const result = db.exec(`
+    SELECT * FROM property_upgrades 
+    WHERE guild_id = ? AND user_id = ? AND owned_property_id = ?
+  `, [guildId, userId, ownedPropertyId]);
+  
+  if (result.length === 0 || result[0].values.length === 0) {
+    // No upgrade record - property is at base state, ready for renovate
+    return {
+      currentStage: null,
+      stageStartedAt: null,
+      stageCompletesAt: null,
+      renovateComplete: false,
+      remodelComplete: false,
+      expandComplete: false,
+      remodelValueBonus: 0,
+      nextStage: 'renovate',
+      isInProgress: false,
+      isReady: true
+    };
+  }
+  
+  const cols = result[0].columns;
+  const row = result[0].values[0];
+  const data = cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
+  
+  const now = Date.now();
+  const isInProgress = data.current_stage && data.stage_completes_at && data.stage_completes_at > now;
+  const isStageComplete = data.current_stage && data.stage_completes_at && data.stage_completes_at <= now;
+  
+  // Determine next stage
+  let nextStage = null;
+  if (!data.renovate_complete && !isInProgress) nextStage = 'renovate';
+  else if (data.renovate_complete && !data.remodel_complete && !isInProgress) nextStage = 'remodel';
+  else if (data.remodel_complete && !data.expand_complete && !isInProgress) nextStage = 'expand';
+  else if (data.expand_complete && !isInProgress) nextStage = 'upgrade';
+  
+  return {
+    currentStage: data.current_stage,
+    stageStartedAt: data.stage_started_at,
+    stageCompletesAt: data.stage_completes_at,
+    renovateComplete: data.renovate_complete === 1,
+    remodelComplete: data.remodel_complete === 1,
+    expandComplete: data.expand_complete === 1,
+    remodelValueBonus: data.remodel_value_bonus || 0,
+    nextStage: nextStage,
+    isInProgress: isInProgress,
+    isStageComplete: isStageComplete,
+    isReady: !isInProgress && nextStage !== null
+  };
+}
+
+// Start an upgrade stage
+function startUpgradeStage(guildId, userId, ownedPropertyId, stage, propertyLevel) {
+  if (!db) return { success: false, error: 'Database not available' };
+  
+  // Validate stage
+  if (!UPGRADE_STAGES.includes(stage)) {
+    return { success: false, error: 'Invalid upgrade stage' };
+  }
+  
+  // Get current status
+  const status = getPropertyUpgradeStatus(guildId, userId, ownedPropertyId);
+  
+  if (status.isInProgress) {
+    return { success: false, error: 'An upgrade is already in progress' };
+  }
+  
+  if (status.nextStage !== stage) {
+    return { success: false, error: `You must complete ${status.nextStage} first` };
+  }
+  
+  // Level 15 cannot upgrade (no next property)
+  if (stage === 'upgrade' && propertyLevel >= 15) {
+    return { success: false, error: 'Property is already at maximum level' };
+  }
+  
+  // Calculate completion time
+  const { times } = getUpgradeCosts(propertyLevel);
+  const hours = times[stage];
+  const completesAt = Date.now() + (hours * 60 * 60 * 1000);
+  
+  // Insert or update upgrade record
+  db.run(`
+    INSERT INTO property_upgrades (guild_id, user_id, owned_property_id, current_stage, stage_started_at, stage_completes_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id, user_id, owned_property_id) DO UPDATE SET
+      current_stage = excluded.current_stage,
+      stage_started_at = excluded.stage_started_at,
+      stage_completes_at = excluded.stage_completes_at
+  `, [guildId, userId, ownedPropertyId, stage, Date.now(), completesAt]);
+  
+  return { 
+    success: true, 
+    stage: stage,
+    completesAt: completesAt,
+    hoursRemaining: hours
+  };
+}
+
+// Complete an upgrade stage (called when timer expires or manually to check)
+function completeUpgradeStage(guildId, userId, ownedPropertyId, propertyId) {
+  if (!db) return { success: false, error: 'Database not available' };
+  
+  const status = getPropertyUpgradeStatus(guildId, userId, ownedPropertyId);
+  
+  if (!status.currentStage) {
+    return { success: false, error: 'No upgrade in progress' };
+  }
+  
+  if (status.isInProgress) {
+    return { success: false, error: 'Upgrade not yet complete' };
+  }
+  
+  const stage = status.currentStage;
+  
+  // Mark stage as complete
+  if (stage === 'renovate') {
+    db.run(`
+      UPDATE property_upgrades SET 
+        renovate_complete = 1,
+        current_stage = NULL,
+        stage_started_at = NULL,
+        stage_completes_at = NULL
+      WHERE guild_id = ? AND user_id = ? AND owned_property_id = ?
+    `, [guildId, userId, ownedPropertyId]);
+    
+    return { success: true, stage: 'renovate', benefit: 'Unlocked Remodel' };
+  }
+  
+  if (stage === 'remodel') {
+    // Calculate remodel value bonus (50% of difference to next property)
+    const properties = getProperties(guildId);
+    const currentProp = properties.find(p => p.id === propertyId);
+    const nextProp = properties.find(p => p.id === propertyId + 1);
+    
+    let valueBonus = 0;
+    if (nextProp && currentProp) {
+      valueBonus = Math.floor((nextProp.value - currentProp.value) * 0.5);
+    } else if (currentProp && propertyId >= 15) {
+      // Level 15: 15% flat increase
+      valueBonus = Math.floor(currentProp.value * 0.15);
+    }
+    
+    db.run(`
+      UPDATE property_upgrades SET 
+        remodel_complete = 1,
+        remodel_value_bonus = ?,
+        current_stage = NULL,
+        stage_started_at = NULL,
+        stage_completes_at = NULL
+      WHERE guild_id = ? AND user_id = ? AND owned_property_id = ?
+    `, [valueBonus, guildId, userId, ownedPropertyId]);
+    
+    return { success: true, stage: 'remodel', benefit: 'Property value increased', valueBonus: valueBonus };
+  }
+  
+  if (stage === 'expand') {
+    db.run(`
+      UPDATE property_upgrades SET 
+        expand_complete = 1,
+        current_stage = NULL,
+        stage_started_at = NULL,
+        stage_completes_at = NULL
+      WHERE guild_id = ? AND user_id = ? AND owned_property_id = ?
+    `, [guildId, userId, ownedPropertyId]);
+    
+    return { success: true, stage: 'expand', benefit: 'Property excluded from wealth tax' };
+  }
+  
+  if (stage === 'upgrade') {
+    // This is handled separately as it changes the property itself
+    return { success: true, stage: 'upgrade', benefit: 'Ready to upgrade property level' };
+  }
+  
+  return { success: false, error: 'Unknown stage' };
+}
+
+// Perform the actual property upgrade (changes property level)
+function performPropertyUpgrade(guildId, userId, ownedPropertyId, currentPropertyId) {
+  if (!db) return { success: false, error: 'Database not available' };
+  
+  if (currentPropertyId >= 15) {
+    return { success: false, error: 'Property is already at maximum level' };
+  }
+  
+  const status = getPropertyUpgradeStatus(guildId, userId, ownedPropertyId);
+  
+  // Must have completed expand stage and have upgrade complete
+  if (!status.expandComplete) {
+    return { success: false, error: 'Must complete Expand stage first' };
+  }
+  
+  // Check if upgrade stage timer is done
+  if (status.currentStage === 'upgrade' && status.isInProgress) {
+    return { success: false, error: 'Upgrade still in progress' };
+  }
+  
+  const newPropertyId = currentPropertyId + 1;
+  const properties = getProperties(guildId);
+  const newProperty = properties.find(p => p.id === newPropertyId);
+  
+  if (!newProperty) {
+    return { success: false, error: 'Next property level not found' };
+  }
+  
+  // Update the owned property to new level
+  db.run(`
+    UPDATE owned_properties SET property_id = ? WHERE id = ?
+  `, [newPropertyId, ownedPropertyId]);
+  
+  // Reset upgrade progress for the new level
+  db.run(`
+    UPDATE property_upgrades SET 
+      current_stage = NULL,
+      stage_started_at = NULL,
+      stage_completes_at = NULL,
+      renovate_complete = 0,
+      remodel_complete = 0,
+      expand_complete = 0,
+      remodel_value_bonus = 0
+    WHERE guild_id = ? AND user_id = ? AND owned_property_id = ?
+  `, [guildId, userId, ownedPropertyId]);
+  
+  return { 
+    success: true, 
+    oldPropertyId: currentPropertyId,
+    newPropertyId: newPropertyId,
+    newProperty: newProperty
+  };
+}
+
+// Check if a property has completed the Expand stage (for wealth tax exemption)
+function isPropertyExpanded(guildId, userId, ownedPropertyId) {
+  if (!db) return false;
+  
+  const result = db.exec(`
+    SELECT expand_complete FROM property_upgrades 
+    WHERE guild_id = ? AND user_id = ? AND owned_property_id = ?
+  `, [guildId, userId, ownedPropertyId]);
+  
+  if (result.length === 0 || result[0].values.length === 0) {
+    return false;
+  }
+  
+  return result[0].values[0][0] === 1;
+}
+
+// Get total value of expanded (tax-sheltered) properties for a user
+function getExpandedPropertyValue(guildId, userId) {
+  if (!db) return 0;
+  
+  const result = db.exec(`
+    SELECT SUM(p.value + COALESCE(pu.remodel_value_bonus, 0)) as total_value
+    FROM owned_properties op
+    JOIN properties p ON op.guild_id = p.guild_id AND op.property_id = p.property_id
+    LEFT JOIN property_upgrades pu ON op.guild_id = pu.guild_id AND op.user_id = pu.user_id AND op.id = pu.owned_property_id
+    WHERE op.guild_id = ? AND op.user_id = ? AND pu.expand_complete = 1
+  `, [guildId, userId]);
+  
+  if (result.length === 0 || result[0].values.length === 0 || result[0].values[0][0] === null) {
+    return 0;
+  }
+  
+  return result[0].values[0][0];
+}
+
+// Get the effective value of a property (base + remodel bonus)
+function getEffectivePropertyValue(guildId, userId, ownedPropertyId, baseValue) {
+  if (!db) return baseValue;
+  
+  const result = db.exec(`
+    SELECT remodel_value_bonus FROM property_upgrades 
+    WHERE guild_id = ? AND user_id = ? AND owned_property_id = ?
+  `, [guildId, userId, ownedPropertyId]);
+  
+  if (result.length === 0 || result[0].values.length === 0) {
+    return baseValue;
+  }
+  
+  return baseValue + (result[0].values[0][0] || 0);
+}
+
+// Get all upgrade statuses for a user's properties
+function getAllPropertyUpgrades(guildId, userId) {
+  if (!db) return [];
+  
+  const result = db.exec(`
+    SELECT pu.*, op.property_id
+    FROM property_upgrades pu
+    JOIN owned_properties op ON pu.owned_property_id = op.id
+    WHERE pu.guild_id = ? AND pu.user_id = ?
+  `, [guildId, userId]);
+  
+  if (result.length === 0 || result[0].values.length === 0) {
+    return [];
+  }
+  
+  return result[0].values.map(row => {
+    const cols = result[0].columns;
+    return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
+  });
+}
+
 module.exports = {
   initProperty,
   scheduleCardDistribution,
@@ -943,6 +1361,7 @@ module.exports = {
   getUserPropertyCount,
   getTotalPropertyValue,
   buyRandomProperty,
+  buyLevel1Property,
   sellProperty,
   seizePropertyFromUser,
   getCards,
@@ -963,6 +1382,19 @@ module.exports = {
   calculateCardEffect,
   getTierName,
   getTierEmoji,
+  // Upgrade system
+  getUpgradeCosts,
+  getPropertyUpgradeStatus,
+  startUpgradeStage,
+  completeUpgradeStage,
+  performPropertyUpgrade,
+  isPropertyExpanded,
+  getExpandedPropertyValue,
+  getEffectivePropertyValue,
+  getAllPropertyUpgrades,
+  UPGRADE_STAGES,
+  UPGRADE_BASE_COSTS,
+  UPGRADE_BASE_HOURS,
   TIER_WEIGHTS,
   DEFAULT_PROPERTIES,
   DEFAULT_CARDS

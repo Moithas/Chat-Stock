@@ -1185,12 +1185,8 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
   }
   pendingTransactions.add(transactionKey);
   
-  // Modal submissions need deferReply, buttons need deferUpdate
-  if (fromModal) {
-    await interaction.deferReply({ flags: 64 });
-  } else {
-    await interaction.deferUpdate();
-  }
+  // Always use deferUpdate for button clicks (even from modal confirmation flow)
+  await interaction.deferUpdate();
   
   let username = targetUserId;
   try {
@@ -1289,8 +1285,14 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
     
     pendingTransactions.delete(transactionKey);
     
-    // Update panel and send public message
-    await showStockPanel(interaction, guildId, userId, true, true);
+    // For modal confirmations, clear the ephemeral confirmation message
+    // For regular flow, update the panel
+    if (fromModal) {
+      await interaction.editReply({ content: '✅ Purchase complete!', embeds: [], components: [] });
+    } else {
+      await showStockPanel(interaction, guildId, userId, true, true);
+    }
+    
     try {
       await interaction.channel.send({ embeds: [embed] });
     } catch (e) {
@@ -1478,12 +1480,8 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     return fromModal ? interaction.reply({ ...msg, flags: 64 }) : interaction.update(msg);
   }
   
-  // Modal submissions need deferReply, buttons need deferUpdate
-  if (fromModal) {
-    await interaction.deferReply({ flags: 64 });
-  } else {
-    await interaction.deferUpdate();
-  }
+  // Always use deferUpdate for button clicks (even from modal confirmation flow)
+  await interaction.deferUpdate();
   
   let username = targetUserId;
   try {
@@ -1523,8 +1521,14 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     
     pendingTransactions.delete(transactionKey);
     
-    // Update panel and send public message
-    await showStockPanel(interaction, guildId, userId, true, true);
+    // For modal confirmations, clear the ephemeral confirmation message
+    // For regular flow, update the panel
+    if (fromModal) {
+      await interaction.editReply({ content: '✅ Sale complete!', embeds: [], components: [] });
+    } else {
+      await showStockPanel(interaction, guildId, userId, true, true);
+    }
+    
     try {
       await interaction.channel.send({ embeds: [embed] });
     } catch (e) {

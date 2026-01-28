@@ -4,7 +4,7 @@
 const { getDb } = require('./database');
 const { getBalance, removeFromBank, getAllBalances, applyFine } = require('./economy');
 const { getPortfolio, calculateStockPrice } = require('./database');
-const { getUserProperties, getTotalPropertyValue } = require('./property');
+const { getUserProperties, getTotalPropertyValue, getExpandedPropertyValue } = require('./property');
 const { getLotteryInfo, setJackpot } = require('./gambling');
 
 let db = null;
@@ -166,14 +166,20 @@ function calculateUserWealth(guildId, userId) {
     stockWealth += price * stock.shares;
   }
   
-  // Property value
+  // Property value (total including remodel bonuses)
   const propertyWealth = getTotalPropertyValue(guildId, userId);
+  
+  // Expanded properties are tax-sheltered
+  const expandedPropertyValue = getExpandedPropertyValue(guildId, userId);
+  const taxablePropertyWealth = propertyWealth - expandedPropertyValue;
   
   return {
     cash: cashWealth,
     stocks: stockWealth,
     properties: propertyWealth,
-    total: cashWealth + stockWealth + propertyWealth
+    taxableProperties: taxablePropertyWealth,
+    taxSheltered: expandedPropertyValue,
+    total: cashWealth + stockWealth + taxablePropertyWealth // Tax shelter excludes expanded properties
   };
 }
 
