@@ -20,7 +20,7 @@ const {
   SIX_CARD_BONUS_PAYOUTS,
   ANTE_BONUS_PAYOUTS
 } = require('../threecardpoker');
-const { isEnabled, getBalance, removeFromBank, addToBank } = require('../economy');
+const { isEnabled, getBalance, removeFromBank, addMoney } = require('../economy');
 const { generateThreeCardPokerImage } = require('../cardImages');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
@@ -469,12 +469,12 @@ async function handleDeal(interaction, game) {
       if (timeoutResult && !timeoutResult.cancelled) {
         // Refund side bet wins if any
         if (timeoutResult.results.totalResult > 0) {
-          await addToBank(guildId, oderId, timeoutResult.results.totalResult + game.anteBet + game.pairPlusBet + game.sixCardBet);
+          await addMoney(guildId, userId, timeoutResult.results.totalResult + game.anteBet + game.pairPlusBet + game.sixCardBet);
         } else if (timeoutResult.results.pairPlusResult > 0 || timeoutResult.results.sixCardResult > 0) {
           // Partial refund for side bet wins
           const sideWins = Math.max(0, timeoutResult.results.pairPlusResult) + Math.max(0, timeoutResult.results.sixCardResult);
           if (sideWins > 0) {
-            await addToBank(guildId, userId, sideWins);
+            await addMoney(guildId, userId, sideWins);
           }
         }
         
@@ -512,7 +512,7 @@ async function handleCancel(interaction, game) {
   const guildId = interaction.guildId;
   
   // Refund ante (side bets not yet deducted in betting phase)
-  await addToBank(guildId, userId, game.anteBet);
+  await addMoney(guildId, userId, game.anteBet);
   
   endGame(userId);
   
@@ -554,13 +554,13 @@ async function handlePlay(interaction, game) {
   const netResult = result.results.totalResult;
   
   if (netResult >= 0) {
-    // Return original bets plus winnings
-    await addToBank(guildId, userId, totalBet + netResult);
+    // Return original bets plus winnings to cash balance
+    await addMoney(guildId, userId, totalBet + netResult);
   } else {
-    // Return any partial wins (side bets that won)
+    // Return any partial wins (side bets that won) to cash balance
     const partialReturn = totalBet + netResult; // netResult is negative
     if (partialReturn > 0) {
-      await addToBank(guildId, userId, partialReturn);
+      await addMoney(guildId, userId, partialReturn);
     }
   }
   
@@ -599,10 +599,10 @@ async function handleFold(interaction, game) {
   const sideBetLosses = Math.min(0, result.results.pairPlusResult) + Math.min(0, result.results.sixCardResult);
   const sideBetTotal = game.pairPlusBet + game.sixCardBet;
   
-  // Return side bet stakes + any wins, minus losses
+  // Return side bet stakes + any wins, minus losses to cash balance
   const sideReturn = sideBetTotal + sideBetWins + sideBetLosses;
   if (sideReturn > 0) {
-    await addToBank(guildId, userId, sideReturn);
+    await addMoney(guildId, userId, sideReturn);
   }
   
   // Show results

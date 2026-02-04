@@ -20,7 +20,7 @@ module.exports = {
         },
         {
           name: '📈 Base Price Formula',
-          value: `• Starting value: 100 ${CURRENCY}\n• +0.5% per message (last 15 days)\n• +0.5% per share owned by others (max +50%)\n• -5% per day of inactivity after 3 days (max -50%)`,
+          value: `• Starting value: 100 ${CURRENCY}\n• +0.2% per message (max +60%)\n• +0.3% per share owned by others (max +30%)\n• -3% per day of inactivity after 3 days (max -30%)`,
           inline: false
         },
         {

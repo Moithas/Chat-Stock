@@ -272,13 +272,16 @@ function formatTimeRemaining(expiresAt) {
   
   if (remaining <= 0) return 'Ready!';
   
-  const minutes = Math.floor(remaining / (60 * 1000));
+  const hours = Math.floor(remaining / (60 * 60 * 1000));
+  const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
   const seconds = Math.floor((remaining % (60 * 1000)) / 1000);
   
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-  return `${seconds}s`;
+  // Format as hh:mm:ss
+  const hh = String(hours).padStart(2, '0');
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(seconds).padStart(2, '0');
+  
+  return `${hh}:${mm}:${ss}`;
 }
 
 // Build the cooldown tracker embed
@@ -397,6 +400,11 @@ async function updateCooldownTracker(guildId) {
     updateTrackerSettings(guildId, { messageId: msg.id });
     
   } catch (error) {
+    // Silently ignore connection timeouts - these are transient Discord API issues
+    if (error.code === 'UND_ERR_CONNECT_TIMEOUT' || error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+      // Discord is temporarily unreachable, will retry on next interval
+      return;
+    }
     console.error('Error updating cooldown tracker:', error);
   }
 }

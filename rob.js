@@ -116,6 +116,17 @@ function initRob(database) {
     )
   `);
   
+  // Create gift protection table (prevents robbing after recent gifts)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS rob_gift_protection (
+      guild_id TEXT NOT NULL,
+      giver_id TEXT NOT NULL,
+      recipient_id TEXT NOT NULL,
+      gift_time INTEGER NOT NULL,
+      PRIMARY KEY (guild_id, giver_id, recipient_id)
+    )
+  `);
+  
   // Create rob history table
   db.run(`
     CREATE TABLE IF NOT EXISTS rob_history (
@@ -186,6 +197,12 @@ function initRob(database) {
       purchased_at INTEGER NOT NULL
     )
   `);
+  
+  // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_rob_tracker_guild_user ON rob_tracker(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_rob_target_tracker_guild_target ON rob_target_tracker(guild_id, target_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_rob_history_guild_time ON rob_history(guild_id, rob_time)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_rob_gift_protection ON rob_gift_protection(guild_id, giver_id, recipient_id)`);
   
   console.log('💰 Rob system initialized');
 }
@@ -386,6 +403,50 @@ function recordTargetRobbed(guildId, targetId) {
     INSERT OR REPLACE INTO rob_target_tracker (guild_id, target_id, last_targeted_time)
     VALUES (?, ?, ?)
   `, [guildId, targetId, now]);
+}
+
+// Record a gift to prevent immediate rob exploitation
+function recordGiftProtection(guildId, giverId, recipientId) {
+  if (!db) return;
+  
+  const now = Date.now();
+  db.run(
+    'INSERT OR REPLACE INTO rob_gift_protection (guild_id, giver_id, recipient_id, gift_time) VALUES (?, ?, ?, ?)',
+    [guildId, giverId, recipientId, now]
+  );
+}
+
+// Check if robbing is prevented due to recent gift (24 hour protection)
+function checkGiftProtection(guildId, robberId, targetId) {
+  if (!db) return { canRob: true };
+  
+  const protectionHours = 24; // 24 hour protection after giving money
+  const protectionMs = protectionHours * 60 * 60 * 1000;
+  const cutoffTime = Date.now() - protectionMs;
+  
+  // Check if robber recently gave money to target
+  const stmt = db.prepare(
+    'SELECT gift_time FROM rob_gift_protection WHERE guild_id = ? AND giver_id = ? AND recipient_id = ? AND gift_time > ?'
+  );
+  stmt.bind([guildId, robberId, targetId, cutoffTime]);
+  
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    stmt.free();
+    
+    if (row && row.gift_time) {
+      const timeLeft = row.gift_time + protectionMs - Date.now();
+      const hoursLeft = Math.ceil(timeLeft / (60 * 60 * 1000));
+      return { 
+        canRob: false, 
+        reason: `You recently gave money to this user. Wait ${hoursLeft} more hour(s) before robbing them.`
+      };
+    }
+  } else {
+    stmt.free();
+  }
+  
+  return { canRob: true };
 }
 
 // Calculate success rate based on formula: target's cash / (target's cash + robber's total balance)
@@ -789,6 +850,8 @@ module.exports = {
   canBeRobbed,
   canRobTarget,
   recordTargetRobbed,
+  recordGiftProtection,
+  checkGiftProtection,
   calculateSuccessRate,
   attemptRob,
   calculateStolenAmount,

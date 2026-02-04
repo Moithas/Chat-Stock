@@ -202,6 +202,13 @@ function initDividends(database) {
     )
   `);
   
+  // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dividend_history_guild ON dividend_history(guild_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dividend_history_time ON dividend_history(payout_time)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_split_history_guild ON split_history(guild_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_passive_income_tracker_guild_user ON passive_income_tracker(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_role_income_tracker_guild_user ON role_income_tracker(guild_id, user_id)`);
+  
   console.log('💰 Dividends & Splits system initialized');
 }
 

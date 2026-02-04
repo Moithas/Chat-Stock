@@ -104,6 +104,10 @@ function initWork(database) {
     )
   `);
   
+  // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_work_tracker_guild_user ON work_tracker(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_work_history_guild_user ON work_history(guild_id, user_id)`);
+  
   console.log('💼 Work system initialized');
 }
 

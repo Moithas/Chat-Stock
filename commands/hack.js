@@ -242,6 +242,14 @@ module.exports = {
     const hackerBalance = getBalance(guildId, hackerId);
     const targetBalance = getBalance(guildId, targetId);
 
+    // Check if target has bank debt - can't hack players with negative bank
+    // (negative cash is fine, we're stealing from bank not cash)
+    if (targetBalance.bank < 0) {
+      return interaction.reply({
+        content: `❌ You cannot hack ${targetUser.username} - their bank account is in debt!`
+      });
+    }
+
     // Check if target has any bank balance to steal
     if (targetBalance.bank === 0) {
       return interaction.reply({

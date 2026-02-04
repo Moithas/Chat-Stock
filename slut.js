@@ -217,6 +217,10 @@ function initSlut(database) {
     )
   `);
   
+  // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_slut_tracker_guild_user ON slut_tracker(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_slut_history_guild_user ON slut_history(guild_id, user_id)`);
+  
   console.log('💋 Slut system initialized');
 }
 
@@ -331,13 +335,18 @@ function calculateSlutReward(settings) {
 
 function calculateFine(settings, totalBalance) {
   // Fine is a percentage of the user's total balance
+  // If user has no money, no fine
+  if (totalBalance <= 0) return 0;
+  
   const minPercent = settings.fineMinPercent / 100;
   const maxPercent = settings.fineMaxPercent / 100;
   const finePercent = Math.random() * (maxPercent - minPercent) + minPercent;
   
-  // Minimum fine is based on the reward range
-  const minFine = Math.floor(settings.minReward * 0.5);
+  // Calculate fine as percentage of balance
   const calculatedFine = Math.floor(totalBalance * finePercent);
+  
+  // Minimum fine is based on the reward range, but only if they have money
+  const minFine = Math.floor(settings.minReward * 0.5);
   
   return Math.max(minFine, calculatedFine);
 }

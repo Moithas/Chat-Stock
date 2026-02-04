@@ -3,7 +3,7 @@ const { Client, GatewayIntentBits, Collection, REST, Routes, ActivityType } = re
 const { initDatabase, createUser, updateMessageCount, calculateStockPrice, logPrice, getUser, getDb, getStreakInfo } = require('./database');
 const { initTicker, sendStreakAnnouncement, sendStreakExpiredAnnouncement } = require('./ticker');
 const { initFees } = require('./fees');
-const { initAntiSpam, shouldCountMessage } = require('./antispam');
+const { initAntiSpam, shouldCountMessage, shouldCountButtonInteraction } = require('./antispam');
 const { initAdmin } = require('./admin');
 const { initMarketProtection } = require('./market');
 const { initProperty, scheduleCardDistribution } = require('./property');
@@ -25,6 +25,7 @@ const { initCooldownTracker, startAllTrackers } = require('./cooldown-tracker');
 const { initialize: initInBetween } = require('./inbetween');
 const { initialize: initLetItRide } = require('./letitride');
 const { initialize: initThreeCardPoker } = require('./threecardpoker');
+const { initMaintenance, startCleanupScheduler, logError, checkCommandCooldown, updateCommandCooldown } = require('./maintenance');
 const fs = require('fs');
 const path = require('path');
 
@@ -383,6 +384,9 @@ client.once('clientReady', async () => {
   // Initialize Three Card Poker game
   initThreeCardPoker(getDb());
 
+  // Initialize maintenance system (cleanup, error logging, rate limiting)
+  initMaintenance(getDb(), client);
+
   // Start lottery auto-draw scheduler
   startLotteryScheduler(client);
 
@@ -397,6 +401,9 @@ client.once('clientReady', async () => {
 
   // Start rob immunity expiration scheduler
   startImmunityScheduler(client);
+
+  // Start database cleanup scheduler (daily at 4 AM)
+  startCleanupScheduler();
 
   // Initialize stock ticker
   initTicker(client);
@@ -544,15 +551,24 @@ client.on('interactionCreate', async (interaction) => {
     });
   }
 
-  // Count button clicks, select menu selections, and modals toward activity
+  // Count button clicks, select menu selections, and modals toward activity (with cooldown)
   if (!interaction.user.bot && (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isUserSelectMenu() || interaction.isModalSubmit())) {
     const userId = interaction.user.id;
+    const guildId = interaction.guildId;
     
     // Create user if doesn't exist
     createUser(userId, interaction.user.username);
     
-    // Count this interaction as activity
-    updateMessageCount(Date.now(), userId);
+    // Check if button interaction should count (respects cooldown)
+    const { shouldCount, reason } = shouldCountButtonInteraction(guildId, userId);
+    
+    if (shouldCount) {
+      // Count this interaction as activity
+      updateMessageCount(Date.now(), userId);
+    } else if (reason) {
+      // Optionally log the cooldown reason for debugging
+      // console.log(`[ANTISPAM] Button interaction blocked for ${interaction.user.username}: ${reason}`);
+    }
   }
 
   // Debug logging for scratch buttons
@@ -573,6 +589,26 @@ client.on('interactionCreate', async (interaction) => {
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
       console.error('Error handling scratch button:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle maintenance panel buttons, modals, and selects
+  if ((interaction.isButton() && interaction.customId.startsWith('maint_')) ||
+      (interaction.isStringSelectMenu() && interaction.customId === 'maint_command_select') ||
+      (interaction.isModalSubmit() && interaction.customId === 'modal_command_cooldown')) {
+    try {
+      const { handleInteraction } = require('./commands/admin-maintenance');
+      const handled = await handleInteraction(interaction, interaction.guildId);
+      if (handled) return;
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling maintenance interaction:', error);
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1195,6 +1231,9 @@ client.on('interactionCreate', async (interaction) => {
       'wealth_tax_collect_now', 'wealth_tax_confirm_collect', 'wealth_tax_reset_tiers', 'wealth_tax_back',
       'wealth_tax_add_tier', 'wealth_tax_tier_select', 'wealth_tax_schedule_modal', 'wealth_tax_channel_modal', 
       'wealth_tax_add_tier_modal', 'wealth_tax_last_collection',
+      // Activity Tiers
+      'activity_tiers_panel', 'activity_tiers_toggle', 'activity_tiers_edit', 'activity_tiers_back',
+      'modal_activity_tiers',
       'admin_skills', 'admin_skills_edit_xp', 'admin_skills_edit_hack', 'admin_skills_edit_rob',
       'admin_skills_view_levels', 'back_admin_skills',
       'modal_admin_skills_xp', 'modal_admin_skills_hack', 'modal_admin_skills_rob',
@@ -1307,9 +1346,25 @@ client.on('interactionCreate', async (interaction) => {
   // Track slash command usage as a message (always counts, no anti-spam)
   const userId = interaction.user.id;
   const username = interaction.user.username;
+  const guildId = interaction.guildId;
+  const commandName = interaction.commandName;
   
   createUser(userId, username);
   updateMessageCount(Date.now(), userId);
+  
+  // Check command rate limit (separate from built-in cooldowns)
+  const cooldownCheck = checkCommandCooldown(guildId, userId, commandName);
+  if (cooldownCheck.onCooldown) {
+    try {
+      await interaction.reply({
+        content: `⏳ Please wait **${cooldownCheck.remainingSeconds}s** before using \`/${commandName}\` again.`,
+        flags: 64
+      });
+    } catch (e) {
+      // Interaction may have expired
+    }
+    return;
+  }
   
   // Periodically log price
   const userMessages = getUser(userId);
@@ -1318,8 +1373,11 @@ client.on('interactionCreate', async (interaction) => {
     logPrice(userId, currentPrice, Date.now());
   }
 
-  const command = client.commands.get(interaction.commandName);
+  const command = client.commands.get(commandName);
   if (!command) return;
+
+  // Update cooldown timestamp after successful command lookup
+  updateCommandCooldown(guildId, userId, commandName);
 
   try {
     await command.execute(interaction);
@@ -1327,11 +1385,18 @@ client.on('interactionCreate', async (interaction) => {
     // Ignore interaction errors - these happen when bot restarts while commands are pending
     // 10062 = Unknown interaction (expired), 40060 = Already acknowledged
     if (error.code === 10062 || error.code === 40060) {
-      console.log(`⚠️ Interaction issue for /${interaction.commandName}: ${error.code === 10062 ? 'expired' : 'already acknowledged'}`);
+      console.log(`⚠️ Interaction issue for /${commandName}: ${error.code === 10062 ? 'expired' : 'already acknowledged'}`);
       return;
     }
     
-    console.error('Error executing command:', error);
+    // Log error to maintenance system
+    logError({
+      guildId,
+      userId,
+      command: commandName,
+      error
+    });
+    
     try {
       const errorMessage = { content: 'There was an error executing this command!', flags: 64 };
       

@@ -88,6 +88,11 @@ function initHack(database) {
     )
   `);
   
+  // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_hack_tracker_guild_user ON hack_tracker(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_hack_target_tracker_guild_target ON hack_target_tracker(guild_id, target_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_hack_history_guild_time ON hack_history(guild_id, hack_time)`);
+  
   console.log('💻 Hack system initialized');
 }
 

@@ -2,11 +2,12 @@
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelSelectMenuBuilder, ChannelType, StringSelectMenuBuilder } = require('discord.js');
 const { logAdminAction } = require('../admin');
 const { getGuildSettings, setFeesEnabled, updateBuyFee, updateSellFee } = require('../fees');
-const { getSpamSettings, setAntiSpamEnabled, updateCooldown, updateMinLength } = require('../antispam');
+const { getSpamSettings, setAntiSpamEnabled, updateCooldown, updateMinLength, updateButtonCooldown } = require('../antispam');
 const { getMarketSettings, updateSellCooldown, updatePriceImpactDelay, updateCapitalGainsTax } = require('../market');
 const { getTickerChannel, setTickerChannel, getDashboardSettings, updateDashboardSettings, setDashboardChannel, updateDashboard } = require('../ticker');
 const { getEventSettings, updateEventSettings, triggerEvent } = require('../events');
 const { getTrackerSettings, saveTrackerSettings, updateTrackerSettings, setTrackerChannel, setTrackerEnabled, startCooldownTracker, stopCooldownTracker, updateCooldownTracker } = require('../cooldown-tracker');
+const { getActivityTierSettings, updateActivityTierSettings, calculateDailyContribution } = require('../database');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -18,6 +19,8 @@ const BUTTON_IDS = [
   'antispam_toggle', 'antispam_edit_settings',
   // Market
   'market_edit_cooldown', 'market_edit_tax',
+  // Activity Tiers
+  'activity_tiers_panel', 'activity_tiers_toggle', 'activity_tiers_edit', 'activity_tiers_back',
   // Ticker
   'ticker_edit_threshold', 'ticker_toggle_weekly', 'ticker_manage_channels', 'ticker_set_channel',
   // Dashboard
@@ -35,6 +38,7 @@ const MODAL_IDS = [
   'modal_buy_fee', 'modal_sell_fee',
   'modal_antispam_settings',
   'modal_market_cooldown', 'modal_market_capital_gains',
+  'modal_activity_tiers',
   'modal_ticker_threshold',
   'modal_dashboard_settings',
   'modal_events_settings', 'modal_events_weights',
@@ -79,6 +83,21 @@ async function handleInteraction(interaction, guildId) {
         return true;
       case 'market_edit_tax':
         await handleMarketEditTax(interaction, guildId);
+        return true;
+        
+      // Activity Tiers buttons
+      case 'activity_tiers_panel':
+        await showActivityTiersPanel(interaction, guildId);
+        return true;
+      case 'activity_tiers_toggle':
+        await handleActivityTiersToggle(interaction, guildId);
+        return true;
+      case 'activity_tiers_edit':
+        await handleActivityTiersEdit(interaction, guildId);
+        return true;
+      case 'activity_tiers_back':
+        await interaction.deferUpdate();
+        await showMarketPanel(interaction, guildId);
         return true;
         
       // Ticker buttons
@@ -162,6 +181,9 @@ async function handleInteraction(interaction, guildId) {
         return true;
       case 'modal_market_capital_gains':
         await handleCapitalGainsModal(interaction, guildId);
+        return true;
+      case 'modal_activity_tiers':
+        await handleActivityTiersModal(interaction, guildId);
         return true;
       case 'modal_ticker_threshold':
         await handleTickerThresholdModal(interaction, guildId);
@@ -366,7 +388,8 @@ async function showAntiSpamPanel(interaction, guildId) {
     .setDescription('Configure anti-spam settings for message counting (affects event/vault triggers)')
     .addFields(
       { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-      { name: '⏱️ Cooldown', value: `${settings.cooldownSeconds} seconds`, inline: true },
+      { name: '⏱️ Message Cooldown', value: `${settings.cooldownSeconds} seconds`, inline: true },
+      { name: '🖱️ Button Cooldown', value: `${settings.buttonCooldownSeconds} seconds`, inline: true },
       { name: '📝 Min Length', value: `${settings.minMessageLength} characters`, inline: true }
     );
 
@@ -407,12 +430,14 @@ async function handleAntiSpamEditSettings(interaction, guildId) {
 
 async function handleAntiSpamModal(interaction, guildId) {
   const cooldownSeconds = parseInt(interaction.fields.getTextInputValue('cooldown_seconds')) || 30;
+  const buttonCooldownSeconds = parseInt(interaction.fields.getTextInputValue('button_cooldown_seconds')) || 3;
   const minLength = parseInt(interaction.fields.getTextInputValue('min_length')) || 5;
   
   updateCooldown(guildId, cooldownSeconds);
+  updateButtonCooldown(guildId, buttonCooldownSeconds);
   updateMinLength(guildId, minLength);
   
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated anti-spam: cooldown=${cooldownSeconds}s, minLength=${minLength}`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated anti-spam: cooldown=${cooldownSeconds}s, buttonCooldown=${buttonCooldownSeconds}s, minLength=${minLength}`);
   await interaction.reply({ content: '✅ Anti-spam settings updated!', flags: 64 });
 }
 
@@ -424,9 +449,18 @@ function createAntiSpamModal(settings) {
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId('cooldown_seconds')
-          .setLabel('Cooldown Between Messages (seconds)')
+          .setLabel('Message Cooldown (seconds)')
           .setPlaceholder('30')
           .setValue(String(settings.cooldownSeconds || 30))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('button_cooldown_seconds')
+          .setLabel('Button Cooldown (seconds)')
+          .setPlaceholder('3')
+          .setValue(String(settings.buttonCooldownSeconds || 3))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
       ),
@@ -446,6 +480,7 @@ function createAntiSpamModal(settings) {
 async function showMarketPanel(interaction, guildId) {
   const marketSettings = getMarketSettings(guildId);
   const feeSettings = getGuildSettings(guildId);
+  const tierSettings = getActivityTierSettings(guildId);
   
   // Format fee display
   const buyFeeDisplay = feeSettings.buyFeeType === 'percent' ? `${feeSettings.buyFeeValue}%` : feeSettings.buyFeeValue.toLocaleString();
@@ -463,7 +498,8 @@ async function showMarketPanel(interaction, guildId) {
       { name: '📈 Long-Term Tax', value: `${marketSettings.longTermTaxPercent || 0}%`, inline: true },
       { name: '⏰ Short-Term Threshold', value: `${marketSettings.shortTermThresholdHours || 24} hours`, inline: true },
       { name: '⏱️ Sell Cooldown', value: `${marketSettings.sellCooldownMinutes || 60} minutes`, inline: true },
-      { name: '📉 Price Impact Delay', value: `${marketSettings.priceImpactDelayMinutes || 120} minutes`, inline: true }
+      { name: '📉 Price Impact Delay', value: `${marketSettings.priceImpactDelayMinutes || 120} minutes`, inline: true },
+      { name: '📈 Activity Tiers', value: tierSettings.enabled ? '✅ Diminishing Returns' : '❌ Flat Rate (Legacy)', inline: true }
     );
 
   // Row 1: Fees
@@ -495,14 +531,22 @@ async function showMarketPanel(interaction, guildId) {
     .setLabel('⏱️ Cooldowns')
     .setStyle(ButtonStyle.Primary);
 
+  const activityTiersBtn = new ButtonBuilder()
+    .setCustomId('activity_tiers_panel')
+    .setLabel('📈 Activity Tiers')
+    .setStyle(ButtonStyle.Primary);
+
+  const row2 = new ActionRowBuilder().addComponents(taxBtn, cooldownBtn, activityTiersBtn);
+
+  // Row 3: Back
   const backBtn = new ButtonBuilder()
     .setCustomId('back_dashboard')
     .setLabel('◀️ Back')
     .setStyle(ButtonStyle.Secondary);
 
-  const row2 = new ActionRowBuilder().addComponents(taxBtn, cooldownBtn, backBtn);
+  const row3 = new ActionRowBuilder().addComponents(backBtn);
 
-  await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+  await interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
 }
 
 async function handleMarketEditCooldown(interaction, guildId) {
@@ -596,6 +640,187 @@ function createCapitalGainsTaxModal(settings) {
           .setLabel('Short-Term Threshold (hours)')
           .setPlaceholder('24')
           .setValue(String(settings.shortTermThresholdHours || 24))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
+// ==================== ACTIVITY TIERS PANEL ====================
+async function showActivityTiersPanel(interaction, guildId) {
+  await interaction.deferUpdate();
+  
+  const settings = getActivityTierSettings(guildId);
+  
+  // Calculate example daily contributions
+  const example20 = calculateDailyContribution(20, settings).toFixed(2);
+  const example50 = calculateDailyContribution(50, settings).toFixed(2);
+  const example100 = calculateDailyContribution(100, settings).toFixed(2);
+  const example200 = calculateDailyContribution(200, settings).toFixed(2);
+  
+  // Calculate max possible contribution over window
+  const maxDaily = calculateDailyContribution(500, settings);
+  const max15Day = (maxDaily * settings.windowDays).toFixed(1);
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x9b59b6)
+    .setTitle('📈 Activity Tiers (Diminishing Returns)')
+    .setDescription(
+      `Control how chat activity affects stock prices. Every message counts, but with diminishing returns per day to prevent spam and reward consistent activity.\n\n` +
+      `**Status:** ${settings.enabled ? '✅ Enabled (Diminishing Returns)' : '❌ Disabled (Legacy Flat Rate)'}`
+    )
+    .addFields(
+      { 
+        name: '🎯 Current Tiers', 
+        value: 
+          `**Tier 1** (1-${settings.tier1Threshold}): ${settings.tier1Rate}% per message\n` +
+          `**Tier 2** (${settings.tier1Threshold + 1}-${settings.tier2Threshold}): ${settings.tier2Rate}% per message\n` +
+          `**Tier 3** (${settings.tier2Threshold + 1}-${settings.tier3Threshold}): ${settings.tier3Rate}% per message\n` +
+          `**Tier 4** (${settings.tier3Threshold + 1}+): ${settings.tier4Rate}% per message`,
+        inline: false 
+      },
+      { 
+        name: '📊 Example Daily Contributions', 
+        value: 
+          `20 msgs → +${example20}%\n` +
+          `50 msgs → +${example50}%\n` +
+          `100 msgs → +${example100}%\n` +
+          `200 msgs → +${example200}%`,
+        inline: true 
+      },
+      { 
+        name: '⏱️ Settings', 
+        value: 
+          `**Window:** ${settings.windowDays} days\n` +
+          `**Max (15d active):** ~+${max15Day}%`,
+        inline: true 
+      },
+      {
+        name: '💡 How It Works',
+        value: 
+          `• First messages each day are worth the most\n` +
+          `• Every message always adds something\n` +
+          `• Resets daily - come back tomorrow for full value!\n` +
+          `• Messages older than ${settings.windowDays} days fall off`,
+        inline: false
+      }
+    );
+
+  const toggleBtn = new ButtonBuilder()
+    .setCustomId('activity_tiers_toggle')
+    .setLabel(settings.enabled ? 'Disable (Use Flat Rate)' : 'Enable Diminishing Returns')
+    .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success);
+
+  const editBtn = new ButtonBuilder()
+    .setCustomId('activity_tiers_edit')
+    .setLabel('✏️ Edit Tiers')
+    .setStyle(ButtonStyle.Primary);
+
+  const backBtn = new ButtonBuilder()
+    .setCustomId('activity_tiers_back')
+    .setLabel('◀️ Back to Market')
+    .setStyle(ButtonStyle.Secondary);
+
+  const row = new ActionRowBuilder().addComponents(toggleBtn, editBtn, backBtn);
+
+  await interaction.editReply({ embeds: [embed], components: [row] });
+}
+
+async function handleActivityTiersToggle(interaction, guildId) {
+  const settings = getActivityTierSettings(guildId);
+  settings.enabled = !settings.enabled;
+  updateActivityTierSettings(guildId, settings);
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `${settings.enabled ? 'Enabled' : 'Disabled'} activity tier diminishing returns`);
+  
+  await showActivityTiersPanel(interaction, guildId);
+}
+
+async function handleActivityTiersEdit(interaction, guildId) {
+  const settings = getActivityTierSettings(guildId);
+  const modal = createActivityTiersModal(settings);
+  await interaction.showModal(modal);
+}
+
+async function handleActivityTiersModal(interaction, guildId) {
+  const tier1Threshold = parseInt(interaction.fields.getTextInputValue('tier1_threshold')) || 20;
+  const tier1Rate = parseFloat(interaction.fields.getTextInputValue('tier1_rate')) || 0.15;
+  const tier2Threshold = parseInt(interaction.fields.getTextInputValue('tier2_threshold')) || 50;
+  const tier2Rate = parseFloat(interaction.fields.getTextInputValue('tier2_rate')) || 0.05;
+  const tier3Threshold = parseInt(interaction.fields.getTextInputValue('tier3_threshold')) || 100;
+  
+  // Validate thresholds are in order
+  if (tier2Threshold <= tier1Threshold || tier3Threshold <= tier2Threshold) {
+    await interaction.reply({ 
+      content: '❌ Tier thresholds must be in ascending order (Tier 1 < Tier 2 < Tier 3).', 
+      flags: 64 
+    });
+    return;
+  }
+  
+  const settings = getActivityTierSettings(guildId);
+  settings.tier1Threshold = tier1Threshold;
+  settings.tier1Rate = tier1Rate;
+  settings.tier2Threshold = tier2Threshold;
+  settings.tier2Rate = tier2Rate;
+  settings.tier3Threshold = tier3Threshold;
+  
+  updateActivityTierSettings(guildId, settings);
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `Updated activity tiers: T1=${tier1Threshold}@${tier1Rate}%, T2=${tier2Threshold}@${tier2Rate}%, T3=${tier3Threshold}`);
+  
+  await interaction.reply({ content: '✅ Activity tiers updated!', flags: 64 });
+}
+
+function createActivityTiersModal(settings) {
+  return new ModalBuilder()
+    .setCustomId('modal_activity_tiers')
+    .setTitle('Edit Activity Tiers')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tier1_threshold')
+          .setLabel('Tier 1 Threshold (messages)')
+          .setPlaceholder('20')
+          .setValue(String(settings.tier1Threshold))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tier1_rate')
+          .setLabel('Tier 1 Rate (% per message)')
+          .setPlaceholder('0.15')
+          .setValue(String(settings.tier1Rate))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tier2_threshold')
+          .setLabel('Tier 2 Threshold (messages)')
+          .setPlaceholder('50')
+          .setValue(String(settings.tier2Threshold))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tier2_rate')
+          .setLabel('Tier 2 Rate (% per message)')
+          .setPlaceholder('0.05')
+          .setValue(String(settings.tier2Rate))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tier3_threshold')
+          .setLabel('Tier 3 Threshold (messages)')
+          .setPlaceholder('100')
+          .setValue(String(settings.tier3Threshold))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
       )
@@ -1326,11 +1551,13 @@ module.exports = {
   showTickerPanel,
   showEventsPanel,
   showTrackerPanel,
+  showActivityTiersPanel,
   createBuyFeeModal,
   createSellFeeModal,
   createAntiSpamModal,
   createMarketCooldownModal,
   createCapitalGainsTaxModal,
+  createActivityTiersModal,
   createTickerThresholdModal,
   createEventsSettingsModal,
   createEventsWeightsModal

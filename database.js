@@ -110,6 +110,22 @@ async function initDatabase() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_timestamp ON price_history(timestamp)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_economy_transactions_guild_user ON economy_transactions(guild_id, user_id)`);
 
+  // Activity tier settings for diminishing returns
+  db.run(`
+    CREATE TABLE IF NOT EXISTS activity_tier_settings (
+      guild_id TEXT PRIMARY KEY,
+      enabled INTEGER DEFAULT 1,
+      tier1_threshold INTEGER DEFAULT 20,
+      tier1_rate REAL DEFAULT 0.15,
+      tier2_threshold INTEGER DEFAULT 50,
+      tier2_rate REAL DEFAULT 0.05,
+      tier3_threshold INTEGER DEFAULT 100,
+      tier3_rate REAL DEFAULT 0.02,
+      tier4_rate REAL DEFAULT 0.005,
+      window_days INTEGER DEFAULT 15
+    )
+  `);
+
   console.log('✅ Database initialized');
 }
 
@@ -352,26 +368,149 @@ function getStreakInfo(userId) {
   return { days: streakDays, tier: currentTier, bonus, newTier };
 }
 
+// Get activity tier settings for a guild
+function getActivityTierSettings(guildId) {
+  const defaults = {
+    enabled: true,
+    tier1Threshold: 20,   // First 20 messages
+    tier1Rate: 0.5,       // 0.5% each = 10% max
+    tier2Threshold: 50,   // Messages 21-50
+    tier2Rate: 0.25,      // 0.25% each = 7.5% max
+    tier3Threshold: 100,  // Messages 51-100
+    tier3Rate: 0.15,      // 0.15% each = 7.5% max
+    tier4Rate: 0.05,      // Messages 101+ = 0.05% each (no cap!)
+    windowDays: 15
+  };
+  
+  if (!guildId) return defaults;
+  
+  const result = db.exec('SELECT * FROM activity_tier_settings WHERE guild_id = ?', [guildId]);
+  if (result.length === 0 || result[0].values.length === 0) return defaults;
+  
+  const cols = result[0].columns;
+  const vals = result[0].values[0];
+  const row = cols.reduce((obj, col, i) => ({ ...obj, [col]: vals[i] }), {});
+  
+  return {
+    enabled: row.enabled === 1,
+    tier1Threshold: row.tier1_threshold,
+    tier1Rate: row.tier1_rate,
+    tier2Threshold: row.tier2_threshold,
+    tier2Rate: row.tier2_rate,
+    tier3Threshold: row.tier3_threshold,
+    tier3Rate: row.tier3_rate,
+    tier4Rate: row.tier4_rate,
+    windowDays: row.window_days
+  };
+}
+
+// Update activity tier settings
+function updateActivityTierSettings(guildId, settings) {
+  db.run(`
+    INSERT OR REPLACE INTO activity_tier_settings 
+    (guild_id, enabled, tier1_threshold, tier1_rate, tier2_threshold, tier2_rate, tier3_threshold, tier3_rate, tier4_rate, window_days)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    guildId,
+    settings.enabled ? 1 : 0,
+    settings.tier1Threshold,
+    settings.tier1Rate,
+    settings.tier2Threshold,
+    settings.tier2Rate,
+    settings.tier3Threshold,
+    settings.tier3Rate,
+    settings.tier4Rate,
+    settings.windowDays
+  ]);
+  saveDatabase();
+}
+
+// Calculate daily contribution with diminishing returns
+function calculateDailyContribution(messageCount, settings) {
+  let contribution = 0;
+  let remaining = messageCount;
+  
+  // Tier 1: First N messages at highest rate
+  const tier1Count = Math.min(remaining, settings.tier1Threshold);
+  contribution += tier1Count * settings.tier1Rate;
+  remaining -= tier1Count;
+  
+  // Tier 2: Next batch at medium rate
+  if (remaining > 0) {
+    const tier2Count = Math.min(remaining, settings.tier2Threshold - settings.tier1Threshold);
+    contribution += tier2Count * settings.tier2Rate;
+    remaining -= tier2Count;
+  }
+  
+  // Tier 3: Next batch at lower rate
+  if (remaining > 0) {
+    const tier3Count = Math.min(remaining, settings.tier3Threshold - settings.tier2Threshold);
+    contribution += tier3Count * settings.tier3Rate;
+    remaining -= tier3Count;
+  }
+  
+  // Tier 4: Everything beyond at lowest rate
+  if (remaining > 0) {
+    contribution += remaining * settings.tier4Rate;
+  }
+  
+  return contribution;
+}
+
 // Calculate stock price (guildId optional - for price impact delay and market events)
 function calculateStockPrice(userId, guildId = null) {
   const user = getUser(userId);
   if (!user) return 100.0;
 
-  // Only count messages from the last 15 days
-  const fifteenDaysAgo = Date.now() - (15 * 24 * 60 * 60 * 1000);
-  const recentMessagesResult = db.exec(
-    'SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = "MESSAGE"',
-    [userId, fifteenDaysAgo]
-  );
+  // Get activity tier settings
+  const tierSettings = getActivityTierSettings(guildId);
+  const windowDays = tierSettings.windowDays;
+  const windowAgo = Date.now() - (windowDays * 24 * 60 * 60 * 1000);
   
-  // If no message tracking in transactions, fall back to total_messages (for backwards compatibility)
-  let recentMessages = user.total_messages;
-  if (recentMessagesResult.length > 0 && recentMessagesResult[0].values.length > 0) {
-    recentMessages = recentMessagesResult[0].values[0][0] || user.total_messages;
+  let recentActivityMultiplier = 1.0;
+  
+  if (tierSettings.enabled) {
+    // Get messages grouped by day within the window
+    const messagesResult = db.exec(
+      'SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = "MESSAGE" ORDER BY timestamp ASC',
+      [userId, windowAgo]
+    );
+    
+    if (messagesResult.length > 0 && messagesResult[0].values.length > 0) {
+      // Group messages by day (using local date)
+      const dayBuckets = {};
+      for (const row of messagesResult[0].values) {
+        const timestamp = row[0];
+        const date = new Date(timestamp);
+        const dayKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+        dayBuckets[dayKey] = (dayBuckets[dayKey] || 0) + 1;
+      }
+      
+      // Calculate total contribution from all days with diminishing returns per day
+      let totalContribution = 0;
+      for (const dayKey in dayBuckets) {
+        const dailyMessages = dayBuckets[dayKey];
+        totalContribution += calculateDailyContribution(dailyMessages, tierSettings);
+      }
+      
+      // Convert percentage to multiplier (e.g., 45% -> 1.45)
+      recentActivityMultiplier = 1 + (totalContribution / 100);
+    }
+  } else {
+    // Legacy flat rate system (disabled diminishing returns)
+    const recentMessagesResult = db.exec(
+      'SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = "MESSAGE"',
+      [userId, windowAgo]
+    );
+    
+    let recentMessages = user.total_messages;
+    if (recentMessagesResult.length > 0 && recentMessagesResult[0].values.length > 0) {
+      recentMessages = recentMessagesResult[0].values[0][0] || user.total_messages;
+    }
+    
+    // Old system: 0.2% per message, capped at 60%
+    recentActivityMultiplier = 1 + Math.min(recentMessages * 0.002, 0.60);
   }
-
-  // Recent activity: 0.5% per message in last 15 days
-  const recentActivityMultiplier = 1 + (recentMessages * 0.005);
   
   // Get streak info (includes expiration logic)
   const streakInfo = getStreakInfo(userId);
@@ -386,9 +525,9 @@ function calculateStockPrice(userId, guildId = null) {
     const daysSinceLastMessage = (Date.now() - user.last_message_time) / (24 * 60 * 60 * 1000);
     
     if (user.last_message_time < threeDaysAgo) {
-      // Decay: -5% per day after 3 days of inactivity (max -50%)
+      // Decay: -3% per day after 3 days of inactivity (max -30%)
       const inactiveDays = Math.floor(daysSinceLastMessage - 3);
-      const decayPercent = Math.min(inactiveDays * 0.05, 0.50); // Max 50% decay
+      const decayPercent = Math.min(inactiveDays * 0.03, 0.30); // Max 30% decay
       price *= (1 - decayPercent);
     }
   }
@@ -408,7 +547,7 @@ function calculateStockPrice(userId, guildId = null) {
   }
   
   if (totalShares > 0) {
-    const demandMultiplier = 1 + Math.min(totalShares * 0.005, 0.5);
+    const demandMultiplier = 1 + Math.min(totalShares * 0.003, 0.30);
     price *= demandMultiplier;
   }
 
@@ -648,5 +787,8 @@ module.exports = {
   setPriceModifier,
   getPriceModifier,
   adminAddShares,
-  adminRemoveShares
+  adminRemoveShares,
+  getActivityTierSettings,
+  updateActivityTierSettings,
+  calculateDailyContribution
 };

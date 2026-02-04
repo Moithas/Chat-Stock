@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getBalance, addMoney, removeMoney, removeFromBank } = require('../economy');
+const { recordGiftProtection } = require('../rob');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -89,6 +90,9 @@ module.exports = {
 
     // Add to recipient's cash
     await addMoney(guildId, toUser.id, amount, `Gift from ${fromUser.username}`);
+    
+    // Record gift for rob protection (prevents exploitation)
+    recordGiftProtection(guildId, fromUser.id, toUser.id);
 
     const newSenderBalance = getBalance(guildId, fromUser.id);
     const newRecipientBalance = getBalance(guildId, toUser.id);

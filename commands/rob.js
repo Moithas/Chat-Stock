@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getBalance, removeMoney, forceRemoveMoney, addMoney, applyFine } = require('../economy');
-const { getRobSettings, canRob, canBeRobbed, canRobTarget, recordTargetRobbed, calculateSuccessRate, attemptRob, calculateStolenAmount, calculateFine, recordRob, isUserImmune, hasActiveImmunity } = require('../rob');
+const { getRobSettings, canRob, canBeRobbed, canRobTarget, recordTargetRobbed, recordGiftProtection, checkGiftProtection, calculateSuccessRate, attemptRob, calculateStolenAmount, calculateFine, recordRob, isUserImmune, hasActiveImmunity } = require('../rob');
 const { getRobBonuses, addXp, checkTrainingComplete } = require('../skills');
 const { hasActiveEffect, getEffectValue, EFFECT_TYPES } = require('../items');
 
@@ -205,6 +205,16 @@ module.exports = {
     const trainingResult = checkTrainingComplete(guildId, robberId, 'rob');
     const robBonuses = getRobBonuses(guildId, robberId);
 
+    // Check gift protection (prevent exploitation)
+    const giftProtection = checkGiftProtection(guildId, robberId, targetId);
+    if (!giftProtection.canRob) {
+      let response = `❌ ${giftProtection.reason}`;
+      if (trainingResult) {
+        response = `✅ **Rob training complete!** +${trainingResult.xpGained} XP${trainingResult.levelUp ? ` → **Level ${trainingResult.newLevel}!**` : ''}\n\n` + response;
+      }
+      return interaction.reply({ content: response });
+    }
+
     // Check cooldown (with skill reduction)
     const cooldownCheck = canRob(guildId, robberId, robBonuses.cooldownReduction);
     if (!cooldownCheck.canRob) {
@@ -218,6 +228,13 @@ module.exports = {
     // Get balances
     const robberBalance = getBalance(guildId, robberId);
     const targetBalance = getBalance(guildId, targetId);
+
+    // Check if target has bank debt or cash debt - can't rob players in debt
+    if (targetBalance.bank < 0 || targetBalance.cash < 0) {
+      return interaction.reply({
+        content: `❌ You cannot rob ${targetUser.username} - they are in debt!`
+      });
+    }
 
     // Check if target has any cash to steal
     if (targetBalance.cash === 0) {

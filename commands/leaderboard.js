@@ -128,8 +128,7 @@ async function buildStockLeaderboard(guildId, page = 0) {
       name: `${medal} ${stock.username}`,
       value: 
         `💰 **Price:** ${stock.currentPrice} ${CURRENCY}/share\n` +
-        `📊 **Shares Owned:** ${stock.totalShares || 0} shares\n` +
-        `💬 **Messages:** ${stock.total_messages}`,
+        `📊 **Shares Owned:** ${stock.totalShares || 0} shares\n`,
       inline: false
     });
   }

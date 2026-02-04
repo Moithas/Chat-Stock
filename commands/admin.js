@@ -183,7 +183,8 @@ async function showResetGamePanel(interaction, guildId) {
       '• 💬 All chat history affecting stock prices\n' +
       '• 🎰 All gambling stats and lottery tickets\n' +
       '• 🔓 All rob/hack history and cooldowns\n' +
-      '• 🎒 All user inventories and active effects\n\n' +
+      '• 🎒 All user inventories and active effects\n' +
+      '• 🏦 All loans, bonds, and bond roles\n\n' +
       '**Settings will NOT be reset** (fees, cooldowns, etc.)\n\n' +
       '⚠️ **THIS CANNOT BE UNDONE!**'
     )
@@ -237,6 +238,28 @@ async function handleResetGameConfirm(interaction, guildId) {
     const db = getDb();
     if (!db) {
       return interaction.editReply({ content: '❌ Database not available.' });
+    }
+
+    // Remove bond roles from all users before clearing data
+    try {
+      const activeBondsResult = db.exec(`SELECT DISTINCT user_id, role_id, guild_id FROM active_bonds WHERE status = 'active'`);
+      if (activeBondsResult.length > 0 && activeBondsResult[0].values.length > 0) {
+        const guild = interaction.guild;
+        for (const [userId, roleId, bondGuildId] of activeBondsResult[0].values) {
+          if (bondGuildId === guildId && roleId) {
+            try {
+              const member = await guild.members.fetch(userId).catch(() => null);
+              if (member) {
+                await member.roles.remove(roleId).catch(() => {});
+              }
+            } catch (e) {
+              // Continue if we can't remove a role
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Table might not exist, continue with reset
     }
 
     // Tables to DELETE all data from (player data)
@@ -317,7 +340,13 @@ async function handleResetGameConfirm(interaction, guildId) {
       'message_counters',
       'event_history',
       'cheese_truck_history',
-      'active_market_events'
+      'active_market_events',
+      
+      // Bank - Loans and Bonds
+      'loans',
+      'loan_payments',
+      'active_bonds',
+      'bond_history'
     ];
 
     let deletedCount = 0;

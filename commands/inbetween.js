@@ -1,6 +1,6 @@
 // In Between (Acey Deucey) Command
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require('discord.js');
-const { getBalance, removeMoney, addMoney, removeFromTotal } = require('../economy');
+const { getBalance, removeMoney, addMoney, removeFromTotal, applyFine } = require('../economy');
 const { 
   getSettings, 
   getPot, 
@@ -26,6 +26,12 @@ const { generateInBetweenImage } = require('../cardImages');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
+// Track pending ante prompts (guildId -> { userId, messageId, timeout })
+const pendingAntePrompts = new Map();
+
+// Ante prompt timeout (15 seconds)
+const ANTE_TIMEOUT_MS = 15000;
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('inbetween')
@@ -43,7 +49,17 @@ module.exports = {
       return interaction.editReply({ content: '❌ In Between is currently disabled on this server.' });
     }
     
-    // Check if a game is already in progress or player on cooldown
+    // Check if a game is already in progress
+    if (hasActiveGame(guildId)) {
+      return interaction.editReply({ content: '❌ A game is already in progress in this server.' });
+    }
+    
+    // Check if there's already a pending ante prompt
+    if (pendingAntePrompts.has(guildId)) {
+      return interaction.editReply({ content: '❌ Someone else is already starting a game. Please wait for them to finish or timeout.' });
+    }
+    
+    // Check player cooldown
     const canStart = canStartGame(guildId, userId);
     if (!canStart.canStart) {
       return interaction.editReply({ content: `❌ ${canStart.reason}` });
@@ -69,18 +85,49 @@ module.exports = {
         { name: '💰 Current Pot', value: `**${pot.toLocaleString()}** ${CURRENCY}`, inline: true },
         { name: '📊 Max Bet', value: `**${Math.floor(pot / 2).toLocaleString()}** ${CURRENCY} (50%)`, inline: true }
       )
-      .setFooter({ text: `${interaction.user.displayName} • Click to deal your cards!` })
+      .setFooter({ text: `${interaction.user.displayName} • Click within 15 seconds to deal!` })
       .setTimestamp();
     
+    // Include userId in the button customId so only they can click it
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId('ib_pay_ante')
+        .setCustomId(`ib_pay_ante_${userId}`)
         .setLabel(`Pay Ante (${settings.anteAmount.toLocaleString()})`)
         .setStyle(ButtonStyle.Primary)
         .setEmoji('🃏')
     );
     
-    await interaction.editReply({ embeds: [embed], components: [row] });
+    const reply = await interaction.editReply({ embeds: [embed], components: [row] });
+    
+    // Set up timeout to expire the ante prompt after 15 seconds
+    const timeout = setTimeout(async () => {
+      // Check if still pending (not already processed)
+      if (pendingAntePrompts.has(guildId)) {
+        pendingAntePrompts.delete(guildId);
+        
+        // Update the message to show it expired
+        const expiredEmbed = new EmbedBuilder()
+          .setColor(0x808080)
+          .setTitle('🃏 In Between (Acey Deucey)')
+          .setDescription('⏰ **Ante prompt expired!**\n\nYou took too long to respond. Use `/inbetween` to try again.')
+          .setFooter({ text: `${interaction.user.displayName} • Timed out` })
+          .setTimestamp();
+        
+        try {
+          await interaction.editReply({ embeds: [expiredEmbed], components: [] });
+        } catch (e) {
+          // Message may have been deleted
+        }
+      }
+    }, ANTE_TIMEOUT_MS);
+    
+    // Track the pending prompt
+    pendingAntePrompts.set(guildId, {
+      userId,
+      messageId: reply.id,
+      channelId: interaction.channelId,
+      timeout
+    });
   }
 };
 
@@ -170,7 +217,7 @@ function buildBettingEmbed(game, user, attachment) {
       { name: '✅ Win Chance', value: `~**${odds.winChance}%**`, inline: true },
       { name: '⚠️ Pole Risk', value: `~**${odds.poleChance}%**`, inline: true }
     )
-    .setFooter({ text: `${user.displayName} • Hit a pole = pay the pot!` })
+    .setFooter({ text: `${user.displayName} • Hit a pole = pay double your bet!` })
     .setTimestamp();
   
   if (attachment) {
@@ -391,8 +438,28 @@ async function handleButton(interaction) {
   const customId = interaction.customId;
   
   // Handle pay ante button (before game exists)
-  if (customId === 'ib_pay_ante') {
+  // Button format: ib_pay_ante_<userId>
+  if (customId.startsWith('ib_pay_ante_')) {
+    const allowedUserId = customId.split('_')[3]; // Extract userId from customId
+    
+    // Check if this user is allowed to click the button
+    if (userId !== allowedUserId) {
+      return interaction.reply({ content: '❌ This is not your game! Use `/inbetween` to start your own.', flags: 64 });
+    }
+    
+    // Clear the pending prompt and timeout
+    const pending = pendingAntePrompts.get(guildId);
+    if (pending) {
+      clearTimeout(pending.timeout);
+      pendingAntePrompts.delete(guildId);
+    }
+    
     const settings = getSettings(guildId);
+    
+    // Check if a game started while waiting (shouldn't happen with lockout but safety check)
+    if (hasActiveGame(guildId)) {
+      return interaction.reply({ content: '❌ A game is already in progress!', flags: 64 });
+    }
     
     // Check if game can still start (includes player cooldown)
     const canStart = canStartGame(guildId, userId);
@@ -626,8 +693,9 @@ async function processResult(interaction, game) {
   } else if (game.result === 'pole_hit' || game.result === 'pole_hit_highlow') {
     // Player owes double their bet/ante (payout is negative)
     // The bet was already placed, so they owe an additional bet amount
+    // Use applyFine to ensure debt is applied even if they can't afford it
     const additionalPenalty = game.result === 'pole_hit' ? game.bet : game.ante;
-    await removeFromTotal(guildId, userId, additionalPenalty, 'In Between pole penalty');
+    await applyFine(guildId, userId, additionalPenalty, 'In Between pole penalty');
   }
   // For 'lose', the bet was already deducted when placed
   // For 'pass', the ante was already deducted when game started

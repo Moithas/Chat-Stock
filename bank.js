@@ -145,6 +145,14 @@ function initBank(database) {
     )
   `);
   
+  // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_loans_guild_user ON loans(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_loans_status ON loans(guild_id, status)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_loan_payments_loan ON loan_payments(loan_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_active_bonds_guild_user ON active_bonds(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_active_bonds_expires ON active_bonds(expires_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_bond_history_guild_user ON bond_history(guild_id, user_id)`);
+  
   console.log('🏦 Bank system initialized');
 }
 

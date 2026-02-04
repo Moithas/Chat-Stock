@@ -170,6 +170,10 @@ function initEvents(database, discordClient) {
     );
   `);
   
+  // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_event_history_guild_time ON event_history(guild_id, triggered_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_truck_history_guild_time ON cheese_truck_history(guild_id, triggered_at)`);
+  
   // Restart any enabled schedulers after a short delay (to let guilds load)
   setTimeout(() => {
     initializeMessageCounters();

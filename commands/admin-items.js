@@ -1910,9 +1910,10 @@ async function showEditItemModal(interaction, guildId, itemId) {
   
   const extraInput = new TextInputBuilder()
     .setCustomId('item_extra')
-    .setLabel('Category, Emoji')
+    .setLabel('Category, Emoji, Max Stack')
     .setStyle(TextInputStyle.Short)
-    .setValue(`${item.category},${item.emoji}`)
+    .setValue(`${item.category},${item.emoji},${item.max_stack || 99}`)
+    .setPlaceholder('e.g., utility,📦,99')
     .setRequired(false);
   
   modal.addComponents(
@@ -1963,6 +1964,7 @@ async function handleEditItemModal(interaction, guildId, itemId) {
   // Parse extra
   let category = 'utility';
   let emoji = '📦';
+  let maxStack = 99;
   
   if (extraStr) {
     const extraParts = extraStr.split(',');
@@ -1973,6 +1975,12 @@ async function handleEditItemModal(interaction, guildId, itemId) {
       }
     }
     if (extraParts.length >= 2) emoji = extraParts[1].trim() || '📦';
+    if (extraParts.length >= 3) {
+      const parsedStack = parseInt(extraParts[2].trim());
+      if (!isNaN(parsedStack) && parsedStack >= 1 && parsedStack <= 999) {
+        maxStack = parsedStack;
+      }
+    }
   }
   
   // Update the item
@@ -1985,7 +1993,8 @@ async function handleEditItemModal(interaction, guildId, itemId) {
     effect_value: effectValue,
     duration_hours: durationHours,
     use_cooldown_hours: useCooldownHours,
-    emoji
+    emoji,
+    max_stack: maxStack
   });
   
   if (!success) {

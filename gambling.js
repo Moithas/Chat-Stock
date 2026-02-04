@@ -168,6 +168,13 @@ function initGambling(database) {
     )
   `);
   
+  // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_gambling_stats_user ON gambling_stats(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_lottery_tickets_guild_user ON lottery_tickets(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_lottery_history_guild_time ON lottery_history(guild_id, draw_time)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_scratch_tickets_guild_user ON scratch_tickets(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_scratch_stats_guild_user ON scratch_stats(guild_id, user_id)`);
+  
   console.log('🎰 Gambling system initialized');
 }
 

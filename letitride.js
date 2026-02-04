@@ -12,7 +12,7 @@ const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
 // Default settings
 const DEFAULT_SETTINGS = {
   enabled: true,
-  minBet: 1000,
+  minBet: 100,
   maxBet: 100000,
   timerSeconds: 15
 };
@@ -43,7 +43,7 @@ function initialize(database) {
     CREATE TABLE IF NOT EXISTS letitride_settings (
       guild_id TEXT PRIMARY KEY,
       enabled INTEGER DEFAULT 1,
-      min_bet INTEGER DEFAULT 1000,
+      min_bet INTEGER DEFAULT 100,
       max_bet INTEGER DEFAULT 100000,
       timer_seconds INTEGER DEFAULT 15
     )

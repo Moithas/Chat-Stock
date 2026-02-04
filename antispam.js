@@ -2,6 +2,7 @@
 
 // In-memory cooldown tracker
 const userCooldowns = new Map();
+const buttonCooldowns = new Map();
 
 // In-memory settings cache
 const guildSpamSettings = new Map();
@@ -10,6 +11,7 @@ const guildSpamSettings = new Map();
 const DEFAULT_SETTINGS = {
   cooldownSeconds: 30,      // Seconds between messages that count
   minMessageLength: 5,      // Minimum characters for message to count
+  buttonCooldownSeconds: 3, // Seconds between button interactions that count
   enabled: true
 };
 
@@ -24,9 +26,17 @@ function initAntiSpam(database) {
       guild_id TEXT PRIMARY KEY,
       cooldown_seconds INTEGER DEFAULT 30,
       min_message_length INTEGER DEFAULT 5,
+      button_cooldown_seconds INTEGER DEFAULT 3,
       enabled INTEGER DEFAULT 1
     );
   `);
+  
+  // Add button_cooldown_seconds column if it doesn't exist (migration for existing databases)
+  try {
+    db.run(`ALTER TABLE spam_settings ADD COLUMN button_cooldown_seconds INTEGER DEFAULT 3`);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
   
   console.log('🛡️ Anti-spam system initialized');
 }
@@ -49,6 +59,7 @@ function getSpamSettings(guildId) {
       const parsed = {
         cooldownSeconds: settings.cooldown_seconds,
         minMessageLength: settings.min_message_length,
+        buttonCooldownSeconds: settings.button_cooldown_seconds || 3,
         enabled: settings.enabled === 1
       };
       
@@ -66,12 +77,13 @@ function saveSpamSettings(guildId, settings) {
   
   db.run(`
     INSERT OR REPLACE INTO spam_settings 
-    (guild_id, cooldown_seconds, min_message_length, enabled)
-    VALUES (?, ?, ?, ?)
+    (guild_id, cooldown_seconds, min_message_length, button_cooldown_seconds, enabled)
+    VALUES (?, ?, ?, ?, ?)
   `, [
     guildId,
     settings.cooldownSeconds,
     settings.minMessageLength,
+    settings.buttonCooldownSeconds,
     settings.enabled ? 1 : 0
   ]);
   
@@ -117,6 +129,36 @@ function shouldCountMessage(guildId, userId, messageContent) {
   return { shouldCount: true, reason: null };
 }
 
+// Check if a button interaction should count toward activity
+function shouldCountButtonInteraction(guildId, userId) {
+  const settings = getSpamSettings(guildId);
+  
+  // If anti-spam is disabled, always count
+  if (!settings.enabled) {
+    return { shouldCount: true, reason: null };
+  }
+  
+  // Check button cooldown
+  const now = Date.now();
+  const userKey = `${guildId}-${userId}`;
+  const lastButtonTime = buttonCooldowns.get(userKey);
+  
+  if (lastButtonTime) {
+    const timeSinceLastButton = (now - lastButtonTime) / 1000;
+    
+    if (timeSinceLastButton < settings.buttonCooldownSeconds) {
+      return { 
+        shouldCount: false, 
+        reason: `Button cooldown active (${Math.ceil(settings.buttonCooldownSeconds - timeSinceLastButton)}s remaining)` 
+      };
+    }
+  }
+  
+  // Button interaction counts - update cooldown
+  buttonCooldowns.set(userKey, now);
+  return { shouldCount: true, reason: null };
+}
+
 function updateCooldown(guildId, seconds) {
   const settings = getSpamSettings(guildId);
   settings.cooldownSeconds = seconds;
@@ -126,6 +168,12 @@ function updateCooldown(guildId, seconds) {
 function updateMinLength(guildId, length) {
   const settings = getSpamSettings(guildId);
   settings.minMessageLength = length;
+  saveSpamSettings(guildId, settings);
+}
+
+function updateButtonCooldown(guildId, seconds) {
+  const settings = getSpamSettings(guildId);
+  settings.buttonCooldownSeconds = seconds;
   saveSpamSettings(guildId, settings);
 }
 
@@ -145,13 +193,21 @@ setInterval(() => {
       userCooldowns.delete(key);
     }
   }
+  
+  for (const [key, timestamp] of buttonCooldowns.entries()) {
+    if (now - timestamp > maxAge) {
+      buttonCooldowns.delete(key);
+    }
+  }
 }, 60 * 1000); // Clean every minute
 
 module.exports = {
   initAntiSpam,
   getSpamSettings,
   shouldCountMessage,
+  shouldCountButtonInteraction,
   updateCooldown,
   updateMinLength,
+  updateButtonCooldown,
   setAntiSpamEnabled
 };

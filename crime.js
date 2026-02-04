@@ -116,6 +116,10 @@ function initCrime(database) {
     )
   `);
   
+  // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_crime_tracker_guild_user ON crime_tracker(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_crime_history_guild_user ON crime_history(guild_id, user_id)`);
+  
   console.log('🔫 Crime system initialized');
 }
 

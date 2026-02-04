@@ -1,5 +1,5 @@
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
-const { calculateStockPrice, getUser, getAllUsers, getPriceHistoryByTimeRange, getStreakInfo, getDb, saveDatabase } = require('./database');
+const { calculateStockPrice, getUser, getAllUsers, getPriceHistoryByTimeRange, getStreakInfo, getDb, saveDatabase, getActivityTierSettings } = require('./database');
 const { getRecentSplitters } = require('./dividends');
 const QuickChart = require('quickchart-js');
 
@@ -185,19 +185,113 @@ async function generateSparkline(userId, username, priceChange) {
   return chart.getUrl();
 }
 
+// Calculate what a user's stock price would have been at a specific point in time
+// This recalculates based on message activity up to that timestamp
+function calculateHistoricalPrice(userId, asOfTimestamp, guildId = null) {
+  const db = getDb();
+  const user = getUser(userId);
+  if (!user) return 100.0;
+  
+  // Get activity tier settings
+  const tierSettings = getActivityTierSettings(guildId);
+  const windowDays = tierSettings.windowDays;
+  const windowAgo = asOfTimestamp - (windowDays * 24 * 60 * 60 * 1000);
+  
+  let recentActivityMultiplier = 1.0;
+  
+  if (tierSettings.enabled) {
+    // Get messages within the window AS OF the target timestamp
+    const messagesResult = db.exec(
+      'SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type = "MESSAGE" ORDER BY timestamp ASC',
+      [userId, windowAgo, asOfTimestamp]
+    );
+    
+    if (messagesResult.length > 0 && messagesResult[0].values.length > 0) {
+      // Group messages by day
+      const dayBuckets = {};
+      for (const row of messagesResult[0].values) {
+        const timestamp = row[0];
+        const date = new Date(timestamp);
+        const dayKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+        dayBuckets[dayKey] = (dayBuckets[dayKey] || 0) + 1;
+      }
+      
+      // Calculate contribution using tier system
+      let totalContribution = 0;
+      for (const dayKey in dayBuckets) {
+        const dailyMessages = dayBuckets[dayKey];
+        let remaining = dailyMessages;
+        let dayContribution = 0;
+        
+        // Tier 1
+        const t1Count = Math.min(remaining, tierSettings.tier1Threshold);
+        dayContribution += t1Count * tierSettings.tier1Rate;
+        remaining -= t1Count;
+        
+        // Tier 2
+        if (remaining > 0) {
+          const t2Count = Math.min(remaining, tierSettings.tier2Threshold - tierSettings.tier1Threshold);
+          dayContribution += t2Count * tierSettings.tier2Rate;
+          remaining -= t2Count;
+        }
+        
+        // Tier 3
+        if (remaining > 0) {
+          const t3Count = Math.min(remaining, tierSettings.tier3Threshold - tierSettings.tier2Threshold);
+          dayContribution += t3Count * tierSettings.tier3Rate;
+          remaining -= t3Count;
+        }
+        
+        // Tier 4 (unlimited)
+        if (remaining > 0) {
+          dayContribution += remaining * tierSettings.tier4Rate;
+        }
+        
+        totalContribution += dayContribution;
+      }
+      
+      recentActivityMultiplier = 1 + (totalContribution / 100);
+    }
+  } else {
+    // Legacy flat rate system
+    const recentMessagesResult = db.exec(
+      'SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type = "MESSAGE"',
+      [userId, windowAgo, asOfTimestamp]
+    );
+    
+    let recentMessages = 0;
+    if (recentMessagesResult.length > 0 && recentMessagesResult[0].values.length > 0) {
+      recentMessages = recentMessagesResult[0].values[0][0] || 0;
+    }
+    
+    recentActivityMultiplier = 1 + Math.min(recentMessages * 0.002, 0.60);
+  }
+  
+  // Note: We skip streak bonus for historical calculations as it's complex to recalculate
+  // The activity multiplier is the main driver of price changes
+  
+  let price = user.base_value * recentActivityMultiplier;
+  
+  return Math.max(100, price);
+}
+
 // Generate the full market dashboard chart
 async function generateDashboardChart(topStocks, gainers, losers) {
   // Create a combined chart with multiple sections
   const chart = new QuickChart();
   
   // Get 24h data for top 5 stocks
-  const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+  const now = Date.now();
+  const oneDayAgo = now - (24 * 60 * 60 * 1000);
   const datasets = [];
   const allLabels = [];
   
-  // Use consistent time labels
+  // Generate 12 time points spanning from 24h ago to now
+  const timePoints = [];
   for (let i = 0; i < 12; i++) {
-    const time = new Date(oneDayAgo + (i * 2 * 60 * 60 * 1000));
+    const timestamp = oneDayAgo + (i * (24 * 60 * 60 * 1000) / 11);
+    timePoints.push(timestamp);
+    const time = new Date(timestamp);
     allLabels.push(`${time.getHours()}:00`);
   }
   
@@ -211,26 +305,22 @@ async function generateDashboardChart(topStocks, gainers, losers) {
   
   for (let i = 0; i < Math.min(5, topStocks.length); i++) {
     const stock = topStocks[i];
-    let priceData = getPriceHistoryByTimeRange(stock.userId, oneDayAgo);
     const currentPrice = stock.currentPrice;
     
-    // Add current price
-    priceData = [...priceData, { price: currentPrice, timestamp: Date.now() }];
-    
-    // Sample to 12 points
+    // Calculate prices at each time point based on message activity at that time
+    // This gives a more accurate picture of price progression
     const sampled = [];
-    if (priceData.length >= 12) {
-      const step = Math.floor(priceData.length / 12);
-      for (let j = 0; j < 12; j++) {
-        const idx = Math.min(j * step, priceData.length - 1);
-        sampled.push(Math.round(priceData[idx].price));
-      }
-    } else {
-      // Pad with first value
-      const prices = priceData.map(p => Math.round(p.price));
-      while (prices.length < 12) prices.unshift(prices[0] || currentPrice);
-      sampled.push(...prices.slice(-12));
+    for (let j = 0; j < 12; j++) {
+      const targetTime = timePoints[j];
+      
+      // Calculate what the price would have been at this point in time
+      // by simulating the price calculation with messages only up to that time
+      const historicalPrice = calculateHistoricalPrice(stock.userId, targetTime);
+      sampled.push(Math.round(historicalPrice || currentPrice));
     }
+    
+    // Last point is always current price
+    sampled[11] = Math.round(currentPrice);
     
     const shortName = stock.username.length > 10 ? stock.username.substring(0, 8) + '..' : stock.username;
     
@@ -245,6 +335,15 @@ async function generateDashboardChart(topStocks, gainers, losers) {
       borderWidth: 2
     });
   }
+
+  // Calculate the max value across all datasets for proper y-axis scaling
+  let maxPrice = 0;
+  for (const dataset of datasets) {
+    const datasetMax = Math.max(...dataset.data);
+    if (datasetMax > maxPrice) maxPrice = datasetMax;
+  }
+  // Add 10% padding to the top
+  const yAxisMax = Math.ceil(maxPrice * 1.1);
 
   chart.setConfig({
     type: 'line',
@@ -272,6 +371,8 @@ async function generateDashboardChart(topStocks, gainers, losers) {
           grid: { color: '#333' }
         },
         y: {
+          min: 0,
+          max: yAxisMax,
           ticks: { color: '#aaa' },
           grid: { color: '#333' }
         }
@@ -293,7 +394,7 @@ async function generateDashboardChart(topStocks, gainers, losers) {
 }
 
 // Build the market dashboard
-async function buildMarketDashboard() {
+async function buildMarketDashboard(guildId = null) {
   const users = getAllUsers();
   if (!users || users.length === 0) return null;
 
@@ -304,7 +405,7 @@ async function buildMarketDashboard() {
   const recentSplitters = getRecentSplitters(oneDayAgo);
 
   for (const user of users) {
-    const currentPrice = calculateStockPrice(user.user_id);
+    const currentPrice = calculateStockPrice(user.user_id, guildId);
     const dayHistory = getPriceHistoryByTimeRange(user.user_id, oneDayAgo);
     
     let dayAgoPrice = currentPrice;
@@ -433,10 +534,10 @@ async function updateDashboard() {
     const channel = await discordClient.channels.fetch(channelId);
     if (!channel) return;
 
-    const embed = await buildMarketDashboard();
+    const guildId = channel.guild?.id || 'global';
+    const embed = await buildMarketDashboard(guildId);
     if (!embed) return;
 
-    const guildId = channel.guild?.id || 'global';
     const existingMsgId = dashboardMessages.get(guildId);
 
     // Delete-and-repost mode: always delete old and post new to stay at bottom
@@ -483,6 +584,11 @@ async function updateDashboard() {
     console.log('📊 Dashboard created');
 
   } catch (error) {
+    // Silently ignore connection timeouts - these are transient Discord API issues
+    if (error.code === 'UND_ERR_CONNECT_TIMEOUT' || error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+      // Discord is temporarily unreachable, will retry on next interval
+      return;
+    }
     console.error('Error updating dashboard:', error);
   }
 }

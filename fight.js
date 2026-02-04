@@ -183,8 +183,12 @@ function initFight(database) {
       placed_at INTEGER NOT NULL
     )
   `);
-  
-  saveDatabase();
+    // Create indexes for faster lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_fighter_stats_guild_user ON fighter_stats(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_fight_history_guild_time ON fight_history(guild_id, fought_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_fight_opponent_guild_user ON fight_opponent_history(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_spectator_bets_fight ON fight_spectator_bets(fight_id)`);
+    saveDatabase();
   console.log('🥊Fight system initialized');
 }
 
