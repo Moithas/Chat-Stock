@@ -1240,11 +1240,17 @@ async function showGiveItemPanel(interaction, guildId) {
     );
   
   // Item select menu
-  const itemOptions = items.slice(0, 25).map(item => ({
-    label: `${item.emoji} ${item.name}`,
-    value: item.id.toString(),
-    description: `${item.price.toLocaleString()} coins - ${item.category}`
-  }));
+  const itemOptions = items.slice(0, 25).map(item => {
+    const option = {
+      label: item.name.length > 95 ? item.name.substring(0, 92) + '...' : item.name,
+      value: item.id.toString(),
+      description: `${item.price.toLocaleString()} coins - ${item.category}`
+    };
+    // Add emoji separately (properly parsed for select menus)
+    const parsedEmoji = parseEmojiForSelect(item.emoji);
+    if (parsedEmoji) option.emoji = parsedEmoji;
+    return option;
+  });
   
   const itemRow = new ActionRowBuilder()
     .addComponents(
@@ -1340,12 +1346,18 @@ async function updateGiveItemPanel(interaction, state) {
     );
   
   // Item select menu
-  const itemOptions = items.slice(0, 25).map(item => ({
-    label: `${item.emoji} ${item.name}`,
-    value: item.id.toString(),
-    description: `${item.price.toLocaleString()} coins - ${item.category}`,
-    default: item.id === state.itemId
-  }));
+  const itemOptions = items.slice(0, 25).map(item => {
+    const option = {
+      label: item.name.length > 95 ? item.name.substring(0, 92) + '...' : item.name,
+      value: item.id.toString(),
+      description: `${item.price.toLocaleString()} coins - ${item.category}`,
+      default: item.id === state.itemId
+    };
+    // Add emoji separately (properly parsed for select menus)
+    const parsedEmoji = parseEmojiForSelect(item.emoji);
+    if (parsedEmoji) option.emoji = parsedEmoji;
+    return option;
+  });
   
   const itemRow = new ActionRowBuilder()
     .addComponents(
@@ -1387,9 +1399,12 @@ async function handleGiveItemConfirm(interaction, guildId) {
     .setCustomId('modal_items_give_qty')
     .setTitle('Give Item - Quantity');
   
+  // Truncate item name if needed (modal labels max 45 chars)
+  const truncatedName = state.itemName.length > 30 ? state.itemName.substring(0, 27) + '...' : state.itemName;
+  
   const qtyInput = new TextInputBuilder()
     .setCustomId('give_quantity')
-    .setLabel(`How many ${state.itemEmoji} ${state.itemName} to give?`)
+    .setLabel(`How many ${truncatedName} to give?`)
     .setStyle(TextInputStyle.Short)
     .setPlaceholder('Enter quantity (1-100)')
     .setValue('1')
@@ -1630,12 +1645,19 @@ async function updateTakeItemPanel(interaction, state, inventory) {
     );
   
   // Item select menu from user's inventory
-  const itemOptions = inventory.slice(0, 25).map(item => ({
-    label: `${item.emoji} ${item.name} (x${item.quantity})`,
-    value: `${item.item_id}:${item.quantity}`,
-    description: item.description ? item.description.substring(0, 50) : 'No description',
-    default: item.item_id === state.itemId
-  }));
+  const itemOptions = inventory.slice(0, 25).map(item => {
+    const labelText = `${item.name} (x${item.quantity})`;
+    const option = {
+      label: labelText.length > 95 ? labelText.substring(0, 92) + '...' : labelText,
+      value: `${item.item_id}:${item.quantity}`,
+      description: item.description ? item.description.substring(0, 50) : 'No description',
+      default: item.item_id === state.itemId
+    };
+    // Add emoji separately (properly parsed for select menus)
+    const parsedEmoji = parseEmojiForSelect(item.emoji);
+    if (parsedEmoji) option.emoji = parsedEmoji;
+    return option;
+  });
   
   const itemRow = new ActionRowBuilder()
     .addComponents(

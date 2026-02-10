@@ -334,21 +334,12 @@ function calculateSlutReward(settings) {
 }
 
 function calculateFine(settings, totalBalance) {
-  // Fine is a percentage of the user's total balance
-  // If user has no money, no fine
-  if (totalBalance <= 0) return 0;
-  
-  const minPercent = settings.fineMinPercent / 100;
-  const maxPercent = settings.fineMaxPercent / 100;
-  const finePercent = Math.random() * (maxPercent - minPercent) + minPercent;
-  
-  // Calculate fine as percentage of balance
-  const calculatedFine = Math.floor(totalBalance * finePercent);
-  
-  // Minimum fine is based on the reward range, but only if they have money
-  const minFine = Math.floor(settings.minReward * 0.5);
-  
-  return Math.max(minFine, calculatedFine);
+  // Fine is a percentage of the user's total balance (same as crime)
+  const minFine = Math.floor(totalBalance * (settings.fineMinPercent / 100));
+  const maxFine = Math.floor(totalBalance * (settings.fineMaxPercent / 100));
+  const fine = Math.floor(Math.random() * (maxFine - minFine + 1)) + minFine;
+  // Ensure minimum fine of 1 if user has any balance
+  return Math.max(fine, totalBalance > 0 ? 1 : 0);
 }
 
 function getRandomSuccessText(settings) {

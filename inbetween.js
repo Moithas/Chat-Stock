@@ -362,6 +362,8 @@ function setAceChoice(guildId, choice) {
   const p1Val = getCardValue(game.pole1, choice === 'high');
   const p2Val = getCardValue(game.pole2, true); // Second ace always high (14)
   
+  console.log(`[In Between] Ace choice: ${choice}, pole1=${game.pole1.rank} (${p1Val}), pole2=${game.pole2.rank} (${p2Val}), equal=${areCardsEqual(p1Val, p2Val)}`);
+  
   if (areCardsEqual(p1Val, p2Val)) {
     game.status = 'awaiting_high_low';
   } else if (areCardsAdjacent(Math.min(p1Val, p2Val), Math.max(p1Val, p2Val))) {
@@ -370,6 +372,8 @@ function setAceChoice(guildId, choice) {
   } else {
     game.status = 'awaiting_bet';
   }
+  
+  console.log(`[In Between] New status: ${game.status}`);
   
   return game;
 }

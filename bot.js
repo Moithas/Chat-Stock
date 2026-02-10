@@ -618,6 +618,18 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Handle help menu select
+  if (interaction.isStringSelectMenu() && interaction.customId === 'help_menu') {
+    try {
+      const { handleInteraction } = require('./commands/help');
+      await handleInteraction(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling help menu:', error);
+    }
+    return;
+  }
+
   // Handle service ticket buttons (complete/close)
   if (interaction.isButton() && interaction.customId.startsWith('ticket_')) {
     try {

@@ -258,9 +258,22 @@ module.exports = {
     }
 
     // Calculate success rate (with skill bonus and item bonus)
+    // Uses total balance (cash + bank) for both parties
     const itemSuccessBoost = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_SUCCESS_BOOST);
     const totalSuccessBonus = hackBonuses.successRateBonus + itemSuccessBoost;
-    const successRate = calculateSuccessRate(targetBalance.bank, hackerBalance.bank, totalSuccessBonus);
+    const hackerTotal = hackerBalance.cash + hackerBalance.bank;
+    const targetTotal = targetBalance.cash + targetBalance.bank;
+    const successRate = calculateSuccessRate(targetTotal, hackerTotal, totalSuccessBonus);
+    
+    // Debug logging for hack rate calculation
+    console.log(`🔍 HACK DEBUG - Hacker: ${hackerId}, Target: ${targetId}`);
+    console.log(`   Hacker Balance: cash=${hackerBalance.cash}, bank=${hackerBalance.bank}, total=${hackerTotal}`);
+    console.log(`   Target Balance: cash=${targetBalance.cash}, bank=${targetBalance.bank}, total=${targetTotal}`);
+    console.log(`   hackBonuses object:`, JSON.stringify(hackBonuses));
+    console.log(`   Skill Bonus: ${hackBonuses.successRateBonus}% (level ${hackBonuses.level}), Item Boost: ${itemSuccessBoost}%`);
+    console.log(`   Total Success Bonus: ${totalSuccessBonus}%`);
+    console.log(`   Base Rate: ${((targetTotal / 2.5) / (hackerTotal + targetTotal) * 100).toFixed(2)}%`);
+    console.log(`   Final Success Rate: ${successRate.toFixed(2)}%`);
 
     // Start tracking this hack
     startActiveHack(guildId, targetId, hackerId);

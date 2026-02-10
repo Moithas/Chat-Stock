@@ -286,6 +286,14 @@ function scheduleEventEnd(guildId, expiresAt, eventName, percentChange, duration
       activeMarketEvents.delete(guildId);
       removeActiveEvent(guildId);
       
+      // Refresh last known prices to prevent false stock alerts
+      try {
+        const { refreshLastKnownPrices } = require('./ticker');
+        refreshLastKnownPrices(guildId);
+      } catch (e) {
+        // Ticker not loaded yet, that's fine
+      }
+      
       // Announce that the event has ended
       await announceEventEnd(guildId, eventName, percentChange);
     }
@@ -627,6 +635,14 @@ function applyEventToStocks(guildId, percentChange, durationMinutes = 30, eventN
   
   // Persist to database so it survives restarts
   saveActiveEvent(guildId, multiplier, percentChange, expiresAt, eventName);
+  
+  // Refresh last known prices to prevent false stock alerts
+  try {
+    const { refreshLastKnownPrices } = require('./ticker');
+    refreshLastKnownPrices(guildId);
+  } catch (e) {
+    // Ticker not loaded yet, that's fine
+  }
   
   // Schedule removal of the event and announce when it ends
   scheduleEventEnd(guildId, expiresAt, eventName, percentChange, durationMinutes);

@@ -43,7 +43,7 @@ function initDashboardSettings() {
       enabled INTEGER DEFAULT 1,
       update_interval_minutes INTEGER DEFAULT 3,
       delete_and_repost INTEGER DEFAULT 1,
-      show_chart INTEGER DEFAULT 1,
+      show_chart INTEGER DEFAULT 0,
       top_stocks_count INTEGER DEFAULT 10,
       top_movers_count INTEGER DEFAULT 5,
       dashboard_channel_id TEXT
@@ -137,10 +137,10 @@ function setDashboardChannel(channelId) {
 }
 
 // Generate a sparkline chart URL for a single stock
-async function generateSparkline(userId, username, priceChange) {
+async function generateSparkline(userId, username, priceChange, guildId = null) {
   const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
   let priceData = getPriceHistoryByTimeRange(userId, oneDayAgo);
-  const currentPrice = calculateStockPrice(userId);
+  const currentPrice = calculateStockPrice(userId, guildId);
   
   // Add current price
   let allPrices = [...priceData, { price: currentPrice, timestamp: Date.now() }];
@@ -276,7 +276,7 @@ function calculateHistoricalPrice(userId, asOfTimestamp, guildId = null) {
 }
 
 // Generate the full market dashboard chart
-async function generateDashboardChart(topStocks, gainers, losers) {
+async function generateDashboardChart(topStocks, gainers, losers, guildId = null) {
   // Create a combined chart with multiple sections
   const chart = new QuickChart();
   
@@ -308,19 +308,17 @@ async function generateDashboardChart(topStocks, gainers, losers) {
     const currentPrice = stock.currentPrice;
     
     // Calculate prices at each time point based on message activity at that time
-    // This gives a more accurate picture of price progression
+    // This shows the BASE price progression without market events
     const sampled = [];
     for (let j = 0; j < 12; j++) {
       const targetTime = timePoints[j];
       
       // Calculate what the price would have been at this point in time
       // by simulating the price calculation with messages only up to that time
-      const historicalPrice = calculateHistoricalPrice(stock.userId, targetTime);
-      sampled.push(Math.round(historicalPrice || currentPrice));
+      // Note: This intentionally excludes market event effects for a cleaner chart
+      const historicalPrice = calculateHistoricalPrice(stock.userId, targetTime, guildId);
+      sampled.push(Math.round(historicalPrice || 100));
     }
-    
-    // Last point is always current price
-    sampled[11] = Math.round(currentPrice);
     
     const shortName = stock.username.length > 10 ? stock.username.substring(0, 8) + '..' : stock.username;
     
@@ -439,7 +437,7 @@ async function buildMarketDashboard(guildId = null) {
   // Generate the chart (if enabled)
   let chartUrl = null;
   if (dashboardSettings.showChart) {
-    chartUrl = await generateDashboardChart(topByPrice, gainers, losers);
+    chartUrl = await generateDashboardChart(topByPrice, gainers, losers, guildId);
   }
 
   // Build embed
@@ -661,10 +659,21 @@ async function checkPriceMovements() {
   const users = getAllUsers();
   if (!users || users.length === 0) return;
   
+  // Get the guildId from the ticker channel for proper price calculation
+  let guildId = null;
+  try {
+    const channel = await discordClient.channels.fetch(tickerChannelId);
+    if (channel && channel.guild) {
+      guildId = channel.guild.id;
+    }
+  } catch (error) {
+    // Channel fetch failed, continue without guildId
+  }
+  
   const alerts = [];
   
   for (const user of users) {
-    const currentPrice = calculateStockPrice(user.user_id);
+    const currentPrice = calculateStockPrice(user.user_id, guildId);
     const lastPrice = lastKnownPrices.get(user.user_id);
     
     if (lastPrice) {
@@ -759,8 +768,11 @@ async function sendEarningsReport() {
     const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
     const stockChanges = [];
     
+    // Get guildId from the channel for proper price calculation
+    const guildId = channel.guild?.id || null;
+    
     for (const user of users) {
-      const currentPrice = calculateStockPrice(user.user_id);
+      const currentPrice = calculateStockPrice(user.user_id, guildId);
       const weekHistory = getPriceHistoryByTimeRange(user.user_id, oneWeekAgo);
       
       let weekAgoPrice = currentPrice; // Default if no history
@@ -855,39 +867,10 @@ function getTickerChannel() {
 }
 
 // Send stock split announcement (this replaces the price drop alert since split causes the drop)
+// Note: The main split announcement is handled in stock.js - this just updates tracking to prevent duplicate alerts
 async function sendSplitAnnouncement(userId, username, ratio, oldPrice, newPrice, shareholderCount) {
-  if (!discordClient || !tickerChannelId) return;
-  
-  try {
-    const channel = await discordClient.channels.fetch(tickerChannelId);
-    if (!channel) return;
-    
-    const isReverse = ratio.startsWith('1:');
-    const emoji = isReverse ? '🔄' : '📊';
-    const color = isReverse ? 0xf39c12 : 0x3498db;
-    const splitType = isReverse ? 'REVERSE SPLIT' : 'STOCK SPLIT';
-    
-    const embed = new EmbedBuilder()
-      .setColor(color)
-      .setTitle(`${emoji} ${splitType}: ${username}`)
-      .setDescription(`**${username}** has executed a **${ratio}** ${isReverse ? 'reverse ' : ''}stock split!`)
-      .addFields(
-        { name: 'Previous Price', value: `${Math.round(oldPrice).toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: 'New Price', value: `${Math.round(newPrice).toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: 'Split Ratio', value: ratio, inline: true },
-        { name: 'Shareholders Affected', value: `${shareholderCount}`, inline: true }
-      )
-      .setTimestamp()
-      .setFooter({ text: 'Chat-Stock Ticker • Shareholder positions adjusted automatically' });
-    
-    await channel.send({ embeds: [embed] });
-    
-    // Update last known price to prevent a second alert from the price change
-    lastKnownPrices.set(userId, newPrice);
-    
-  } catch (error) {
-    console.error('Error sending split announcement:', error);
-  }
+  // Update last known price to prevent a second alert from the price change
+  lastKnownPrices.set(userId, newPrice);
 }
 
 // Send streak milestone announcement
@@ -907,7 +890,9 @@ async function sendStreakAnnouncement(userId, username, streakDays, tier) {
     const info = tierInfo[tier];
     if (!info) return;
     
-    const currentPrice = calculateStockPrice(userId);
+    // Get guildId from channel for proper price calculation
+    const guildId = channel.guild?.id || null;
+    const currentPrice = calculateStockPrice(userId, guildId);
     
     const embed = new EmbedBuilder()
       .setColor(info.color)
@@ -936,7 +921,9 @@ async function sendStreakExpiredAnnouncement(userId, username) {
     const channel = await discordClient.channels.fetch(tickerChannelId);
     if (!channel) return;
     
-    const currentPrice = calculateStockPrice(userId);
+    // Get guildId from channel for proper price calculation
+    const guildId = channel.guild?.id || null;
+    const currentPrice = calculateStockPrice(userId, guildId);
     
     const embed = new EmbedBuilder()
       .setColor(0x95a5a6)
@@ -956,6 +943,20 @@ async function sendStreakExpiredAnnouncement(userId, username) {
   }
 }
 
+// Refresh all last known prices to current values
+// Call this after market events to prevent false alerts
+async function refreshLastKnownPrices(guildId = null) {
+  const users = getAllUsers();
+  if (!users || users.length === 0) return;
+  
+  for (const user of users) {
+    const currentPrice = calculateStockPrice(user.user_id, guildId);
+    lastKnownPrices.set(user.user_id, currentPrice);
+  }
+  
+  console.log(`📊 Refreshed last known prices for ${users.length} users (market event adjustment)`);
+}
+
 module.exports = {
   initTicker,
   setTickerChannel,
@@ -970,5 +971,6 @@ module.exports = {
   sendStreakAnnouncement,
   sendStreakExpiredAnnouncement,
   updateDashboard,
-  buildMarketDashboard
+  buildMarketDashboard,
+  refreshLastKnownPrices
 };

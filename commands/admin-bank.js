@@ -321,7 +321,7 @@ async function handleButton(interaction, guildId, customId) {
     const loans = getAllActiveLoans(guildId);
     const loan = loans.find(l => l.id === loanId);
     if (loan) {
-      forgiveLoan(guildId, loanId);
+      forgiveLoan(loanId);
       logAdminAction(guildId, interaction.user.id, interaction.user.username, `Forgave loan #${loanId} for user ${loan.user_id}`);
     }
     await interaction.deferUpdate();

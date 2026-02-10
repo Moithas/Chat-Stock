@@ -164,6 +164,17 @@ function initSkills(database) {
     console.log('🎓 Added rob_trained_at_level column');
   } catch (e) { /* Column already exists */ }
   
+  // Migration: Add training_started_at_level columns to track what level training was initiated at
+  try {
+    db.run(`ALTER TABLE user_skills ADD COLUMN hack_training_started_at_level INTEGER DEFAULT -1`);
+    console.log('🎓 Added hack_training_started_at_level column');
+  } catch (e) { /* Column already exists */ }
+  
+  try {
+    db.run(`ALTER TABLE user_skills ADD COLUMN rob_training_started_at_level INTEGER DEFAULT -1`);
+    console.log('🎓 Added rob_training_started_at_level column');
+  } catch (e) { /* Column already exists */ }
+  
   console.log('🎓 Skills system initialized');
 }
 
@@ -271,12 +282,14 @@ function getUserSkills(guildId, userId) {
       hackTraining: row.hack_training_end ? {
         startTime: row.hack_training_start,
         endTime: row.hack_training_end,
-        xpReward: row.hack_training_xp
+        xpReward: row.hack_training_xp,
+        startedAtLevel: row.hack_training_started_at_level ?? -1
       } : null,
       robTraining: row.rob_training_end ? {
         startTime: row.rob_training_start,
         endTime: row.rob_training_end,
-        xpReward: row.rob_training_xp
+        xpReward: row.rob_training_xp,
+        startedAtLevel: row.rob_training_started_at_level ?? -1
       } : null,
       hackTrainedAtLevel: row.hack_trained_at_level ?? -1,
       robTrainedAtLevel: row.rob_trained_at_level ?? -1,
@@ -389,12 +402,17 @@ function checkTrainingComplete(guildId, userId, skill) {
   const newXp = currentXp + training.xpReward;
   const newLevel = getLevel(newXp);
   
-  // Update database - add XP, clear training, and mark trained at this level
+  // Use the level at which training was STARTED, not the current level
+  // This prevents the bug where leveling up during training locks you out of training at the new level
+  const trainingStartedAtLevel = training.startedAtLevel ?? currentLevel;
+  
+  // Update database - add XP, clear training, and mark trained at the level training was started
   const xpColumn = skill === 'hack' ? 'hack_xp' : 'rob_xp';
   const startColumn = skill === 'hack' ? 'hack_training_start' : 'rob_training_start';
   const endColumn = skill === 'hack' ? 'hack_training_end' : 'rob_training_end';
   const rewardColumn = skill === 'hack' ? 'hack_training_xp' : 'rob_training_xp';
   const trainedAtColumn = skill === 'hack' ? 'hack_trained_at_level' : 'rob_trained_at_level';
+  const startedAtLevelColumn = skill === 'hack' ? 'hack_training_started_at_level' : 'rob_training_started_at_level';
   
   db.run(`
     UPDATE user_skills SET
@@ -403,9 +421,10 @@ function checkTrainingComplete(guildId, userId, skill) {
       ${endColumn} = NULL,
       ${rewardColumn} = 0,
       ${trainedAtColumn} = ?,
+      ${startedAtLevelColumn} = -1,
       last_activity = ?
     WHERE guild_id = ? AND user_id = ?
-  `, [newXp, currentLevel, Date.now(), guildId, userId]);
+  `, [newXp, trainingStartedAtLevel, Date.now(), guildId, userId]);
   
   return {
     xpGained: training.xpReward,
@@ -447,19 +466,21 @@ function startTraining(guildId, userId, skill) {
   const now = Date.now();
   const endTime = now + duration;
   
-  // Update database
+  // Update database - also record the level at which training was started
   const startColumn = skill === 'hack' ? 'hack_training_start' : 'rob_training_start';
   const endColumn = skill === 'hack' ? 'hack_training_end' : 'rob_training_end';
   const rewardColumn = skill === 'hack' ? 'hack_training_xp' : 'rob_training_xp';
+  const startedAtLevelColumn = skill === 'hack' ? 'hack_training_started_at_level' : 'rob_training_started_at_level';
   
   db.run(`
-    INSERT INTO user_skills (guild_id, user_id, ${startColumn}, ${endColumn}, ${rewardColumn})
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO user_skills (guild_id, user_id, ${startColumn}, ${endColumn}, ${rewardColumn}, ${startedAtLevelColumn})
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id, user_id) DO UPDATE SET
       ${startColumn} = ?,
       ${endColumn} = ?,
-      ${rewardColumn} = ?
-  `, [guildId, userId, now, endTime, xpReward, now, endTime, xpReward]);
+      ${rewardColumn} = ?,
+      ${startedAtLevelColumn} = ?
+  `, [guildId, userId, now, endTime, xpReward, currentLevel, now, endTime, xpReward, currentLevel]);
   
   return {
     success: true,

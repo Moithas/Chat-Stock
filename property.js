@@ -408,9 +408,10 @@ function getUserProperties(guildId, userId) {
   if (!db) return [];
   
   const result = db.exec(`
-    SELECT op.*, p.name, p.tier, p.value 
+    SELECT op.*, p.name, p.tier, p.value, COALESCE(pu.remodel_value_bonus, 0) as remodel_bonus
     FROM owned_properties op
     JOIN properties p ON op.guild_id = p.guild_id AND op.property_id = p.property_id
+    LEFT JOIN property_upgrades pu ON op.guild_id = pu.guild_id AND op.user_id = pu.user_id AND op.id = pu.owned_property_id
     WHERE op.guild_id = ? AND op.user_id = ?
   `, [guildId, userId]);
   
@@ -1097,6 +1098,26 @@ function getPropertyUpgradeStatus(guildId, userId, ownedPropertyId) {
   };
 }
 
+// Check and auto-complete any expired upgrade stages for a property
+// This ensures upgrades complete even if the bot restarted during the timer
+function checkAndCompleteExpiredUpgrade(guildId, userId, ownedPropertyId, propertyId) {
+  const status = getPropertyUpgradeStatus(guildId, userId, ownedPropertyId);
+  
+  // If a stage has expired (isStageComplete is true), complete it now
+  if (status && status.isStageComplete && status.currentStage) {
+    const result = completeUpgradeStage(guildId, userId, ownedPropertyId, propertyId);
+    
+    // If it was an upgrade stage, perform the actual property upgrade
+    if (result.success && status.currentStage === 'upgrade') {
+      performPropertyUpgrade(guildId, userId, ownedPropertyId, propertyId);
+    }
+    
+    return { wasCompleted: true, stage: status.currentStage, result };
+  }
+  
+  return { wasCompleted: false };
+}
+
 // Start an upgrade stage
 function startUpgradeStage(guildId, userId, ownedPropertyId, stage, propertyLevel) {
   if (!db) return { success: false, error: 'Database not available' };
@@ -1385,6 +1406,7 @@ module.exports = {
   // Upgrade system
   getUpgradeCosts,
   getPropertyUpgradeStatus,
+  checkAndCompleteExpiredUpgrade,
   startUpgradeStage,
   completeUpgradeStage,
   performPropertyUpgrade,

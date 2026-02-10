@@ -19,6 +19,7 @@ const {
   // Upgrade system
   getUpgradeCosts,
   getPropertyUpgradeStatus,
+  checkAndCompleteExpiredUpgrade,
   startUpgradeStage,
   completeUpgradeStage,
   performPropertyUpgrade,
@@ -129,6 +130,11 @@ async function showPropertyPanel(interaction, guildId, userId, settings, isUpdat
   const userCards = getUserCards(guildId, userId);
   const propertyCooldowns = getAllPropertyCooldowns(guildId, userId);
   
+  // Check and auto-complete any expired upgrade stages (handles bot restarts)
+  for (const prop of userProperties) {
+    checkAndCompleteExpiredUpgrade(guildId, userId, prop.id, prop.property_id);
+  }
+  
   let balanceData = { cash: 0, bank: 0, total: 0 };
   if (isEconomyEnabled()) {
     balanceData = await economy.getBalance(guildId, userId);
@@ -184,7 +190,8 @@ async function showPropertyPanel(interaction, guildId, userId, settings, isUpdat
     let readyCount = 0;
     
     const propertyList = propertyCooldowns.map((pc, index) => {
-      const rent = Math.round(pc.property.value * (settings.rentPercent / 100));
+      const effectiveValue = pc.property.value + (pc.property.remodel_bonus || 0);
+      const rent = Math.round(effectiveValue * (settings.rentPercent / 100));
       totalRent += rent;
       totalCards += pc.property.tier;
       
@@ -197,7 +204,7 @@ async function showPropertyPanel(interaction, guildId, userId, settings, isUpdat
       }
       
       return `**${index + 1}.** ${getTierEmoji(pc.property.tier)} **${pc.property.name}** — ${cooldownStatus}\n` +
-             `   💵 ${pc.property.value.toLocaleString()} ${CURRENCY} | 💰 ${rent.toLocaleString()} ${CURRENCY}/rent`;
+             `   💵 ${effectiveValue.toLocaleString()} ${CURRENCY} | 💰 ${rent.toLocaleString()} ${CURRENCY}/rent`;
     }).join('\n\n');
     
     embed.setDescription(`${propertyList}\n\n━━━━━━━━━━━━━━━━━━━━━━`);
@@ -447,7 +454,8 @@ async function handleBuyButton(interaction, guildId, userId, settings) {
     return interaction.editReply({ embeds: [embed], components: [backButton] });
   }
   
-  const rentAmount = Math.round(property.value * (settings.rentPercent / 100));
+  const effectiveValue = property.value + (property.remodel_bonus || 0);
+  const rentAmount = Math.round(effectiveValue * (settings.rentPercent / 100));
   const cardsPerDay = property.tier;
   
   const embed = new EmbedBuilder()
@@ -674,6 +682,11 @@ function getStageName(stage) {
 async function showUpgradesPanel(interaction, guildId, userId, settings, isUpdate = false) {
   const userProperties = getUserProperties(guildId, userId);
   
+  // Check and auto-complete any expired upgrade stages (handles bot restarts)
+  for (const prop of userProperties) {
+    checkAndCompleteExpiredUpgrade(guildId, userId, prop.id, prop.property_id);
+  }
+  
   let balanceData = { cash: 0, bank: 0, total: 0 };
   if (isEconomyEnabled()) {
     balanceData = await economy.getBalance(guildId, userId);
@@ -799,6 +812,13 @@ async function handleUpgradeSelect(interaction) {
     return interaction.reply({ content: '❌ Property not found.', flags: 64 });
   }
   
+  // Check and auto-complete any expired upgrade first (handles bot restarts)
+  const autoCompleted = checkAndCompleteExpiredUpgrade(guildId, userId, ownedPropertyId, property.property_id);
+  if (autoCompleted.wasCompleted) {
+    // Stage was auto-completed, refresh the panel to show updated status
+    return showUpgradesPanel(interaction, guildId, userId, settings, true);
+  }
+  
   // Get costs
   const { costs, times } = getUpgradeCosts(property.property_id);
   const cost = costs[stage];
@@ -912,13 +932,14 @@ async function handleList(interaction, guildId, targetUserId, targetUser) {
   let totalCards = 0;
   
   const propertyList = userProperties.map((prop, index) => {
-    const rent = Math.round(prop.value * (settings.rentPercent / 100));
+    const effectiveValue = prop.value + (prop.remodel_bonus || 0);
+    const rent = Math.round(effectiveValue * (settings.rentPercent / 100));
     const cards = prop.tier;
     totalRent += rent;
     totalCards += cards;
     
     return `**${index + 1}.** ${getTierEmoji(prop.tier)} **${prop.name}**\n` +
-           `   💵 Value: ${prop.value} ${CURRENCY} | 💰 Rent: ${rent} ${CURRENCY} | 🧧 Cards: ${cards}/day`;
+           `   💵 Value: ${effectiveValue.toLocaleString()} ${CURRENCY} | 💰 Rent: ${rent.toLocaleString()} ${CURRENCY} | 🧧 Cards: ${cards}/day`;
   }).join('\n\n');
   
   const embed = new EmbedBuilder()
@@ -1009,7 +1030,8 @@ async function handleRent(interaction, guildId, userId, settings) {
   // Build property list with cooldown status
   let propertyList = '';
   propertyCooldowns.forEach((pc, index) => {
-    const rent = Math.round(pc.property.value * (settings.rentPercent / 100));
+    const effectiveValue = pc.property.value + (pc.property.remodel_bonus || 0);
+    const rent = Math.round(effectiveValue * (settings.rentPercent / 100));
     if (pc.canPlay) {
       propertyList += `**${index + 1}.** ${getTierEmoji(pc.property.tier)} **${pc.property.name}** - ✅ Ready\n`;
       propertyList += `   💵 Rent: ${rent} ${CURRENCY}\n\n`;
@@ -1040,7 +1062,8 @@ async function handleRent(interaction, guildId, userId, settings) {
   }
   
   const selectOptions = readyProperties.map((pc, index) => {
-    const rent = Math.round(pc.property.value * (settings.rentPercent / 100));
+    const effectiveValue = pc.property.value + (pc.property.remodel_bonus || 0);
+    const rent = Math.round(effectiveValue * (settings.rentPercent / 100));
     return {
       label: pc.property.name,
       description: `${getTierName(pc.property.tier)} | Rent: ${rent} ${CURRENCY}`,
@@ -1092,7 +1115,8 @@ async function handleRentButton(interaction, guildId, userId, settings, property
   // Defer the update for async operations
   await interaction.deferUpdate();
   
-  const rentAmount = Math.round(property.value * (settings.rentPercent / 100));
+  const effectiveValue = property.value + (property.remodel_bonus || 0);
+  const rentAmount = Math.round(effectiveValue * (settings.rentPercent / 100));
   
   // Get user's financial data for card calculations
   let userBalance = 0;
@@ -1219,7 +1243,8 @@ async function handleRentSelect(interaction) {
   // Defer the update for async operations
   await interaction.deferUpdate();
   
-  const rentAmount = Math.round(property.value * (settings.rentPercent / 100));
+  const effectiveValue = property.value + (property.remodel_bonus || 0);
+  const rentAmount = Math.round(effectiveValue * (settings.rentPercent / 100));
   
   // Get user's financial data for card calculations
   let userBalance = 0;
