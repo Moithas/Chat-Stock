@@ -525,9 +525,9 @@ function calculateStockPrice(userId, guildId = null) {
     const daysSinceLastMessage = (Date.now() - user.last_message_time) / (24 * 60 * 60 * 1000);
     
     if (user.last_message_time < threeDaysAgo) {
-      // Decay: -3% per day after 3 days of inactivity (max -30%)
-      const inactiveDays = Math.floor(daysSinceLastMessage - 3);
-      const decayPercent = Math.min(inactiveDays * 0.03, 0.30); // Max 30% decay
+      // Decay: -5% per day after 3 days of inactivity (max -50%), scales smoothly
+      const inactiveDaysPast3 = daysSinceLastMessage - 3;
+      const decayPercent = Math.min(inactiveDaysPast3 * 0.05, 0.50);
       price *= (1 - decayPercent);
     }
   }

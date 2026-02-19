@@ -26,6 +26,8 @@ const { initialize: initInBetween } = require('./inbetween');
 const { initialize: initLetItRide } = require('./letitride');
 const { initialize: initThreeCardPoker } = require('./threecardpoker');
 const { initMaintenance, startCleanupScheduler, logError, checkCommandCooldown, updateCommandCooldown } = require('./maintenance');
+const { initDungeon } = require('./dungeon');
+const { initSYN } = require('./screwyourneighbor');
 const fs = require('fs');
 const path = require('path');
 
@@ -384,6 +386,12 @@ client.once('clientReady', async () => {
   // Initialize Three Card Poker game
   initThreeCardPoker(getDb());
 
+  // Initialize dungeon system
+  initDungeon(getDb());
+
+  // Initialize Screw Your Neighbor
+  initSYN(getDb());
+
   // Initialize maintenance system (cleanup, error logging, rate limiting)
   initMaintenance(getDb(), client);
 
@@ -506,7 +514,7 @@ client.on('messageCreate', async (message) => {
   // Periodically log price (every 10 messages to avoid spam)
   const userMessages = getUser(userId);
   if (userMessages && userMessages.total_messages % 10 === 0) {
-    const currentPrice = calculateStockPrice(userId);
+    const currentPrice = calculateStockPrice(userId, guildId);
     logPrice(userId, currentPrice, Date.now());
   }
   
@@ -1155,6 +1163,24 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
     
+    // Handle Screw Your Neighbor game buttons (not admin buttons)
+    const synAdminIds = ['syn_toggle', 'syn_edit_settings', 'syn_edit_timing', 'back_syn', 'admin_syn'];
+    if (interaction.isButton() && interaction.customId.startsWith('syn_') && !synAdminIds.includes(interaction.customId)) {
+      try {
+        const { handleButton } = require('./commands/screwyourneighbor');
+        await handleButton(interaction);
+      } catch (error) {
+        if (error.code === 10062 || error.code === 40060) return;
+        console.error('Error handling SYN button:', error);
+        try {
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: 'An error occurred.', flags: 64 });
+          }
+        } catch (e) { /* Interaction expired */ }
+      }
+      return;
+    }
+
     // Check if this is an admin panel interaction
     const adminCustomIds = [
       'admin_select', 'admin_category', 'back_dashboard',
@@ -1238,6 +1264,7 @@ client.on('interactionCreate', async (interaction) => {
       'bank_edit_loan_settings', 'bank_edit_requirements',
       'bank_toggle_req_properties', 'bank_toggle_req_portfolio', 'bank_toggle_req_tenure', 'bank_toggle_collateral',
       'bank_bond_settings', 'bank_add_bond', 'bank_view_loans', 'bank_view_bonds', 'bank_delete_active_bond',
+      'bank_credit_tiers', 'bank_credit_reset', 'bank_credit_tier_select',
       'modal_bank_criteria', 'modal_bank_loan_settings', 'modal_bank_bond_add',
       'wealth_tax_toggle', 'wealth_tax_schedule', 'wealth_tax_channel', 'wealth_tax_tiers', 'wealth_tax_preview',
       'wealth_tax_collect_now', 'wealth_tax_confirm_collect', 'wealth_tax_reset_tiers', 'wealth_tax_back',
@@ -1262,7 +1289,13 @@ client.on('interactionCreate', async (interaction) => {
       'items_create_category', 'items_create_effect',
       'modal_items_add', 'modal_items_edit', 'modal_items_create', 'modal_items_give_qty', 'modal_items_take_qty',
       // Reset Game
-      'reset_game_confirm', 'reset_game_cancel', 'modal_reset_game_confirm'
+      'reset_game_confirm', 'reset_game_cancel', 'modal_reset_game_confirm',
+      // Dungeon
+      'admin_dungeon', 'dungeon_toggle', 'dungeon_edit_settings', 'back_dungeon',
+      'modal_dungeon_settings',
+      // SYN
+      'admin_syn', 'syn_toggle', 'syn_edit_settings', 'syn_edit_timing', 'back_syn',
+      'modal_syn_settings', 'modal_syn_timing'
     ];
     
     // Check for exact match OR dynamic card/property edit IDs
@@ -1298,7 +1331,8 @@ client.on('interactionCreate', async (interaction) => {
                           interaction.customId.startsWith('bank_loans_page_') ||
                           interaction.customId.startsWith('bank_bonds_page_') ||
                           interaction.customId.startsWith('bank_activebonds_page_') ||
-                          interaction.customId.startsWith('modal_bank_bond_edit_');
+                          interaction.customId.startsWith('modal_bank_bond_edit_') ||
+                          interaction.customId.startsWith('modal_bank_credit_tier_');
     const isDynamicRob = interaction.customId.startsWith('rob_immune_remove_') ||
                          interaction.customId === 'rob_immune_add_role' ||
                          interaction.customId.startsWith('rob_immunity_page_') ||
@@ -1381,7 +1415,7 @@ client.on('interactionCreate', async (interaction) => {
   // Periodically log price
   const userMessages = getUser(userId);
   if (userMessages && userMessages.total_messages % 10 === 0) {
-    const currentPrice = calculateStockPrice(userId);
+    const currentPrice = calculateStockPrice(userId, guildId);
     logPrice(userId, currentPrice, Date.now());
   }
 

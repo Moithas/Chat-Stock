@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   fineMinPercent: 10,       // Minimum fine as % of robber's total balance
   fineMaxPercent: 25,       // Maximum fine as % of robber's total balance
   defensesEnabled: true,    // Whether defense mechanics are enabled
+  defenseWindowSeconds: 10, // Seconds a target has to choose a defense
   hidecashSuccessRate: 70,  // Hide cash success %
   dodgeSuccessRate: 60,     // Dodge success %
   fightBackSuccessRate: 50  // Fight back success %
@@ -92,6 +93,11 @@ function initRob(database) {
   }
   try {
     db.run(`ALTER TABLE rob_settings ADD COLUMN fightback_success_rate INTEGER DEFAULT 50`);
+  } catch (e) {
+    // Column already exists
+  }
+  try {
+    db.run(`ALTER TABLE rob_settings ADD COLUMN defense_window_seconds INTEGER DEFAULT 10`);
   } catch (e) {
     // Column already exists
   }
@@ -229,6 +235,7 @@ function getRobSettings(guildId) {
       fineMinPercent: row.fine_min_percent || 10,
       fineMaxPercent: row.fine_max_percent || 25,
       defensesEnabled: row.defenses_enabled === 1,
+      defenseWindowSeconds: row.defense_window_seconds || 10,
       hidecashSuccessRate: row.hidecash_success_rate || 70,
       dodgeSuccessRate: row.dodge_success_rate || 60,
       fightBackSuccessRate: row.fightback_success_rate || 50
@@ -250,8 +257,8 @@ function updateRobSettings(guildId, updates) {
   const settings = { ...current, ...updates };
   
   db.run(`
-    INSERT OR REPLACE INTO rob_settings (guild_id, enabled, min_steal_percent, max_steal_percent, cooldown_minutes, target_cooldown_seconds, unique_targets_required, fine_min_percent, fine_max_percent, defenses_enabled, hidecash_success_rate, dodge_success_rate, fightback_success_rate)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO rob_settings (guild_id, enabled, min_steal_percent, max_steal_percent, cooldown_minutes, target_cooldown_seconds, unique_targets_required, fine_min_percent, fine_max_percent, defenses_enabled, defense_window_seconds, hidecash_success_rate, dodge_success_rate, fightback_success_rate)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     guildId,
     settings.enabled ? 1 : 0,
@@ -263,6 +270,7 @@ function updateRobSettings(guildId, updates) {
     settings.fineMinPercent,
     settings.fineMaxPercent,
     settings.defensesEnabled ? 1 : 0,
+    settings.defenseWindowSeconds || 10,
     settings.hidecashSuccessRate,
     settings.dodgeSuccessRate,
     settings.fightBackSuccessRate

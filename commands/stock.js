@@ -50,6 +50,18 @@ async function generatePriceChart(userId, username, timeRange, currentPrice) {
   const startTime = Date.now() - range.ms;
   let priceData = getPriceHistoryByTimeRange(userId, startTime);
   
+  if (priceData.length < 1) {
+    return null; // Not enough data for a chart
+  }
+
+  // Scale historical prices to match current actual price
+  // Stored prices may have been logged with different calculation parameters
+  const lastStoredPrice = priceData[priceData.length - 1].price;
+  if (lastStoredPrice > 0 && currentPrice > 0) {
+    const scaleFactor = currentPrice / lastStoredPrice;
+    priceData = priceData.map(p => ({ ...p, price: p.price * scaleFactor }));
+  }
+
   // Add current price as the latest data point
   let allPrices = [...priceData, { price: currentPrice, timestamp: Date.now() }];
   
@@ -130,7 +142,7 @@ async function generatePriceChart(userId, username, timeRange, currentPrice) {
   chart.setHeight(250);
   chart.setBackgroundColor('#2f3136');
 
-  return chart.getUrl();
+  return await chart.getShortUrl();
 }
 
 // Pending transactions to prevent duplicates
@@ -145,7 +157,8 @@ module.exports = {
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
 
-    await showStockPanel(interaction, guildId, userId);
+    await interaction.deferReply({ flags: 64 });
+    await showStockPanel(interaction, guildId, userId, false, true);
   },
 
   async handleButton(interaction) {

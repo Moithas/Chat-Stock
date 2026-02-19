@@ -64,6 +64,17 @@ module.exports = {
       }
     }
 
+    // Prevent giving debt (negative cash) or zero
+    if (amount <= 0) {
+      return interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(0xe74c3c)
+          .setTitle('❌ No Cash to Give')
+          .setDescription(`You don't have any cash to give.\n\n💵 Cash: **${senderBalance.cash.toLocaleString()}** ${CURRENCY}`)],
+        ephemeral: true
+      });
+    }
+
     // Check if sender has enough cash
     if (senderBalance.cash < amount) {
       return interaction.reply({

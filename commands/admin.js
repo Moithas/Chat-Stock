@@ -15,6 +15,8 @@ const adminBank = require('./admin-bank');
 const adminDividends = require('./admin-dividends');
 const adminSkills = require('./admin-skills');
 const adminItems = require('./admin-items');
+const adminDungeon = require('./admin-dungeon');
+const adminSYN = require('./admin-syn');
 
 // ==================== MAIN DASHBOARD ====================
 async function showDashboard(interaction) {
@@ -54,6 +56,8 @@ async function showDashboard(interaction) {
         { label: 'Fight', value: 'fight', emoji: '🥊', description: 'PvP cage fighting' },
         { label: 'Skills', value: 'skills', emoji: '🎓', description: 'XP, training & level bonuses' },
         { label: 'Item Shop', value: 'items', emoji: '🛒', description: 'Shop items & effects' },
+        { label: 'Dungeon', value: 'dungeon', emoji: '🏰', description: 'Solo dungeon crawl' },
+        { label: 'SYN', value: 'syn', emoji: '🃏', description: 'Screw Your Neighbor card game' },
         { label: '⚠️ Reset Game', value: 'reset_game', emoji: '🔄', description: 'DANGER: Reset all player data' }
       )
   );
@@ -114,6 +118,8 @@ module.exports.handleAdminInteraction = async function(interaction) {
         case 'fight': await adminFight.showFightPanel(interaction, guildId); break;
         case 'skills': await adminSkills.showSkillsPanel(interaction, guildId); break;
         case 'items': await adminItems.showItemsPanel(interaction, guildId); break;
+        case 'dungeon': await adminDungeon.showDungeonPanel(interaction, guildId); break;
+        case 'syn': await adminSYN.showSYNPanel(interaction, guildId); break;
         case 'reset_game': await showResetGamePanel(interaction, guildId); break;
       }
       return;
@@ -132,6 +138,8 @@ module.exports.handleAdminInteraction = async function(interaction) {
     if (await adminBank.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Bank'); return; }
     if (await adminSkills.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Skills'); return; }
     if (await adminItems.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Items'); return; }
+    if (await adminDungeon.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Dungeon'); return; }
+    if (await adminSYN.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by SYN'); return; }
     console.log('[Admin] No handler matched for:', interaction.customId);
 
     // Back to dashboard button

@@ -15,7 +15,14 @@ const {
   getTotalBondsCollected,
   getTotalBondIncomeCollected,
   recordBondHistory,
-  completeLoan
+  completeLoan,
+  getUserCreditScore,
+  getCreditTier,
+  getCreditLoanLimits,
+  formatCreditScore,
+  createCreditBar,
+  recordCreditEvent,
+  MAX_CREDIT_SCORE
 } = require('../bank');
 const { getUserProperties } = require('../property');
 const { getDb, getPortfolio, calculateStockPrice } = require('../database');
@@ -73,6 +80,40 @@ async function showBankPanel(interaction, guildId, userId, isUpdate = false) {
   
   embed.addFields({ name: '\u200B', value: '\u200B', inline: true }); // Spacer
   
+  // Credit Score Section
+  const creditInfo = getUserCreditScore(guildId, userId);
+  const creditTier = getCreditTier(creditInfo.score, guildId);
+  const creditLimits = getCreditLoanLimits(guildId, userId);
+  const creditBar = createCreditBar(creditInfo.score);
+  
+  let creditText = [
+    `**Score:** ${creditTier.emoji} **${creditInfo.score}** / ${MAX_CREDIT_SCORE} (${creditTier.name})`,
+    `${creditBar}`,
+    `**Max Loan:** ${creditLimits.maxLoan > 0 ? creditLimits.maxLoan.toLocaleString() + ' ' + CURRENCY : '❌ Not eligible'}`,
+    `**Interest Rate:** ${creditLimits.interestRate}%`
+  ];
+  
+  if (creditInfo.loansCompleted > 0 || creditInfo.loansDefaulted > 0) {
+    creditText.push(`📊 Completed: **${creditInfo.loansCompleted}** | Defaulted: **${creditInfo.loansDefaulted}**`);
+  }
+  
+  if (creditLimits.defaultPenaltyPercent > 0) {
+    creditText.push(`⚠️ **Default penalty:** -${Math.round(creditLimits.defaultPenaltyPercent)}% max loan (${creditInfo.totalDefaultedAmount.toLocaleString()} ${CURRENCY} lifetime defaults)`);
+  }
+  
+  if (creditLimits.defaultCooldownRemaining > 0) {
+    const cooldownHours = Math.ceil(creditLimits.defaultCooldownRemaining / (60 * 60 * 1000));
+    creditText.push(`🚫 **Loan banned** for ${cooldownHours}h (recent default)`);
+  } else if (creditInfo.score < 500 && creditInfo.loansDefaulted > 0) {
+    creditText.push(`🔄 Credit recovering **+10/day** until restored`);
+  }
+  
+  embed.addFields({
+    name: '📊 Credit Score',
+    value: creditText.join('\n'),
+    inline: false
+  });
+
   // Loan Status Section
   if (activeLoan) {
     const remaining = activeLoan.total_owed - activeLoan.amount_paid;
@@ -273,14 +314,24 @@ async function showLoanApplication(interaction, guildId, userId) {
   
   const eligibility = checkLoanEligibility(guildId, userId, member, portfolioValue, propertiesOwned);
   if (!eligibility.eligible) {
+    const creditInfo = getUserCreditScore(guildId, userId);
+    const desc = [
+      ...eligibility.reasons,
+      '',
+      `📊 Your Credit Score: ${formatCreditScore(creditInfo.score, guildId)}`
+    ].join('\n');
     return interaction.reply({
       embeds: [new EmbedBuilder()
         .setColor(0xe74c3c)
         .setTitle('❌ Not Eligible')
-        .setDescription(eligibility.reasons.join('\n'))],
+        .setDescription(desc)],
       flags: 64
     });
   }
+  
+  // Get credit-based loan limits
+  const creditLimits = eligibility.creditLimits || getCreditLoanLimits(guildId, userId);
+  const effectiveMax = Math.max(settings.loanMinAmount, creditLimits.maxLoan);
   
   // Show loan application modal
   const modal = new ModalBuilder()
@@ -289,9 +340,9 @@ async function showLoanApplication(interaction, guildId, userId) {
   
   const amountInput = new TextInputBuilder()
     .setCustomId('loan_amount')
-    .setLabel(`Loan Amount (${settings.loanMinAmount.toLocaleString()} - ${settings.loanMaxAmount.toLocaleString()})`)
+    .setLabel(`Amount (${settings.loanMinAmount.toLocaleString()} - ${effectiveMax.toLocaleString()})`)
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('Enter amount...')
+    .setPlaceholder(`Max: ${effectiveMax.toLocaleString()} (based on credit score)`)
     .setRequired(true);
   
   const durationInput = new TextInputBuilder()
@@ -460,10 +511,22 @@ async function showHistory(interaction, guildId, userId) {
   const bondHist = getBondHistory(guildId, userId, 5);
   const totalBondIncomeCollected = getTotalBondIncomeCollected(guildId, userId);
   
+  const creditInfo = getUserCreditScore(guildId, userId);
+  const creditTier = getCreditTier(creditInfo.score, guildId);
+
   const embed = new EmbedBuilder()
-    .setColor(0x3498db)
+    .setColor(creditTier.color || 0x3498db)
     .setTitle('📋 Your Bank History')
-    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }));
+    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+    .setDescription([
+      `📊 **Credit Score:** ${formatCreditScore(creditInfo.score, guildId)}`,
+      `${createCreditBar(creditInfo.score)}`,
+      '',
+      `✅ Loans Completed: **${creditInfo.loansCompleted}** | ❌ Defaulted: **${creditInfo.loansDefaulted}**`,
+      `📈 On-Time Payments: **${creditInfo.onTimePayments}** | ⚠️ Missed: **${creditInfo.missedPayments}**`,
+      `💰 Total Borrowed: **${creditInfo.totalBorrowed.toLocaleString()}** ${CURRENCY}`,
+      `💸 Total Repaid: **${creditInfo.totalRepaid.toLocaleString()}** ${CURRENCY}`
+    ].join('\n'));
   
   if (loanHistory.length > 0) {
     const loanText = loanHistory.map(l => {
@@ -751,11 +814,14 @@ async function handleBankInteraction(interaction) {
     const interval = interaction.fields.getTextInputValue('loan_interval').toLowerCase().trim();
     
     const settings = getBankSettings(guildId);
+    const creditLimits = getCreditLoanLimits(guildId, userId);
+    const effectiveMax = Math.max(settings.loanMinAmount, creditLimits.maxLoan);
+    const effectiveRate = creditLimits.interestRate;
     
     // Validate
-    if (isNaN(amount) || amount < settings.loanMinAmount || amount > settings.loanMaxAmount) {
+    if (isNaN(amount) || amount < settings.loanMinAmount || amount > effectiveMax) {
       return interaction.reply({
-        content: `❌ Invalid amount. Must be between ${settings.loanMinAmount.toLocaleString()} and ${settings.loanMaxAmount.toLocaleString()}.`,
+        content: `❌ Invalid amount. Must be between ${settings.loanMinAmount.toLocaleString()} and ${effectiveMax.toLocaleString()} (based on your credit score).`,
         flags: 64
       });
     }
@@ -775,27 +841,30 @@ async function handleBankInteraction(interaction) {
       });
     }
     
-    // Calculate loan details
-    const interest = amount * (settings.loanInterestRate / 100);
+    // Calculate loan details using credit-adjusted interest rate
+    const interest = Math.floor(amount * (effectiveRate / 100));
     const totalOwed = amount + interest;
     const intervalMs = interval === 'daily' ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
     const durationMs = days * 24 * 60 * 60 * 1000;
     const numPayments = Math.ceil(durationMs / intervalMs);
     const paymentAmount = Math.ceil(totalOwed / numPayments);
     
+    const creditInfo = getUserCreditScore(guildId, userId);
+    const creditTier = getCreditTier(creditInfo.score, guildId);
+    
     const embed = new EmbedBuilder()
-      .setColor(0xf1c40f)
+      .setColor(creditTier.color || 0xf1c40f)
       .setTitle('📋 Loan Application Review')
-      .setDescription('Please review your loan terms before confirming.')
+      .setDescription(`Please review your loan terms before confirming.\n📊 Credit: ${formatCreditScore(creditInfo.score, guildId)}`)
       .addFields(
         { name: '💵 Principal', value: `${amount.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: '📈 Interest Rate', value: `${settings.loanInterestRate}%`, inline: true },
+        { name: '📈 Interest Rate', value: `${effectiveRate}%${effectiveRate !== settings.loanInterestRate ? ` (base ${settings.loanInterestRate}%)` : ''}`, inline: true },
         { name: '💰 Interest Amount', value: `${interest.toLocaleString()} ${CURRENCY}`, inline: true },
         { name: '📊 Total to Repay', value: `${totalOwed.toLocaleString()} ${CURRENCY}`, inline: true },
         { name: '📅 Duration', value: `${days} days`, inline: true },
         { name: '🔄 Payment Schedule', value: `${paymentAmount.toLocaleString()} ${CURRENCY} ${interval}`, inline: true }
       )
-      .setFooter({ text: '⚠️ Missed payments incur penalties and may result in consequences!' });
+      .setFooter({ text: '⚠️ Missed payments hurt your credit score! Defaults result in a loan ban.' });
     
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -824,7 +893,12 @@ async function handleBankInteraction(interaction) {
 
     try {
       const settings = getBankSettings(guildId);
-      const loan = createLoan(guildId, userId, amount, settings.loanInterestRate, days, paymentInterval);
+      const creditLimits = getCreditLoanLimits(guildId, userId);
+      const effectiveRate = creditLimits.interestRate;
+      const loan = createLoan(guildId, userId, amount, effectiveRate, days, paymentInterval);
+      
+      // Record that a loan was taken
+      recordCreditEvent(guildId, userId, 'loan_taken', amount, 0);
       
       // Give the user the money
       await addMoney(guildId, userId, amount, 'Bank loan');
@@ -838,7 +912,7 @@ async function handleBankInteraction(interaction) {
           { name: '📅 Payment Schedule', value: `${loan.paymentAmount.toLocaleString()} ${CURRENCY} ${paymentInterval}`, inline: true },
           { name: '⏰ First Payment', value: `<t:${Math.floor(loan.nextPaymentTime / 1000)}:R>`, inline: true }
         )
-        .setFooter({ text: '⚠️ Payments are automatically deducted from your bank balance!' });
+        .setFooter({ text: '⚠️ Missed payments hurt your credit score! Defaults ban you from loans.' });
 
       return interaction.editReply({ embeds: [embed], components: [] });
     } catch (error) {
@@ -1045,10 +1119,21 @@ async function processPayment(interaction, guildId, userId, loan, amount) {
     if (newRemaining <= 0) {
       completeLoan(loan.id);
       
+      // Check if early payoff (paid before the natural end date)
+      const loanAge = Date.now() - loan.created_at;
+      const intervalMs = loan.payment_interval === 'weekly' ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+      const expectedPayments = Math.ceil(loan.total_owed / loan.payment_amount);
+      const elapsedPayments = Math.floor(loanAge / intervalMs);
+      const isEarly = elapsedPayments < expectedPayments - 1;
+      
+      recordCreditEvent(guildId, userId, isEarly ? 'completed_early' : 'completed', loan.principal, amount);
+      
+      const creditInfo = getUserCreditScore(guildId, userId);
+      
       const embed = new EmbedBuilder()
         .setColor(0x2ecc71)
         .setTitle('🎉 Loan Paid Off!')
-        .setDescription(`Congratulations! You've paid off your entire loan!\n\n**Final Payment:** ${amount.toLocaleString()} ${CURRENCY}`);
+        .setDescription(`Congratulations! You've paid off your entire loan!${isEarly ? ' 🌟 **Early payoff bonus!**' : ''}\n\n**Final Payment:** ${amount.toLocaleString()} ${CURRENCY}\n📊 Credit Score: ${formatCreditScore(creditInfo.score, guildId)}`);
       
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()

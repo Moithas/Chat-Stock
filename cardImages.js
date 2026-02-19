@@ -1434,6 +1434,91 @@ function drawTCPBetCircle(ctx, x, y, label, isActive, amount) {
   }
 }
 
+// Generate Screw Your Neighbor reveal image - all players' cards in a row
+async function generateSYNRevealImage(players) {
+  // players = [{ name, card: { rank, suit }, isLoser }, ...]
+  const numPlayers = players.length;
+  if (numPlayers === 0) return null;
+
+  const cardWidth = CARD_WIDTH;
+  const cardHeight = CARD_HEIGHT;
+  const sectionWidth = cardWidth + 40; // card + padding per player
+  const nameHeight = 50;
+  const statusHeight = 30;
+  const topPadding = 20;
+  const bottomPadding = 15;
+
+  const totalWidth = Math.max(sectionWidth * numPlayers + 20, 300);
+  const totalHeight = topPadding + cardHeight + nameHeight + statusHeight + bottomPadding;
+
+  const canvas = createCanvas(totalWidth, totalHeight);
+  const ctx = canvas.getContext('2d');
+
+  // Dark background
+  ctx.fillStyle = '#36393f';
+  roundRect(ctx, 0, 0, totalWidth, totalHeight, 10);
+  ctx.fill();
+
+  for (let i = 0; i < numPlayers; i++) {
+    const p = players[i];
+    const centerX = 10 + i * sectionWidth + sectionWidth / 2;
+    const cardX = centerX - cardWidth / 2;
+    const cardY = topPadding;
+
+    // Draw card
+    if (p.card) {
+      const url = getCardImageUrl(p.card);
+      const img = await loadCardImage(url);
+      if (img) {
+        // Glow effect for losers
+        if (p.isLoser) {
+          ctx.shadowColor = 'rgba(231, 76, 60, 0.7)';
+          ctx.shadowBlur = 12;
+        } else {
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+          ctx.shadowBlur = 4;
+        }
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = 2;
+
+        ctx.save();
+        roundRect(ctx, cardX, cardY, cardWidth, cardHeight, 4);
+        ctx.clip();
+        ctx.drawImage(img, cardX, cardY, cardWidth, cardHeight);
+        ctx.restore();
+
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+
+        // Red border for losers
+        if (p.isLoser) {
+          ctx.strokeStyle = '#e74c3c';
+          ctx.lineWidth = 3;
+          roundRect(ctx, cardX, cardY, cardWidth, cardHeight, 4);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Player name below card
+    const safeName = sanitizeDisplayName(p.name);
+    const displayName = safeName.length > 12 ? safeName.substring(0, 11) + '…' : safeName;
+    ctx.fillStyle = p.isLoser ? '#e74c3c' : '#ffffff';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(displayName, centerX, cardY + cardHeight + 22);
+
+    // Status below name
+    ctx.font = '14px Arial';
+    ctx.fillStyle = p.isLoser ? '#e74c3c' : '#2ecc71';
+    ctx.fillText(p.isLoser ? '💀 LOWEST' : '✅ Safe', centerX, cardY + cardHeight + 44);
+  }
+
+  return canvas.toBuffer('image/png');
+}
+
 module.exports = {
   generateHandImage,
   generateBlackjackImage,
@@ -1441,6 +1526,7 @@ module.exports = {
   generateInBetweenImage,
   generateLetItRideImage,
   generateThreeCardPokerImage,
+  generateSYNRevealImage,
   CARD_WIDTH,
   CARD_HEIGHT
 };

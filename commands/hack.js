@@ -302,6 +302,16 @@ module.exports = {
     let progress = 0;
     let defended = false;
     let defenseCollector = null;
+    let hackCompleted = false;
+
+    // Failsafe: if hack doesn't complete within 45 seconds, force cleanup
+    const failsafeTimeout = setTimeout(() => {
+      if (!hackCompleted) {
+        console.error(`⚠️ HACK FAILSAFE triggered for hacker=${hackerId}, target=${targetId} — forcing cleanup`);
+        endActiveHack(guildId, targetId);
+        hackCompleted = true;
+      }
+    }, 45000);
 
     // Set up button collector for defense
     const filter = i => i.customId === `hack_defend_${hackerId}` && i.user.id === targetId;
@@ -319,10 +329,14 @@ module.exports = {
       if (defenseSuccess) {
         // Defense succeeded - hack fails, but hacker still gets XP
         defended = true;
+        hackCompleted = true;
+        clearTimeout(failsafeTimeout);
         endActiveHack(guildId, targetId);
         clearTargetCooldown(guildId, targetId);
         
-        const potentialSteal = calculateStealAmount(targetBalance.bank, progress, settings, hackBonuses.maxStealBonus);
+        // Use 100% progress to calculate fine based on full potential steal, not current progress
+        // Otherwise early defense (e.g. 0% progress) results in zero fine
+        const potentialSteal = calculateStealAmount(targetBalance.bank, 100, settings, hackBonuses.maxStealBonus);
         const itemFineReduction = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_FINE_REDUCTION);
         const fineReduction = (hackBonuses.level * 3) + itemFineReduction; // 3% reduction per level + item
         const baseFine = calculateFine(potentialSteal, settings);
@@ -395,6 +409,8 @@ module.exports = {
             const recoveryPercent = 10 + Math.random() * 15;
             const recoveryAmount = Math.floor(potentialSteal * (recoveryPercent / 100));
             
+            // Take recovery amount from the hacker (can put them further into debt)
+            await applyFine(guildId, hackerId, recoveryAmount, `Traced by ${targetUser.username}`);
             await addMoney(guildId, targetId, recoveryAmount, `Traced hacker ${interaction.user.username}`);
             
             const traceFlavorText = getRandomFlavor(FLAVOR_TEXTS.traceSuccess).replaceAll('{target}', `**${targetUser.username}**`);
@@ -466,7 +482,10 @@ module.exports = {
       if (progress >= 100) {
         clearInterval(progressInterval);
         if (defenseCollector) defenseCollector.stop('complete');
+        clearTimeout(failsafeTimeout);
+        hackCompleted = true;
         
+        try {
         // End active hack tracking
         endActiveHack(guildId, targetId);
         
@@ -601,6 +620,8 @@ module.exports = {
               const recoveryPercent = 10 + Math.random() * 15;
               const recoveryAmount = Math.floor(potentialSteal * (recoveryPercent / 100));
               
+              // Take recovery amount from the hacker (can put them further into debt)
+              await applyFine(guildId, hackerId, recoveryAmount, `Traced by ${targetUser.username}`);
               await addMoney(guildId, targetId, recoveryAmount, `Traced hacker ${interaction.user.username}`);
               
               const traceFlavorText = getRandomFlavor(FLAVOR_TEXTS.traceSuccess).replaceAll('{target}', `**${targetUser.username}**`);
@@ -646,6 +667,22 @@ module.exports = {
           });
         }
         
+        } catch (err) {
+          console.error(`❌ HACK ERROR during completion for hacker=${hackerId}, target=${targetId}:`, err);
+          // Make sure active hack is always cleaned up
+          endActiveHack(guildId, targetId);
+          clearTargetCooldown(guildId, targetId);
+          try {
+            await hackMessage.edit({ 
+              content: `❌ An error occurred during the hack. No money was transferred.`,
+              embeds: [], 
+              components: [] 
+            });
+          } catch (editErr) {
+            console.error('Failed to edit hack message after error:', editErr.message);
+          }
+        }
+        
         return;
       }
       
@@ -659,9 +696,13 @@ module.exports = {
           components: [newDefenseRow]
         });
       } catch (err) {
-        // Message may have been deleted
+        // Message may have been deleted or API error
+        console.error(`❌ HACK PROGRESS ERROR for hacker=${hackerId}, target=${targetId}:`, err.message);
         clearInterval(progressInterval);
+        clearTimeout(failsafeTimeout);
+        hackCompleted = true;
         endActiveHack(guildId, targetId);
+        clearTargetCooldown(guildId, targetId);
       }
     }, 5000);
   }

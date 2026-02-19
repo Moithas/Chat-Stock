@@ -964,7 +964,6 @@ async function handleMarketButton(interaction, guildId) {
   
   // Group by tier
   const tiers = [1, 2, 3, 4, 5];
-  const tierWeights = { 1: 35, 2: 25, 3: 20, 4: 12, 5: 8 };
   
   let description = '';
   
@@ -972,9 +971,8 @@ async function handleMarketButton(interaction, guildId) {
     const tierProps = properties.filter(p => p.tier === tier);
     const tierName = getTierName(tier);
     const emoji = getTierEmoji(tier);
-    const weight = tierWeights[tier];
     
-    description += `\n**${emoji} ${tierName} (${weight}% chance, ${tier} card${tier > 1 ? 's' : ''}/day)**\n`;
+    description += `\n**${emoji} ${tierName} (${tier} card${tier > 1 ? 's' : ''}/day)**\n`;
     
     for (const prop of tierProps) {
       const rent = Math.round(prop.value * (settings.rentPercent / 100));

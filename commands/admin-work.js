@@ -804,6 +804,8 @@ async function showRobDefensePanel(interaction, guildId) {
     .setDescription('Configure the defense mechanics for /rob')
     .addFields(
       { name: '📊 Status', value: settings.defensesEnabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+      { name: '⏱️ Defense Window', value: `${settings.defenseWindowSeconds || 10}s`, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true },
       { name: '🙈 Hide Cash Success', value: `${settings.hidecashSuccessRate}%`, inline: true },
       { name: '💨 Dodge Success', value: `${settings.dodgeSuccessRate}%`, inline: true },
       { name: '🥊 Fight Back Success', value: `${settings.fightBackSuccessRate}%`, inline: true }
@@ -845,12 +847,19 @@ async function handleRobDefenseEdit(interaction, guildId) {
 }
 
 async function handleRobDefenseSettingsModal(interaction, guildId) {
+  const defenseWindow = parseInt(interaction.fields.getTextInputValue('defense_window')) || 10;
   const hidecashRate = parseInt(interaction.fields.getTextInputValue('hidecash_rate')) || 70;
   const dodgeRate = parseInt(interaction.fields.getTextInputValue('dodge_rate')) || 60;
   const fightBackRate = parseInt(interaction.fields.getTextInputValue('fightback_rate')) || 50;
   
+  // Validate defense window
+  if (defenseWindow < 5 || defenseWindow > 60) {
+    return interaction.reply({ content: '❌ Defense window must be between 5 and 60 seconds.', flags: 64 });
+  }
+  
   // Validate rates are between 0-100
   const validatedRates = {
+    defenseWindowSeconds: defenseWindow,
     hidecashSuccessRate: Math.max(0, Math.min(100, hidecashRate)),
     dodgeSuccessRate: Math.max(0, Math.min(100, dodgeRate)),
     fightBackSuccessRate: Math.max(0, Math.min(100, fightBackRate))
@@ -866,8 +875,17 @@ async function handleRobDefenseSettingsModal(interaction, guildId) {
 function createRobDefenseSettingsModal(settings) {
   return new ModalBuilder()
     .setCustomId('modal_rob_defense_settings')
-    .setTitle('Defense Success Rates (%)')
+    .setTitle('Defense Settings')
     .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('defense_window')
+          .setLabel('Defense Window (seconds)')
+          .setPlaceholder('10')
+          .setValue(String(settings.defenseWindowSeconds || 10))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId('hidecash_rate')

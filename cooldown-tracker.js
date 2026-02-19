@@ -371,6 +371,24 @@ async function buildCooldownEmbed(guildId) {
   return embed;
 }
 
+// Clean up messages in the tracker channel (delete everything except the tracker message)
+async function cleanupTrackerChannel(channel, keepMessageId) {
+  try {
+    const messages = await channel.messages.fetch({ limit: 50 });
+    const toDelete = messages.filter(msg => msg.id !== keepMessageId);
+    
+    for (const [id, msg] of toDelete) {
+      try {
+        await msg.delete();
+      } catch (e) {
+        // Already deleted or no permission
+      }
+    }
+  } catch (e) {
+    // Silently ignore cleanup errors
+  }
+}
+
 // Update the cooldown tracker for a guild
 async function updateCooldownTracker(guildId) {
   if (!discordClient || !db) return;
@@ -389,11 +407,16 @@ async function updateCooldownTracker(guildId) {
       try {
         const existingMsg = await channel.messages.fetch(settings.messageId);
         await existingMsg.edit({ embeds: [embed] });
+        // Clean up any other messages in the channel
+        await cleanupTrackerChannel(channel, settings.messageId);
         return;
       } catch (e) {
         // Message was deleted, create new one
       }
     }
+    
+    // Clean up any stale messages before creating a new one
+    await cleanupTrackerChannel(channel, null);
     
     // Create new message
     const msg = await channel.send({ embeds: [embed] });

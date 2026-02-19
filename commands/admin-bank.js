@@ -31,7 +31,9 @@ const BUTTON_IDS = [
   'bank_toggle_req_tenure',
   'bank_toggle_collateral',
   'bank_edit_requirements',
-  'bank_add_bond'
+  'bank_add_bond',
+  'bank_credit_tiers',
+  'bank_credit_reset'
 ];
 
 const BUTTON_PREFIXES = [
@@ -53,11 +55,13 @@ const MODAL_IDS = [
 ];
 
 const MODAL_PREFIXES = [
-  'modal_bank_bond_edit_'
+  'modal_bank_bond_edit_',
+  'modal_bank_credit_tier_'
 ];
 
 const SELECT_IDS = [
-  'bank_delete_active_bond'
+  'bank_delete_active_bond',
+  'bank_credit_tier_select'
 ];
 
 const SELECT_PREFIXES = [
@@ -329,6 +333,23 @@ async function handleButton(interaction, guildId, customId) {
     return true;
   }
 
+  // Credit tiers panel
+  if (customId === 'bank_credit_tiers') {
+    await interaction.deferUpdate();
+    await showCreditTiersPanel(interaction, guildId);
+    return true;
+  }
+
+  // Reset credit tiers to defaults
+  if (customId === 'bank_credit_reset') {
+    const { resetCreditTierSettings } = require('../bank');
+    resetCreditTierSettings(guildId);
+    logAdminAction(guildId, interaction.user.id, interaction.user.username, 'Reset all credit tier settings to defaults');
+    await interaction.deferUpdate();
+    await showCreditTiersPanel(interaction, guildId);
+    return true;
+  }
+
   return false;
 }
 
@@ -473,6 +494,35 @@ async function handleModal(interaction, guildId, customId) {
     return true;
   }
 
+  // Edit credit tier modal
+  if (customId.startsWith('modal_bank_credit_tier_')) {
+    const tierIndex = parseInt(customId.replace('modal_bank_credit_tier_', ''));
+    const { updateCreditTierSetting, CREDIT_TIERS } = require('../bank');
+
+    if (tierIndex < 0 || tierIndex >= CREDIT_TIERS.length) {
+      await interaction.reply({ content: '❌ Invalid credit tier.', flags: 64 });
+      return true;
+    }
+
+    const maxLoanPercent = parseFloat(interaction.fields.getTextInputValue('max_loan_percent'));
+    const interestMod = parseFloat(interaction.fields.getTextInputValue('interest_mod'));
+
+    if (isNaN(maxLoanPercent) || maxLoanPercent < 0 || maxLoanPercent > 500) {
+      await interaction.reply({ content: '❌ Max Loan % must be between 0 and 500.', flags: 64 });
+      return true;
+    }
+    if (isNaN(interestMod) || interestMod < 0 || interestMod > 10) {
+      await interaction.reply({ content: '❌ Interest Modifier must be between 0 and 10.', flags: 64 });
+      return true;
+    }
+
+    updateCreditTierSetting(guildId, tierIndex, maxLoanPercent, interestMod);
+    logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated credit tier "${CREDIT_TIERS[tierIndex].name}" - Max Loan: ${maxLoanPercent}%, Interest Mod: ${interestMod}x`);
+    await interaction.deferUpdate();
+    await showCreditTiersPanel(interaction, guildId);
+    return true;
+  }
+
   return false;
 }
 
@@ -528,6 +578,20 @@ async function handleSelect(interaction, guildId, customId) {
     }
     await interaction.deferUpdate();
     await showActiveBondsPanel(interaction, guildId, 0, true);
+    return true;
+  }
+
+  // Credit tier select - open edit modal for selected tier
+  if (customId === 'bank_credit_tier_select') {
+    const tierIndex = parseInt(interaction.values[0]);
+    const { getGuildCreditTiers, CREDIT_TIERS } = require('../bank');
+    const tiers = getGuildCreditTiers(guildId);
+    const tier = tiers[tierIndex];
+    const defaultTier = CREDIT_TIERS[tierIndex];
+    if (tier) {
+      const modal = createCreditTierModal(tierIndex, tier, defaultTier);
+      await interaction.showModal(modal);
+    }
     return true;
   }
 
@@ -601,6 +665,11 @@ async function showBankPanel(interaction, guildId, useEditReply = false) {
     .setLabel('📜 Bond Tiers')
     .setStyle(ButtonStyle.Primary);
 
+  const creditTiersBtn = new ButtonBuilder()
+    .setCustomId('bank_credit_tiers')
+    .setLabel('📊 Credit Tiers')
+    .setStyle(ButtonStyle.Primary);
+
   const viewLoansBtn = new ButtonBuilder()
     .setCustomId('bank_view_loans')
     .setLabel(`📊 View Loans (${activeLoans.length})`)
@@ -616,7 +685,7 @@ async function showBankPanel(interaction, guildId, useEditReply = false) {
     .setLabel('◀️ Back')
     .setStyle(ButtonStyle.Secondary);
 
-  const row2 = new ActionRowBuilder().addComponents(bondTiersBtn, viewLoansBtn, viewBondsBtn, backBtn);
+  const row2 = new ActionRowBuilder().addComponents(bondTiersBtn, creditTiersBtn, viewLoansBtn, viewBondsBtn, backBtn);
 
   await interaction.editReply({ embeds: [embed], components: [row1, row2] });
 }
@@ -1092,6 +1161,65 @@ async function showActiveBondsPanel(interaction, guildId, page = 0, useEditReply
   await interaction.editReply({ embeds: [embed], components });
 }
 
+// ==================== CREDIT TIERS PANEL ====================
+async function showCreditTiersPanel(interaction, guildId) {
+  const { getGuildCreditTiers, CREDIT_TIERS, getBankSettings } = require('../bank');
+  const tiers = getGuildCreditTiers(guildId);
+  const defaults = CREDIT_TIERS;
+  const settings = getBankSettings(guildId);
+
+  let description = 'Configure max loan % and interest modifier per credit tier.\n';
+  description += `Base Interest: **${settings.loanInterestRate}%** | Base Max Loan: **${settings.loanMaxAmount.toLocaleString()}**\n\n`;
+
+  for (let i = 0; i < tiers.length; i++) {
+    const t = tiers[i];
+    const d = defaults[i];
+    const isCustom = t.maxLoanPercent !== d.maxLoanPercent || t.interestMod !== d.interestMod;
+    const customTag = isCustom ? ' ✏️' : '';
+
+    description += `${t.emoji} **${t.name}** (Score ≥ ${t.minScore})${customTag}\n`;
+    description += `   Max Loan: **${t.maxLoanPercent}%** (${Math.floor(settings.loanMaxAmount * (t.maxLoanPercent / 100)).toLocaleString()})`;
+    description += ` | Interest: **${t.interestMod}x** (${Math.round((settings.loanInterestRate * t.interestMod) * 10) / 10}%)\n`;
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(0x3498db)
+    .setTitle('📊 Credit Tier Settings')
+    .setDescription(description)
+    .setFooter({ text: '✏️ = customized from default | Select a tier below to edit' });
+
+  const selectOptions = tiers.map((t, i) => {
+    const d = defaults[i];
+    const isCustom = t.maxLoanPercent !== d.maxLoanPercent || t.interestMod !== d.interestMod;
+    return {
+      label: `${t.name} (Score ≥ ${t.minScore})`,
+      description: `Loan: ${t.maxLoanPercent}% | Interest: ${t.interestMod}x${isCustom ? ' (custom)' : ''}`,
+      value: String(i),
+      emoji: t.emoji
+    };
+  });
+
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId('bank_credit_tier_select')
+    .setPlaceholder('Select a tier to edit...')
+    .addOptions(selectOptions);
+
+  const resetBtn = new ButtonBuilder()
+    .setCustomId('bank_credit_reset')
+    .setLabel('🔄 Reset to Defaults')
+    .setStyle(ButtonStyle.Danger);
+
+  const backBtn = new ButtonBuilder()
+    .setCustomId('bank_settings')
+    .setLabel('◀️ Back')
+    .setStyle(ButtonStyle.Secondary);
+
+  const row1 = new ActionRowBuilder().addComponents(selectMenu);
+  const row2 = new ActionRowBuilder().addComponents(resetBtn, backBtn);
+
+  await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+}
+
 // ==================== MODAL BUILDERS ====================
 function createBankLoanSettingsModal(settings) {
   return new ModalBuilder()
@@ -1217,6 +1345,32 @@ function createBondTierModal(bond = null) {
     );
 }
 
+function createCreditTierModal(tierIndex, tier, defaultTier) {
+  return new ModalBuilder()
+    .setCustomId(`modal_bank_credit_tier_${tierIndex}`)
+    .setTitle(`Edit: ${tier.emoji} ${tier.name} Tier`)
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('max_loan_percent')
+          .setLabel(`Max Loan % of Base (default: ${defaultTier.maxLoanPercent})`)
+          .setPlaceholder(String(defaultTier.maxLoanPercent))
+          .setValue(String(tier.maxLoanPercent))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('interest_mod')
+          .setLabel(`Interest Multiplier (default: ${defaultTier.interestMod})`)
+          .setPlaceholder(String(defaultTier.interestMod))
+          .setValue(String(tier.interestMod))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
 // ==================== EXPORTS ====================
 module.exports = {
   handleInteraction,
@@ -1229,7 +1383,9 @@ module.exports = {
   showActiveLoansPanel,
   showLoanDetailPanel,
   showActiveBondsPanel,
+  showCreditTiersPanel,
   createBankLoanSettingsModal,
   createBankRequirementsModal,
-  createBondTierModal
+  createBondTierModal,
+  createCreditTierModal
 };

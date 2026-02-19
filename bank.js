@@ -145,6 +145,49 @@ function initBank(database) {
     )
   `);
   
+  // Create credit score table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS loan_credit_scores (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      credit_score INTEGER DEFAULT 500,
+      loans_completed INTEGER DEFAULT 0,
+      loans_defaulted INTEGER DEFAULT 0,
+      total_on_time_payments INTEGER DEFAULT 0,
+      total_missed_payments INTEGER DEFAULT 0,
+      total_borrowed INTEGER DEFAULT 0,
+      total_repaid INTEGER DEFAULT 0,
+      last_default_time INTEGER DEFAULT 0,
+      last_recovery_time INTEGER DEFAULT 0,
+      PRIMARY KEY (guild_id, user_id)
+    )
+  `);
+
+  // Migration: add last_recovery_time column if missing
+  try {
+    db.run(`ALTER TABLE loan_credit_scores ADD COLUMN last_recovery_time INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists
+  }
+
+  // Migration: add total_defaulted_amount column for lifetime default tracking
+  try {
+    db.run(`ALTER TABLE loan_credit_scores ADD COLUMN total_defaulted_amount INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists
+  }
+
+  // Create credit tier settings table (per-guild overrides)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS credit_tier_settings (
+      guild_id TEXT NOT NULL,
+      tier_index INTEGER NOT NULL,
+      max_loan_percent REAL NOT NULL,
+      interest_mod REAL NOT NULL,
+      PRIMARY KEY (guild_id, tier_index)
+    )
+  `);
+
   // Create indexes for faster lookups
   db.run(`CREATE INDEX IF NOT EXISTS idx_loans_guild_user ON loans(guild_id, user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_loans_status ON loans(guild_id, status)`);
@@ -152,6 +195,7 @@ function initBank(database) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_active_bonds_guild_user ON active_bonds(guild_id, user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_active_bonds_expires ON active_bonds(expires_at)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_bond_history_guild_user ON bond_history(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_credit_scores_guild_user ON loan_credit_scores(guild_id, user_id)`);
   
   console.log('🏦 Bank system initialized');
 }
@@ -649,6 +693,300 @@ function getTotalBondIncomeCollected(guildId, userId) {
   return total || 0;
 }
 
+// ============ CREDIT SCORE SYSTEM ============
+
+// Credit tiers determine borrowing limits and interest rates
+const CREDIT_TIERS = [
+  { name: 'Bankrupt',    emoji: '💀', minScore: 0,   maxLoanPercent: 0,    interestMod: 0,   color: 0x2c2f33 },
+  { name: 'Terrible',    emoji: '🔴', minScore: 100, maxLoanPercent: 15,   interestMod: 2.0, color: 0xe74c3c },
+  { name: 'Poor',        emoji: '🟠', minScore: 250, maxLoanPercent: 30,   interestMod: 1.5, color: 0xe67e22 },
+  { name: 'Fair',        emoji: '🟡', minScore: 400, maxLoanPercent: 50,   interestMod: 1.2, color: 0xf1c40f },
+  { name: 'Good',        emoji: '🟢', minScore: 500, maxLoanPercent: 75,   interestMod: 1.0, color: 0x2ecc71 },
+  { name: 'Great',       emoji: '🟢', minScore: 650, maxLoanPercent: 100,  interestMod: 0.8, color: 0x27ae60 },
+  { name: 'Excellent',   emoji: '⭐', minScore: 800, maxLoanPercent: 130,  interestMod: 0.6, color: 0x3498db },
+  { name: 'Perfect',     emoji: '💎', minScore: 950, maxLoanPercent: 160,  interestMod: 0.4, color: 0x9b59b6 }
+];
+
+const DEFAULT_CREDIT_SCORE = 500; // Everyone starts at "Good"
+const MAX_CREDIT_SCORE = 1000;
+const MIN_CREDIT_SCORE = 0;
+
+// Score changes
+const SCORE_CHANGES = {
+  LOAN_COMPLETED: 50,        // Paid off a loan in full
+  ON_TIME_PAYMENT: 5,        // Each scheduled payment made on time
+  MISSED_PAYMENT: -30,       // Missed a payment
+  LOAN_DEFAULTED: -200,      // Defaulted on a loan
+  EARLY_PAYOFF_BONUS: 25,    // Paid off before all scheduled payments
+};
+
+// Default cooldown: how long (in days) a defaulter must wait before borrowing again
+const DEFAULT_COOLDOWN_DAYS = 7;
+
+// Passive credit recovery: points gained per day while below starting score and past cooldown
+const PASSIVE_RECOVERY_PER_DAY = 10;
+const PASSIVE_RECOVERY_INTERVAL_MS = 24 * 60 * 60 * 1000; // Check in 1-day increments
+
+// Get credit tiers with per-guild overrides applied
+function getGuildCreditTiers(guildId) {
+  const tiers = CREDIT_TIERS.map(t => ({ ...t })); // Clone defaults
+  if (!db) return tiers;
+
+  const result = db.exec(`SELECT tier_index, max_loan_percent, interest_mod FROM credit_tier_settings WHERE guild_id = ?`, [guildId]);
+  if (result.length > 0 && result[0].values.length > 0) {
+    for (const row of result[0].values) {
+      const idx = row[0];
+      if (idx >= 0 && idx < tiers.length) {
+        tiers[idx].maxLoanPercent = row[1];
+        tiers[idx].interestMod = row[2];
+      }
+    }
+  }
+  return tiers;
+}
+
+function updateCreditTierSetting(guildId, tierIndex, maxLoanPercent, interestMod) {
+  if (!db || tierIndex < 0 || tierIndex >= CREDIT_TIERS.length) return;
+
+  db.run(`
+    INSERT OR REPLACE INTO credit_tier_settings (guild_id, tier_index, max_loan_percent, interest_mod)
+    VALUES (?, ?, ?, ?)
+  `, [guildId, tierIndex, maxLoanPercent, interestMod]);
+
+  saveDatabase();
+}
+
+function resetCreditTierSettings(guildId) {
+  if (!db) return;
+  db.run(`DELETE FROM credit_tier_settings WHERE guild_id = ?`, [guildId]);
+  saveDatabase();
+}
+
+function getUserCreditScore(guildId, userId) {
+  if (!db) return { score: DEFAULT_CREDIT_SCORE, loansCompleted: 0, loansDefaulted: 0, onTimePayments: 0, missedPayments: 0, totalBorrowed: 0, totalRepaid: 0, totalDefaultedAmount: 0, lastDefaultTime: 0 };
+
+  const result = db.exec(`SELECT * FROM loan_credit_scores WHERE guild_id = ? AND user_id = ?`, [guildId, userId]);
+
+  if (result.length === 0 || result[0].values.length === 0) {
+    return { score: DEFAULT_CREDIT_SCORE, loansCompleted: 0, loansDefaulted: 0, onTimePayments: 0, missedPayments: 0, totalBorrowed: 0, totalRepaid: 0, totalDefaultedAmount: 0, lastDefaultTime: 0 };
+  }
+
+  const cols = result[0].columns;
+  const vals = result[0].values[0];
+  const row = cols.reduce((obj, col, i) => ({ ...obj, [col]: vals[i] }), {});
+
+  let score = row.credit_score;
+  const lastDefaultTime = row.last_default_time || 0;
+
+  // Passive credit recovery: if score is below starting score and past default cooldown, recover over time
+  if (score < DEFAULT_CREDIT_SCORE) {
+    const cooldownMs = DEFAULT_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+    const cooldownEnd = lastDefaultTime > 0 ? lastDefaultTime + cooldownMs : 0;
+    const now = Date.now();
+
+    if (now > cooldownEnd) {
+      // Calculate recovery from the later of: cooldown end, or last recovery checkpoint
+      const lastRecovery = row.last_recovery_time || cooldownEnd || 0;
+      if (lastRecovery > 0) {
+        const elapsed = now - lastRecovery;
+        const daysElapsed = Math.floor(elapsed / PASSIVE_RECOVERY_INTERVAL_MS);
+
+        if (daysElapsed > 0) {
+          const recovery = daysElapsed * PASSIVE_RECOVERY_PER_DAY;
+          const newScore = Math.min(DEFAULT_CREDIT_SCORE, score + recovery);
+
+          if (newScore > score) {
+            score = newScore;
+            // Persist the recovery
+            db.run(`UPDATE loan_credit_scores SET credit_score = ?, last_recovery_time = ? WHERE guild_id = ? AND user_id = ?`,
+              [score, now, guildId, userId]);
+            saveDatabase();
+            console.log(`📊 Passive credit recovery for ${userId}: ${row.credit_score} → ${score} (+${recovery})`);
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    score,
+    loansCompleted: row.loans_completed,
+    loansDefaulted: row.loans_defaulted,
+    onTimePayments: row.total_on_time_payments,
+    missedPayments: row.total_missed_payments,
+    totalBorrowed: row.total_borrowed,
+    totalRepaid: row.total_repaid,
+    totalDefaultedAmount: row.total_defaulted_amount || 0,
+    lastDefaultTime
+  };
+}
+
+function modifyCreditScore(guildId, userId, change, reason = '') {
+  if (!db) return;
+
+  const current = getUserCreditScore(guildId, userId);
+  const newScore = Math.max(MIN_CREDIT_SCORE, Math.min(MAX_CREDIT_SCORE, current.score + change));
+
+  db.run(`
+    INSERT OR REPLACE INTO loan_credit_scores 
+    (guild_id, user_id, credit_score, loans_completed, loans_defaulted, total_on_time_payments, total_missed_payments, total_borrowed, total_repaid, last_default_time, last_recovery_time, total_defaulted_amount)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+  `, [guildId, userId, newScore, current.loansCompleted, current.loansDefaulted, current.onTimePayments, current.missedPayments, current.totalBorrowed, current.totalRepaid, current.lastDefaultTime, current.totalDefaultedAmount || 0]);
+
+  if (reason) {
+    console.log(`📊 Credit score for ${userId}: ${current.score} → ${newScore} (${change > 0 ? '+' : ''}${change}, ${reason})`);
+  }
+
+  return newScore;
+}
+
+// Minimum loan size (as % of current max borrowing limit) to earn positive credit score changes
+const CREDIT_MIN_LOAN_PERCENT = 25;
+
+function recordCreditEvent(guildId, userId, event, loanPrincipal = 0, paymentAmount = 0) {
+  if (!db) return;
+
+  const current = getUserCreditScore(guildId, userId);
+  const settings = getBankSettings(guildId);
+  const baseMaxAmount = settings.loanMaxAmount || 100000;
+
+  // Determine the user's current max loan for the minimum threshold check
+  const creditLimits = getCreditLoanLimits(guildId, userId);
+  const currentMaxLoan = creditLimits.maxLoan;
+  const minLoanForCredit = Math.floor(currentMaxLoan * (CREDIT_MIN_LOAN_PERCENT / 100));
+
+  // Check if this loan qualifies for positive credit impact
+  // Loans below 25% of your max borrowing limit don't build credit (but penalties always apply)
+  const isPositiveEvent = ['completed', 'completed_early', 'on_time_payment'].includes(event);
+  const qualifiesForCredit = loanPrincipal >= minLoanForCredit || !isPositiveEvent;
+
+  // Scale factor: rewards/penalties scale with loan size relative to max
+  const loanScale = loanPrincipal > 0 
+    ? Math.max(0.1, Math.min(2.0, loanPrincipal / baseMaxAmount))
+    : 1;
+
+  let scoreChange = 0;
+  const updates = { ...current };
+
+  switch (event) {
+    case 'completed':
+      updates.loansCompleted = current.loansCompleted + 1;
+      updates.totalRepaid = current.totalRepaid + paymentAmount;
+      scoreChange = qualifiesForCredit ? Math.round(SCORE_CHANGES.LOAN_COMPLETED * loanScale) : 0;
+      break;
+    case 'completed_early':
+      updates.loansCompleted = current.loansCompleted + 1;
+      updates.totalRepaid = current.totalRepaid + paymentAmount;
+      scoreChange = qualifiesForCredit ? Math.round((SCORE_CHANGES.LOAN_COMPLETED + SCORE_CHANGES.EARLY_PAYOFF_BONUS) * loanScale) : 0;
+      break;
+    case 'defaulted':
+      updates.loansDefaulted = current.loansDefaulted + 1;
+      updates.lastDefaultTime = Date.now();
+      updates.totalDefaultedAmount = (current.totalDefaultedAmount || 0) + loanPrincipal;
+      // Default penalty scales more aggressively (1.5x multiplier on scale)
+      const defaultScale = Math.max(0.25, (loanPrincipal / baseMaxAmount) * 1.5);
+      scoreChange = Math.round(SCORE_CHANGES.LOAN_DEFAULTED * defaultScale);
+      break;
+    case 'on_time_payment':
+      updates.onTimePayments = current.onTimePayments + 1;
+      updates.totalRepaid = current.totalRepaid + paymentAmount;
+      scoreChange = qualifiesForCredit ? Math.max(1, Math.round(SCORE_CHANGES.ON_TIME_PAYMENT * loanScale)) : 0;
+      break;
+    case 'missed_payment':
+      updates.missedPayments = current.missedPayments + 1;
+      scoreChange = Math.min(-1, Math.round(SCORE_CHANGES.MISSED_PAYMENT * loanScale));
+      break;
+    case 'loan_taken':
+      updates.totalBorrowed = current.totalBorrowed + loanPrincipal;
+      scoreChange = 0;
+      break;
+  }
+
+  if (isPositiveEvent && !qualifiesForCredit && loanPrincipal > 0) {
+    console.log(`📊 Credit [${event}] ${userId}: No score change — loan ${loanPrincipal.toLocaleString()} below 25% threshold (${minLoanForCredit.toLocaleString()})`)
+  }
+
+  const newScore = Math.max(MIN_CREDIT_SCORE, Math.min(MAX_CREDIT_SCORE, current.score + scoreChange));
+
+  db.run(`
+    INSERT OR REPLACE INTO loan_credit_scores 
+    (guild_id, user_id, credit_score, loans_completed, loans_defaulted, total_on_time_payments, total_missed_payments, total_borrowed, total_repaid, last_default_time, last_recovery_time, total_defaulted_amount)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+  `, [guildId, userId, newScore, updates.loansCompleted, updates.loansDefaulted, updates.onTimePayments, updates.missedPayments, updates.totalBorrowed, updates.totalRepaid, updates.lastDefaultTime, updates.totalDefaultedAmount || 0]);
+
+  saveDatabase();
+
+  if (scoreChange !== 0) {
+    console.log(`📊 Credit [${event}] ${userId}: ${current.score} → ${newScore} (${scoreChange > 0 ? '+' : ''}${scoreChange}, principal=${loanPrincipal}, scale=${loanScale.toFixed(2)})`);
+  }
+
+  return newScore;
+}
+
+function getCreditTier(score, guildId = null) {
+  const tiers = guildId ? getGuildCreditTiers(guildId) : CREDIT_TIERS;
+  // Find the highest tier the score qualifies for
+  let tier = tiers[0];
+  for (const t of tiers) {
+    if (score >= t.minScore) tier = t;
+  }
+  return tier;
+}
+
+function getCreditLoanLimits(guildId, userId) {
+  const settings = getBankSettings(guildId);
+  const credit = getUserCreditScore(guildId, userId);
+  const tier = getCreditTier(credit.score, guildId);
+
+  // Max loan = base max * tier percentage
+  let maxLoan = Math.floor(settings.loanMaxAmount * (tier.maxLoanPercent / 100));
+
+  // Lifetime default penalty: reduce max loan based on total amount defaulted
+  // Every $1 of lifetime defaults reduces max borrowing power
+  // Penalty caps at 75% reduction — you can never fully recover from serial defaults
+  let defaultPenaltyPercent = 0;
+  if (credit.totalDefaultedAmount > 0) {
+    defaultPenaltyPercent = Math.min(75, (credit.totalDefaultedAmount / (settings.loanMaxAmount * 3)) * 100);
+    maxLoan = Math.floor(maxLoan * (1 - defaultPenaltyPercent / 100));
+  }
+
+  // Interest = base rate * tier modifier
+  const interestRate = Math.round((settings.loanInterestRate * tier.interestMod) * 10) / 10;
+
+  // Check default cooldown
+  let defaultCooldownRemaining = 0;
+  if (credit.lastDefaultTime > 0) {
+    const cooldownMs = DEFAULT_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+    const elapsed = Date.now() - credit.lastDefaultTime;
+    if (elapsed < cooldownMs) {
+      defaultCooldownRemaining = cooldownMs - elapsed;
+    }
+  }
+
+  return {
+    credit,
+    tier,
+    maxLoan,
+    interestRate,
+    defaultCooldownRemaining,
+    defaultPenaltyPercent,
+    baseMaxLoan: settings.loanMaxAmount,
+    baseInterestRate: settings.loanInterestRate
+  };
+}
+
+function formatCreditScore(score, guildId = null) {
+  const tier = getCreditTier(score, guildId);
+  return `${tier.emoji} **${score}** / ${MAX_CREDIT_SCORE} (${tier.name})`;
+}
+
+function createCreditBar(score, length = 10) {
+  const pct = (score / MAX_CREDIT_SCORE) * 100;
+  const filled = Math.round((pct / 100) * length);
+  const empty = length - filled;
+  return '█'.repeat(filled) + '░'.repeat(empty);
+}
+
 // ============ ELIGIBILITY CHECKS ============
 
 function checkLoanEligibility(guildId, userId, member, portfolioValue, propertiesOwned) {
@@ -663,6 +1001,20 @@ function checkLoanEligibility(guildId, userId, member, portfolioValue, propertie
   const existingLoan = getUserActiveLoan(guildId, userId);
   if (existingLoan) {
     return { eligible: false, reasons: ['You already have an active loan. Pay it off first.'] };
+  }
+
+  // Check credit score - default cooldown
+  const creditLimits = getCreditLoanLimits(guildId, userId);
+  if (creditLimits.defaultCooldownRemaining > 0) {
+    const days = Math.ceil(creditLimits.defaultCooldownRemaining / (24 * 60 * 60 * 1000));
+    const hours = Math.ceil(creditLimits.defaultCooldownRemaining / (60 * 60 * 1000));
+    const timeStr = days > 1 ? `${days} days` : `${hours} hours`;
+    reasons.push(`🚫 You defaulted on a loan recently. You must wait **${timeStr}** before borrowing again.`);
+  }
+
+  // Check credit score - bankrupt tier can't borrow
+  if (creditLimits.tier.maxLoanPercent <= 0) {
+    reasons.push(`💀 Your credit score is too low to borrow. (${formatCreditScore(creditLimits.credit.score)})`);
   }
   
   // Check property requirement
@@ -692,7 +1044,8 @@ function checkLoanEligibility(guildId, userId, member, portfolioValue, propertie
   
   return {
     eligible: reasons.length === 0,
-    reasons
+    reasons,
+    creditLimits // Pass along for use in the application UI
   };
 }
 
@@ -751,10 +1104,12 @@ async function processLoanPayments() {
       if (success) {
         // Record successful payment
         recordLoanPayment(loan.id, loan.guild_id, loan.user_id, paymentAmount, 'scheduled');
+        recordCreditEvent(loan.guild_id, loan.user_id, 'on_time_payment', loan.principal, paymentAmount);
         
         const newPaid = loan.amount_paid + paymentAmount;
         if (newPaid >= loan.total_owed) {
           completeLoan(loan.id);
+          recordCreditEvent(loan.guild_id, loan.user_id, 'completed', loan.principal, paymentAmount);
           console.log(`✅ Loan ${loan.id} completed for user ${loan.user_id}`);
         } else {
           // Schedule next payment
@@ -766,10 +1121,12 @@ async function processLoanPayments() {
       } else {
         // Missed payment
         incrementMissedPayments(loan.id);
+        recordCreditEvent(loan.guild_id, loan.user_id, 'missed_payment', loan.principal, 0);
         
         const settings = getBankSettings(loan.guild_id);
         if (loan.missed_payments + 1 >= settings.loanMaxMissedPayments) {
           defaultLoan(loan.id);
+          recordCreditEvent(loan.guild_id, loan.user_id, 'defaulted', loan.principal, 0);
           console.log(`❌ Loan ${loan.id} defaulted for user ${loan.user_id}`);
           
           // Seize property as collateral if enabled
@@ -845,6 +1202,20 @@ module.exports = {
   checkLoanEligibility,
   forgiveLoan,
   removeDefaultedLoan,
+  // Credit Score
+  getUserCreditScore,
+  modifyCreditScore,
+  recordCreditEvent,
+  getCreditTier,
+  getCreditLoanLimits,
+  formatCreditScore,
+  createCreditBar,
+  getGuildCreditTiers,
+  updateCreditTierSetting,
+  resetCreditTierSettings,
+  CREDIT_TIERS,
+  MAX_CREDIT_SCORE,
+  DEFAULT_COOLDOWN_DAYS,
   // Bonds
   getBondConfigs,
   getBondConfig,

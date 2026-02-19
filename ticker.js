@@ -18,7 +18,7 @@ let dashboardSettings = {
   enabled: true,
   updateIntervalMinutes: 3,
   deleteAndRepost: true, // If true, deletes old message and posts new one to stay at bottom
-  showChart: true,
+  showChart: false,
   topStocksCount: 10,
   topMoversCount: 5
 };
@@ -317,7 +317,22 @@ async function generateDashboardChart(topStocks, gainers, losers, guildId = null
       // by simulating the price calculation with messages only up to that time
       // Note: This intentionally excludes market event effects for a cleaner chart
       const historicalPrice = calculateHistoricalPrice(stock.userId, targetTime, guildId);
-      sampled.push(Math.round(historicalPrice || 100));
+      sampled.push(historicalPrice || 100);
+    }
+    
+    // Scale historical prices to match actual current price
+    // calculateHistoricalPrice is simplified (no streak, supply/demand, etc.)
+    // so we scale proportionally to preserve trend shape with accurate Y-axis values
+    const lastHistorical = sampled[sampled.length - 1];
+    if (lastHistorical > 0 && currentPrice > 0) {
+      const scaleFactor = currentPrice / lastHistorical;
+      for (let k = 0; k < sampled.length; k++) {
+        sampled[k] = Math.round(sampled[k] * scaleFactor);
+      }
+    } else {
+      for (let k = 0; k < sampled.length; k++) {
+        sampled[k] = Math.round(sampled[k]);
+      }
     }
     
     const shortName = stock.username.length > 10 ? stock.username.substring(0, 8) + '..' : stock.username;

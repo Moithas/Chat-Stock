@@ -329,11 +329,13 @@ function clearTargetCooldown(guildId, targetId) {
 // Calculate success rate: (target's total balance / 2.5) / (hacker's total balance + target's total balance)
 // skillBonus is added as a flat percentage
 // NOTE: Uses total balance (cash + bank) for both parties, not just bank
+// FIX: Clamp hackerTotal to 0 minimum so negative balance can't inflate success rate
 function calculateSuccessRate(targetTotal, hackerTotal, skillBonus = 0) {
   if (targetTotal <= 0) return 0;
   
+  const clampedHackerTotal = Math.max(0, hackerTotal);
   const adjustedTargetTotal = targetTotal / 2.5;
-  const totalWealth = hackerTotal + targetTotal;
+  const totalWealth = clampedHackerTotal + targetTotal;
   
   if (totalWealth === 0) return 0;
   

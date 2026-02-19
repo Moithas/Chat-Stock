@@ -95,12 +95,14 @@ function getRandomFlavor(textArray) {
   return textArray[Math.floor(Math.random() * textArray.length)];
 }
 
-function getTimeScaledSuccessRate(defenseSuccessRate, elapsedSeconds) {
-  // 0-10s: 100% success
-  // 10-20s: 75% success
-  // 20-30s: 50% success
-  if (elapsedSeconds < 10) return defenseSuccessRate;
-  if (elapsedSeconds < 20) return defenseSuccessRate * 0.75;
+function getTimeScaledSuccessRate(defenseSuccessRate, elapsedSeconds, windowSeconds = 10) {
+  // Splits the defense window into 3 equal segments:
+  // First third: 100% of base rate
+  // Second third: 75% of base rate
+  // Final third: 50% of base rate
+  const third = windowSeconds / 3;
+  if (elapsedSeconds < third) return defenseSuccessRate;
+  if (elapsedSeconds < third * 2) return defenseSuccessRate * 0.75;
   return defenseSuccessRate * 0.5;
 }
 
@@ -268,7 +270,7 @@ module.exports = {
       const defenseEmbed = new EmbedBuilder()
         .setColor(0xf39c12)
         .setTitle('🚨 ROBBERY IN PROGRESS!')
-        .setDescription(`<@${targetId}> is being robbed by ${interaction.user.username}! Choose a defense within 30 seconds:`)
+        .setDescription(`<@${targetId}> is being robbed by ${interaction.user.username}! Choose a defense within ${settings.defenseWindowSeconds} seconds:`)
         .addFields(
           { name: '🙈 Hide Cash', value: `${settings.hidecashSuccessRate}% success - No money changes hands if you succeed`, inline: true },
           { name: '💨 Dodge', value: `${settings.dodgeSuccessRate}% success - Get 15% of what they'd steal if you succeed`, inline: true },
@@ -283,9 +285,9 @@ module.exports = {
       try {
         const defenseMessage = await interaction.channel.send({ content: `<@${targetId}>`, embeds: [defenseEmbed], components: [row] });
         
-        // Wait for button click with 30 second timeout
+        // Wait for button click with configurable timeout
         const filter = i => i.customId.startsWith('rob_defend_') && i.customId.includes(`_${robberId}`) && i.user.id === targetId;
-        const collected = await defenseMessage.awaitMessageComponent({ filter, time: 30000 }).catch(() => null);
+        const collected = await defenseMessage.awaitMessageComponent({ filter, time: settings.defenseWindowSeconds * 1000 }).catch(() => null);
         
         if (collected) {
           // Acknowledge the button interaction to avoid expiration
@@ -528,7 +530,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
     defenseSuccessRate = settings.fightBackSuccessRate;
   }
 
-  const timeScaledRate = getTimeScaledSuccessRate(defenseSuccessRate, elapsedSeconds);
+  const timeScaledRate = getTimeScaledSuccessRate(defenseSuccessRate, elapsedSeconds, settings.defenseWindowSeconds || 10);
   const roll = Math.random() * 100;
   defenseSuccess = roll < timeScaledRate;
 
