@@ -1011,8 +1011,18 @@ function getAllTickets(guildId) {
   return [];
 }
 
+// Prevent simultaneous lottery draws
+const drawingLotteries = new Set();
+
 function drawLottery(guildId) {
   if (!db) return null;
+  
+  if (drawingLotteries.has(guildId)) {
+    console.log(`🎰 Lottery draw already in progress for guild ${guildId}, skipping.`);
+    return null;
+  }
+  drawingLotteries.add(guildId);
+  try {
   
   const lotteryInfo = getLotteryInfo(guildId);
   const tickets = getAllTickets(guildId);
@@ -1088,6 +1098,9 @@ function drawLottery(guildId) {
     totalTickets: tickets.length,
     totalPrizesPaid
   };
+  } finally {
+    drawingLotteries.delete(guildId);
+  }
 }
 
 function countMatches(playerNumbers, winningNumbers) {

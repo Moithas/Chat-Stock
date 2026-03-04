@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS = {
 // In-memory game state
 const activeGames = new Map();
 const settingsCache = new Map();
-let forceEnabledOnStartup = true;
+
 
 // Card constants
 const SUITS = ['S', 'H', 'D', 'C'];  // Spades, Hearts, Diamonds, Clubs
@@ -129,16 +129,6 @@ function initialize(database) {
       timestamp INTEGER
     )
   `);
-  
-  // Force enable on startup
-  if (forceEnabledOnStartup) {
-    const result = db.exec('SELECT guild_id FROM threecardpoker_settings');
-    if (result.length > 0 && result[0].values.length > 0) {
-      db.run('UPDATE threecardpoker_settings SET enabled = 1');
-      console.log('🃏 3 Card Poker: Force-enabled all existing settings');
-    }
-    forceEnabledOnStartup = false;
-  }
   
   console.log('🃏 Three Card Poker system initialized');
 }

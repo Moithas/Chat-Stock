@@ -326,6 +326,15 @@ function clearTargetCooldown(guildId, targetId) {
   `, [guildId, targetId]);
 }
 
+// Clear hacker's cooldown (called when hack fails to complete due to errors)
+function clearHackerCooldown(guildId, hackerId) {
+  if (!db) return;
+  
+  db.run(`
+    DELETE FROM hack_tracker WHERE guild_id = ? AND user_id = ?
+  `, [guildId, hackerId]);
+}
+
 // Calculate success rate: (target's total balance / 2.5) / (hacker's total balance + target's total balance)
 // skillBonus is added as a flat percentage
 // NOTE: Uses total balance (cash + bank) for both parties, not just bank
@@ -454,6 +463,7 @@ module.exports = {
   recordHackerCooldown,
   recordTargetHacked,
   clearTargetCooldown,
+  clearHackerCooldown,
   calculateSuccessRate,
   calculateStealPercent,
   calculateStealAmount,

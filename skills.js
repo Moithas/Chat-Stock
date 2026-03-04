@@ -15,6 +15,17 @@ function getXpBoostValue(guildId, userId) {
   }
 }
 
+// Lazy-load Lucky Penny XP boost
+function getLpXpBoost(guildId, userId, skill) {
+  try {
+    const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('./luckypenny');
+    const effectType = skill === 'hack' ? LP_EFFECT_TYPES.HACK_XP : LP_EFFECT_TYPES.ROB_XP;
+    return getLuckyPennyEffect(guildId, userId, effectType) || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
 // Level thresholds (XP needed to reach each level)
 const LEVEL_THRESHOLDS = [
   0,       // Level 0: 0 XP
@@ -360,6 +371,12 @@ function addXp(guildId, userId, skill, amount, success, amountStolen = 0) {
   const xpBoostPercent = getXpBoostValue(guildId, userId);
   if (xpBoostPercent > 0) {
     xpGained = Math.floor(xpGained * (1 + xpBoostPercent / 100));
+  }
+  
+  // Apply Lucky Penny XP buff/debuff
+  const lpXpBoost = getLpXpBoost(guildId, userId, skill);
+  if (lpXpBoost !== 0) {
+    xpGained = Math.max(1, Math.floor(xpGained * (1 + lpXpBoost / 100)));
   }
   
   const currentXp = skill === 'hack' ? userSkills.hackXp : userSkills.robXp;

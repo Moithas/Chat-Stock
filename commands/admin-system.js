@@ -2,7 +2,7 @@
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelSelectMenuBuilder, ChannelType, StringSelectMenuBuilder } = require('discord.js');
 const { logAdminAction } = require('../admin');
 const { getGuildSettings, setFeesEnabled, updateBuyFee, updateSellFee } = require('../fees');
-const { getSpamSettings, setAntiSpamEnabled, updateCooldown, updateMinLength, updateButtonCooldown } = require('../antispam');
+const { getSpamSettings, setAntiSpamEnabled, updateCooldown, updateMinLength, updateButtonCooldown, updateBaseValueGrowth } = require('../antispam');
 const { getMarketSettings, updateSellCooldown, updatePriceImpactDelay, updateCapitalGainsTax } = require('../market');
 const { getTickerChannel, setTickerChannel, getDashboardSettings, updateDashboardSettings, setDashboardChannel, updateDashboard } = require('../ticker');
 const { getEventSettings, updateEventSettings, triggerEvent } = require('../events');
@@ -390,7 +390,8 @@ async function showAntiSpamPanel(interaction, guildId) {
       { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
       { name: '⏱️ Message Cooldown', value: `${settings.cooldownSeconds} seconds`, inline: true },
       { name: '🖱️ Button Cooldown', value: `${settings.buttonCooldownSeconds} seconds`, inline: true },
-      { name: '📝 Min Length', value: `${settings.minMessageLength} characters`, inline: true }
+      { name: '📝 Min Length', value: `${settings.minMessageLength} characters`, inline: true },
+      { name: '📈 Base Value Growth', value: `+${settings.baseValueGrowth} per message`, inline: true }
     );
 
   const toggleBtn = new ButtonBuilder()
@@ -432,12 +433,17 @@ async function handleAntiSpamModal(interaction, guildId) {
   const cooldownSeconds = parseInt(interaction.fields.getTextInputValue('cooldown_seconds')) || 30;
   const buttonCooldownSeconds = parseInt(interaction.fields.getTextInputValue('button_cooldown_seconds')) || 3;
   const minLength = parseInt(interaction.fields.getTextInputValue('min_length')) || 5;
+  const baseValueGrowth = parseFloat(interaction.fields.getTextInputValue('base_value_growth'));
   
   updateCooldown(guildId, cooldownSeconds);
   updateButtonCooldown(guildId, buttonCooldownSeconds);
   updateMinLength(guildId, minLength);
   
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated anti-spam: cooldown=${cooldownSeconds}s, buttonCooldown=${buttonCooldownSeconds}s, minLength=${minLength}`);
+  if (!isNaN(baseValueGrowth) && baseValueGrowth >= 0) {
+    updateBaseValueGrowth(guildId, baseValueGrowth);
+  }
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated anti-spam: cooldown=${cooldownSeconds}s, buttonCooldown=${buttonCooldownSeconds}s, minLength=${minLength}, baseGrowth=${baseValueGrowth}`);
   await interaction.reply({ content: '✅ Anti-spam settings updated!', flags: 64 });
 }
 
@@ -470,6 +476,15 @@ function createAntiSpamModal(settings) {
           .setLabel('Minimum Message Length (characters)')
           .setPlaceholder('5')
           .setValue(String(settings.minMessageLength || 5))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('base_value_growth')
+          .setLabel('Base Value Growth Per Message')
+          .setPlaceholder('0.075')
+          .setValue(String(settings.baseValueGrowth != null ? settings.baseValueGrowth : 0.075))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
       )

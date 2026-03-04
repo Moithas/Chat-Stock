@@ -432,6 +432,9 @@ function buildHighLowButtons() {
 
 // ==================== BUTTON HANDLERS ====================
 
+// Prevent double-click processing
+const processingUsers = new Set();
+
 async function handleButton(interaction) {
   const guildId = interaction.guildId;
   const userId = interaction.user.id;
@@ -518,6 +521,12 @@ async function handleButton(interaction) {
   if (game.userId !== userId) {
     return interaction.reply({ content: '❌ This is not your game!', flags: 64 });
   }
+  
+  if (processingUsers.has(userId)) {
+    return interaction.reply({ content: '⏳ Processing your last action...', flags: 64 });
+  }
+  processingUsers.add(userId);
+  try {
   
   // Handle ace choice
   if (customId === 'ib_ace_high' || customId === 'ib_ace_low') {
@@ -618,6 +627,10 @@ async function handleButton(interaction) {
   
   // Fallback for unrecognized buttons
   return interaction.reply({ content: '❌ Unknown action.', flags: 64 });
+
+  } finally {
+    processingUsers.delete(userId);
+  }
 }
 
 async function handleModal(interaction) {

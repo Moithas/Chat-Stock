@@ -30,6 +30,9 @@ const { saveDatabase } = require('../database');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
+// Prevent double-click processing on fight buttons
+const processingInteractions = new Set();
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('fight')
@@ -45,6 +48,7 @@ module.exports = {
         .setMinValue(1)),
 
   async execute(interaction) {
+    await interaction.deferReply();
     const guildId = interaction.guildId;
     const challenger = interaction.user;
     const opponent = interaction.options.getUser('opponent');
@@ -53,17 +57,17 @@ module.exports = {
 
     // Check if fighting is enabled
     if (!settings.enabled) {
-      return interaction.reply({ content: '❌ Fighting is currently disabled on this server.', ephemeral: true });
+      return interaction.editReply({ content: '❌ Fighting is currently disabled on this server.' });
     }
 
     // Can't fight yourself
     if (challenger.id === opponent.id) {
-      return interaction.reply({ content: '❌ You can\'t fight yourself!', ephemeral: true });
+      return interaction.editReply({ content: '❌ You can\'t fight yourself!' });
     }
 
     // Can't fight bots
     if (opponent.bot) {
-      return interaction.reply({ content: '❌ You can\'t fight bots!', ephemeral: true });
+      return interaction.editReply({ content: '❌ You can\'t fight bots!' });
     }
 
     // Check if either player is already in a fight
@@ -71,42 +75,39 @@ module.exports = {
     const existingFight2 = getFightByFighter(guildId, opponent.id);
     
     if (existingFight1) {
-      return interaction.reply({ content: '❌ You\'re already in a fight!', ephemeral: true });
+      return interaction.editReply({ content: '❌ You\'re already in a fight!' });
     }
     if (existingFight2) {
-      return interaction.reply({ content: '❌ That player is already in a fight!', ephemeral: true });
+      return interaction.editReply({ content: '❌ That player is already in a fight!' });
     }
 
     // Check for existing challenge
     const existingChallenge = getChallenge(guildId, challenger.id);
     if (existingChallenge) {
-      return interaction.reply({ content: '❌ You already have a pending challenge!', ephemeral: true });
+      return interaction.editReply({ content: '❌ You already have a pending challenge!' });
     }
 
     // Check rematch cooldown
     const rematchCheck = canFightOpponent(guildId, challenger.id, opponent.id);
     if (!rematchCheck.canFight) {
-      return interaction.reply({ 
-        content: `❌ You must fight **${rematchCheck.fightsNeeded}** more unique opponent(s) before you can fight this person again!`, 
-        ephemeral: true 
+      return interaction.editReply({ 
+        content: `❌ You must fight **${rematchCheck.fightsNeeded}** more unique opponent(s) before you can fight this person again!`
       });
     }
 
     // Check challenger has enough money (cash only)
     const challengerBalance = await getBalance(guildId, challenger.id);
     if (challengerBalance.cash < betAmount) {
-      return interaction.reply({ 
-        content: `❌ You don't have enough cash! You have **${challengerBalance.cash.toLocaleString()}** ${CURRENCY} in cash.`, 
-        ephemeral: true 
+      return interaction.editReply({ 
+        content: `❌ You don't have enough cash! You have **${challengerBalance.cash.toLocaleString()}** ${CURRENCY} in cash.`
       });
     }
 
     // Check opponent has enough money (we'll verify again on accept)
     const opponentBalance = await getBalance(guildId, opponent.id);
     if (opponentBalance.cash < betAmount) {
-      return interaction.reply({ 
-        content: `❌ ${opponent.displayName} doesn't have enough cash to match your bet!`, 
-        ephemeral: true 
+      return interaction.editReply({ 
+        content: `❌ ${opponent.displayName} doesn't have enough cash to match your bet!`
       });
     }
 
@@ -116,7 +117,7 @@ module.exports = {
       challengerMember = await interaction.guild.members.fetch(challenger.id);
       opponentMember = await interaction.guild.members.fetch(opponent.id);
     } catch {
-      return interaction.reply({ content: '❌ Could not fetch player information.', ephemeral: true });
+      return interaction.editReply({ content: '❌ Could not fetch player information.' });
     }
 
     // Create the challenge
@@ -168,11 +169,10 @@ module.exports = {
         .setEmoji('❌')
     );
 
-    const message = await interaction.reply({ 
+    const message = await interaction.editReply({ 
       content: `<@${opponent.id}>`, 
       embeds: [embed], 
-      components: [row], 
-      fetchReply: true 
+      components: [row]
     });
 
     // Set timeout for challenge expiration
@@ -196,6 +196,13 @@ module.exports = {
   async handleButton(interaction) {
     const customId = interaction.customId;
     const guildId = interaction.guildId;
+    const interactionUserId = interaction.user.id;
+
+    // Prevent double-click processing on money-sensitive actions
+    const processingKey = `${interactionUserId}_${customId}`;
+    if (processingInteractions.has(processingKey)) {
+      return interaction.reply({ content: '⏳ Processing your last action...', ephemeral: true });
+    }
 
     // Accept fight
     if (customId.startsWith('fight_accept_')) {
@@ -209,6 +216,9 @@ module.exports = {
       if (interaction.user.id !== challenge.opponent.id) {
         return interaction.reply({ content: '❌ This challenge isn\'t for you!', ephemeral: true });
       }
+
+      processingInteractions.add(processingKey);
+      try {
 
       // Verify both players still have the money
       const challengerBalance = await getBalance(guildId, challenge.challenger.id);
@@ -250,6 +260,10 @@ module.exports = {
       // Start the betting phase
       await startBettingPhase(interaction, fight);
       return;
+
+      } finally {
+        processingInteractions.delete(processingKey);
+      }
     }
 
     // Decline fight
@@ -344,6 +358,9 @@ module.exports = {
         return interaction.update({ content: `❌ Maximum bet is **${fight.betAmount.toLocaleString()}** ${CURRENCY}`, components: [] });
       }
 
+      processingInteractions.add(processingKey);
+      try {
+
       // Check balance
       const balance = await getBalance(guildId, interaction.user.id);
       if (balance.cash < amount) {
@@ -371,6 +388,10 @@ module.exports = {
       // Update the public embed with new bet totals
       await updateBettingEmbed(interaction.channel, fight);
       return;
+
+      } finally {
+        processingInteractions.delete(processingKey);
+      }
     }
 
     // Fighter clicks "Select Your Move" button - show ephemeral move options

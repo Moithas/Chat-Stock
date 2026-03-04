@@ -178,13 +178,15 @@ function addPlayer(guildId, userId, userName, startingLives) {
   if (!game) return null;
 
   if (game.players.has(userId)) return null;
-  if (game.players.size >= MAX_PLAYERS) return null;
+  const maxPlayers = (game.settings && game.settings.maxPlayers) || MAX_PLAYERS;
+  if (game.players.size >= maxPlayers) return null;
   if (game.status !== 'lobby') return null;
 
+  const lives = startingLives || (game.settings && game.settings.startingLives) || STARTING_LIVES;
   game.players.set(userId, {
     id: userId,
     name: userName,
-    lives: startingLives || STARTING_LIVES,
+    lives: lives,
     card: null,
     originalCard: null,
     action: null,

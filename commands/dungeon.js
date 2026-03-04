@@ -1,4 +1,7 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
+const path = require('path');
+const fs = require('fs');
+const { createCanvas, loadImage } = require('canvas');
 const { addMoney } = require('../economy');
 const {
   getDungeonSettings,
@@ -21,30 +24,90 @@ const {
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
+// Monster name → image file base name mapping
+const MONSTER_IMAGE_MAP = {
+  'Script Kiddie': 'ScriptKiddie',
+  'Rogue Bot': 'RogueBot',
+  'Corrupt Firewall': 'CorruptFirewall',
+  'Data Wraith': 'DataWraith',
+  'Malware Golem': 'MalwareGolem',
+  'Phishing Phantom': 'PhishingPhantom',
+  'Ransomware Demon': 'RansomwareDemon',
+  'Trojan Sentinel': 'TrojanSentinel',
+  'Zero-Day Specter': 'Zero-DaySpecter',
+  'DDoS Swarm': 'DDosSwarm',
+  'Cryptojacker': 'Cryptojacker',
+  'Worm Cluster': 'WormCluster',
+  'Rootkit Shade': 'RootkitShade',
+  'Keylogger Stalker': 'KeyloggerStalker',
+  'Botnet Overlord': 'BotnetOverlord'
+};
+
+function getMonsterAttachment(enemyName, defeated = false, scale = 1.0) {
+  const baseName = MONSTER_IMAGE_MAP[enemyName];
+  if (!baseName) return null;
+  
+  const fileName = defeated ? `${baseName} Defeat.png` : `${baseName}.png`;
+  const filePath = path.join(__dirname, '..', 'assets', 'Dungeon', fileName);
+  
+  if (!fs.existsSync(filePath)) return null;
+  
+  if (scale < 1.0) {
+    // Return a promise-based attachment for scaled images
+    return { filePath, scale, isScaled: true };
+  }
+  
+  return new AttachmentBuilder(filePath, { name: 'monster.png' });
+}
+
+async function getScaledMonsterAttachment(enemyName, defeated = false, scale = 0.8) {
+  const baseName = MONSTER_IMAGE_MAP[enemyName];
+  if (!baseName) return null;
+  
+  const fileName = defeated ? `${baseName} Defeat.png` : `${baseName}.png`;
+  const filePath = path.join(__dirname, '..', 'assets', 'Dungeon', fileName);
+  
+  if (!fs.existsSync(filePath)) return null;
+  
+  try {
+    const img = await loadImage(filePath);
+    const newWidth = Math.floor(img.width * scale);
+    const newHeight = Math.floor(img.height * scale);
+    const canvas = createCanvas(newWidth, newHeight);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, newWidth, newHeight);
+    return new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'monster.png' });
+  } catch (e) {
+    console.error('Error scaling monster image:', e.message);
+    return new AttachmentBuilder(filePath, { name: 'monster.png' });
+  }
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('dungeon')
     .setDescription('Enter the dungeon and fight NPC enemies for rewards!'),
 
   async execute(interaction) {
+    await interaction.deferReply();
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     const settings = getDungeonSettings(guildId);
 
     // Check if dungeon is enabled
     if (!settings.enabled) {
-      return interaction.reply({ content: '❌ The dungeon is currently closed.', ephemeral: true });
+      return interaction.editReply({ content: '❌ The dungeon is currently closed.' });
     }
 
     // Check if user is already in a dungeon
     if (isInDungeon(guildId, userId)) {
-      return interaction.reply({ content: '❌ You\'re already in a dungeon run! Finish your current run first.', ephemeral: true });
+      return interaction.editReply({ content: '❌ You\'re already in a dungeon run! Finish your current run first.' });
     }
 
     // Check cooldown
     const cooldownCheck = canRunDungeon(guildId, userId);
     if (!cooldownCheck.canRun) {
-      return interaction.reply({ content: `❌ ${cooldownCheck.reason}`, ephemeral: true });
+      return interaction.editReply({ content: `❌ ${cooldownCheck.reason}` });
     }
 
     // Start cooldown immediately
@@ -59,20 +122,22 @@ module.exports = {
       goldEarned: 0,
       enemy,
       roundLog: [],
-      grappleCooldown: 0,
-      enemyGrappleCooldown: 0
+      restoreCooldown: 0,
+      enemyRestoreCooldown: 0
     };
     setActiveRun(guildId, userId, run);
 
     // Build intro embed
     const introEmbed = buildFloorEmbed(interaction.user, run, settings);
+    const monsterAttach = await getScaledMonsterAttachment(run.enemy.name);
 
-    const moveRow = buildMoveButtons(userId, run.grappleCooldown);
-    const escapeRow = buildEscapeButton(userId);
+    const moveRow = buildMoveButtons(userId, run.restoreCooldown);
+    const restoreEscapeRow = buildRestoreEscapeRow(userId, run.restoreCooldown);
 
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [introEmbed],
-      components: [moveRow, escapeRow]
+      components: [moveRow, restoreEscapeRow],
+      files: monsterAttach ? [monsterAttach] : []
     });
 
     const message = await interaction.fetchReply();
@@ -92,10 +157,40 @@ module.exports = {
       if (roundTimer) clearTimeout(roundTimer);
       roundTimer = setTimeout(async () => {
         roundExpired = true;
-        // Player took too long — treat as a death
         const currentRun = getActiveRun(guildId, userId);
         if (!currentRun) return;
 
+        // If the enemy is already dead, this timeout fired on the continue/escape decision screen
+        // Treat as an escape — player keeps full gold, no penalty
+        if (currentRun.enemy.hp <= 0) {
+          const goldEarned = currentRun.goldEarned;
+          if (goldEarned > 0) {
+            await addMoney(guildId, userId, goldEarned, 'Dungeon run (decision timeout)');
+          }
+
+          const floorsCleared = currentRun.floor;
+          recordDungeonRun(guildId, userId, floorsCleared, settings.maxFloors, goldEarned, 'escaped');
+          clearActiveRun(guildId, userId);
+          collector.stop('timeout');
+
+          const stats = getDungeonStats(guildId, userId);
+
+          const timeoutEmbed = new EmbedBuilder()
+            .setColor(0xf39c12)
+            .setTitle('⏱️ TIME\'S UP — AUTO ESCAPE')
+            .setDescription(`You took too long to decide and automatically escaped the dungeon with your earnings.`)
+            .addFields(
+              { name: '🏰 Floors Cleared', value: `${floorsCleared} / ${settings.maxFloors}`, inline: true },
+              { name: '💰 Gold Earned', value: `${goldEarned.toLocaleString()} ${CURRENCY}`, inline: true },
+              { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths}`, inline: false }
+            )
+            .setTimestamp();
+
+          try { await message.edit({ embeds: [timeoutEmbed], components: [] }); } catch {}
+          return;
+        }
+
+        // Player took too long mid-combat — treat as a death
         const penaltyPercent = settings.deathPenaltyPercent / 100;
         const goldEarned = Math.floor(currentRun.goldEarned * (1 - penaltyPercent));
         
@@ -107,6 +202,7 @@ module.exports = {
         clearActiveRun(guildId, userId);
         collector.stop('timeout');
 
+        const timeoutAttach = getMonsterAttachment(currentRun.enemy.name);
         const timeoutEmbed = new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('💀 YOU HESITATED TOO LONG!')
@@ -116,9 +212,10 @@ module.exports = {
             { name: '💰 Gold Earned', value: `${goldEarned.toLocaleString()} ${CURRENCY} (−${settings.deathPenaltyPercent}% penalty)`, inline: true }
           )
           .setTimestamp();
+        if (timeoutAttach) timeoutEmbed.setImage('attachment://monster.png');
 
         try {
-          await message.edit({ embeds: [timeoutEmbed], components: [] });
+          await message.edit({ embeds: [timeoutEmbed], components: [], attachments: [], files: timeoutAttach ? [timeoutAttach] : [] });
         } catch {}
       }, settings.roundTimeSeconds * 1000);
     }
@@ -130,7 +227,7 @@ module.exports = {
 
       const currentRun = getActiveRun(guildId, userId);
       if (!currentRun) {
-        await buttonInteraction.deferUpdate();
+        try { await buttonInteraction.deferUpdate(); } catch {}
         collector.stop('ended');
         return;
       }
@@ -140,24 +237,25 @@ module.exports = {
       // ==================== ESCAPE ====================
       if (customId === `dungeon_escape_${userId}`) {
         if (roundTimer) clearTimeout(roundTimer);
-        await buttonInteraction.deferUpdate();
+        try { await buttonInteraction.deferUpdate(); } catch {}
 
         const goldEarned = currentRun.goldEarned;
         if (goldEarned > 0) {
           await addMoney(guildId, userId, goldEarned, 'Dungeon run (escaped)');
         }
 
-        const floorsCleared = currentRun.floor - 1;
+        const floorsCleared = currentRun.floor;
         recordDungeonRun(guildId, userId, floorsCleared, settings.maxFloors, goldEarned, 'escaped');
         clearActiveRun(guildId, userId);
         collector.stop('escaped');
 
         const stats = getDungeonStats(guildId, userId);
 
+        const escapeAttach = getMonsterAttachment(currentRun.enemy.name);
         const escapeEmbed = new EmbedBuilder()
           .setColor(0xf39c12)
           .setTitle('🏃 ESCAPED THE DUNGEON!')
-          .setDescription(`You retreated before facing ${currentRun.enemy.emoji} **${currentRun.enemy.name}** on Floor ${currentRun.floor}.`)
+          .setDescription(`You escaped after clearing Floor ${currentRun.floor}!`)
           .addFields(
             { name: '🏰 Floors Cleared', value: `${floorsCleared} / ${settings.maxFloors}`, inline: true },
             { name: '💰 Gold Earned', value: `${goldEarned.toLocaleString()} ${CURRENCY}`, inline: true },
@@ -165,36 +263,39 @@ module.exports = {
             { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths}`, inline: false }
           )
           .setTimestamp();
+        if (escapeAttach) escapeEmbed.setImage('attachment://monster.png');
 
-        try { await message.edit({ embeds: [escapeEmbed], components: [] }); } catch {}
+        try { await message.edit({ embeds: [escapeEmbed], components: [], attachments: [], files: escapeAttach ? [escapeAttach] : [] }); } catch {}
         return;
       }
 
       // ==================== CONTINUE TO NEXT FLOOR ====================
       if (customId === `dungeon_continue_${userId}`) {
-        await buttonInteraction.deferUpdate();
+        try { await buttonInteraction.deferUpdate(); } catch {}
 
-        // Generate new enemy for next floor
+        // Use the previewed enemy if available, otherwise generate fresh
         currentRun.floor++;
-        currentRun.enemy = generateEnemy(currentRun.floor, settings);
+        currentRun.enemy = currentRun.nextEnemy || generateEnemy(currentRun.floor, settings);
+        currentRun.nextEnemy = null;
         currentRun.roundLog = [];
-        currentRun.enemyGrappleCooldown = 0;
+        currentRun.enemyRestoreCooldown = 0;
 
         setActiveRun(guildId, userId, currentRun);
         startRoundTimer();
 
         const floorEmbed = buildFloorEmbed(interaction.user, currentRun, settings);
-        const newMoveRow = buildMoveButtons(userId, currentRun.grappleCooldown);
-        const newEscapeRow = buildEscapeButton(userId);
+        const newFloorAttach = await getScaledMonsterAttachment(currentRun.enemy.name);
+        const newMoveRow = buildMoveButtons(userId, currentRun.restoreCooldown);
+        const newRestoreEscapeRow = buildRestoreEscapeRow(userId, currentRun.restoreCooldown);
 
-        try { await message.edit({ embeds: [floorEmbed], components: [newMoveRow, newEscapeRow] }); } catch {}
+        try { await message.edit({ embeds: [floorEmbed], components: [newMoveRow, newRestoreEscapeRow], attachments: [], files: newFloorAttach ? [newFloorAttach] : [] }); } catch {}
         return;
       }
 
       // ==================== CASH OUT (after clearing final floor) ====================
       if (customId === `dungeon_cashout_${userId}`) {
         if (roundTimer) clearTimeout(roundTimer);
-        await buttonInteraction.deferUpdate();
+        try { await buttonInteraction.deferUpdate(); } catch {}
         // Already handled in the clear logic — this button is just for acknowledgment
         collector.stop('cleared');
         return;
@@ -206,17 +307,17 @@ module.exports = {
 
       const playerMove = moveMatch[1];
       
-      // Validate grapple cooldown
-      if (playerMove === 'grapple' && currentRun.grappleCooldown > 0) {
-        await buttonInteraction.reply({ content: `❌ Grapple is on cooldown for ${currentRun.grappleCooldown} more round(s)!`, ephemeral: true });
+      // Validate restore cooldown
+      if (playerMove === 'restore' && currentRun.restoreCooldown > 0) {
+        await buttonInteraction.reply({ content: `❌ Restore is on cooldown for ${currentRun.restoreCooldown} more round(s)!`, ephemeral: true });
         return;
       }
 
       if (roundTimer) clearTimeout(roundTimer);
-      await buttonInteraction.deferUpdate();
+      try { await buttonInteraction.deferUpdate(); } catch {}
 
       // Get enemy move
-      const enemyMove = getEnemyMove(currentRun.enemy, currentRun.enemyGrappleCooldown);
+      const enemyMove = getEnemyMove(currentRun.enemy, currentRun.enemyRestoreCooldown);
 
       // Resolve combat
       const result = resolveRound(playerMove, enemyMove);
@@ -229,16 +330,16 @@ module.exports = {
       if (currentRun.playerHp < 0) currentRun.playerHp = 0;
       if (currentRun.enemy.hp < 0) currentRun.enemy.hp = 0;
 
-      // Update grapple cooldowns
-      if (playerMove === 'grapple') {
-        currentRun.grappleCooldown = 3;
-      } else if (currentRun.grappleCooldown > 0) {
-        currentRun.grappleCooldown--;
+      // Update restore cooldowns
+      if (playerMove === 'restore') {
+        currentRun.restoreCooldown = 3;
+      } else if (currentRun.restoreCooldown > 0) {
+        currentRun.restoreCooldown--;
       }
-      if (enemyMove === 'grapple') {
-        currentRun.enemyGrappleCooldown = 3;
-      } else if (currentRun.enemyGrappleCooldown > 0) {
-        currentRun.enemyGrappleCooldown--;
+      if (enemyMove === 'restore') {
+        currentRun.enemyRestoreCooldown = 3;
+      } else if (currentRun.enemyRestoreCooldown > 0) {
+        currentRun.enemyRestoreCooldown--;
       }
 
       // Log the round
@@ -264,6 +365,7 @@ module.exports = {
 
         const stats = getDungeonStats(guildId, userId);
 
+        const deathAttach = getMonsterAttachment(currentRun.enemy.name);
         const deathEmbed = new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('💀 YOU DIED!')
@@ -275,8 +377,9 @@ module.exports = {
             { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths}`, inline: false }
           )
           .setTimestamp();
+        if (deathAttach) deathEmbed.setImage('attachment://monster.png');
 
-        try { await message.edit({ embeds: [deathEmbed], components: [] }); } catch {}
+        try { await message.edit({ embeds: [deathEmbed], components: [], attachments: [], files: deathAttach ? [deathAttach] : [] }); } catch {}
         return;
       }
 
@@ -297,6 +400,7 @@ module.exports = {
 
           const stats = getDungeonStats(guildId, userId);
 
+          const clearAttach = getMonsterAttachment(currentRun.enemy.name, true);
           const clearEmbed = new EmbedBuilder()
             .setColor(0x2ecc71)
             .setTitle('🏆 DUNGEON CLEARED!')
@@ -309,8 +413,9 @@ module.exports = {
               { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths} | Total Gold: ${stats.totalGoldEarned.toLocaleString()}`, inline: false }
             )
             .setTimestamp();
+          if (clearAttach) clearEmbed.setImage('attachment://monster.png');
 
-          try { await message.edit({ embeds: [clearEmbed], components: [] }); } catch {}
+          try { await message.edit({ embeds: [clearEmbed], components: [], attachments: [], files: clearAttach ? [clearAttach] : [] }); } catch {}
           return;
         }
 
@@ -324,8 +429,10 @@ module.exports = {
         startRoundTimer(); // Timer for the decision
 
         const nextEnemy = generateEnemy(currentRun.floor + 1, settings);
+        currentRun.nextEnemy = nextEnemy; // Store so continue uses the same enemy
         const nextFloorReward = calculateFloorReward(currentRun.floor + 1, settings);
 
+        const victoryAttach = getMonsterAttachment(currentRun.enemy.name, true);
         const victoryEmbed = new EmbedBuilder()
           .setColor(0x3498db)
           .setTitle(`⚔️ FLOOR ${currentRun.floor} CLEARED!`)
@@ -338,6 +445,7 @@ module.exports = {
           )
           .setFooter({ text: `Continue deeper or escape with your gold? (${settings.roundTimeSeconds}s to decide)` })
           .setTimestamp();
+        if (victoryAttach) victoryEmbed.setImage('attachment://monster.png');
 
         const decisionRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -350,7 +458,7 @@ module.exports = {
             .setStyle(ButtonStyle.Success)
         );
 
-        try { await message.edit({ embeds: [victoryEmbed], components: [decisionRow] }); } catch {}
+        try { await message.edit({ embeds: [victoryEmbed], components: [decisionRow], attachments: [], files: victoryAttach ? [victoryAttach] : [] }); } catch {}
         return;
       }
 
@@ -359,10 +467,11 @@ module.exports = {
       startRoundTimer();
 
       const combatEmbed = buildCombatEmbed(interaction.user, currentRun, settings, result.description);
-      const newMoveRow = buildMoveButtons(userId, currentRun.grappleCooldown);
-      const newEscapeRow = buildEscapeButton(userId);
+      const combatAttach = await getScaledMonsterAttachment(currentRun.enemy.name);
+      const newMoveRow = buildMoveButtons(userId, currentRun.restoreCooldown);
+      const newRestoreEscapeRow = buildRestoreEscapeRow(userId, currentRun.restoreCooldown);
 
-      try { await message.edit({ embeds: [combatEmbed], components: [newMoveRow, newEscapeRow] }); } catch {}
+      try { await message.edit({ embeds: [combatEmbed], components: [newMoveRow, newRestoreEscapeRow], attachments: [], files: combatAttach ? [combatAttach] : [] }); } catch {}
     });
 
     collector.on('end', async (collected, reason) => {
@@ -386,12 +495,12 @@ function buildFloorEmbed(user, run, settings) {
     .setColor(0x9b59b6)
     .setTitle(`🏰 DUNGEON — Floor ${run.floor} / ${settings.maxFloors}`)
     .setDescription(`${floorIntro}\n\n${run.enemy.emoji} **${run.enemy.name}** appears!`)
+    .setImage('attachment://monster.png')
     .addFields(
       { name: '❤️ Your HP', value: `${createHealthBar(run.playerHp, run.playerMaxHp)} ${run.playerHp}%`, inline: true },
       { name: `${run.enemy.emoji} Enemy HP`, value: `${createHealthBar(run.enemy.hp, run.enemy.maxHp)} ${run.enemy.hp}%`, inline: true },
       { name: '💰 Gold Earned', value: `${run.goldEarned.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '💰 Floor Reward', value: `${floorReward.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '📋 Moves', value: '⚔️ Slash > 🛡️ Tackle > 🪤 Subdue > ⚔️ Slash\n💚 Heal restores HP but enemy attacks freely', inline: false }
+      { name: '💰 Floor Reward', value: `${floorReward.toLocaleString()} ${CURRENCY}`, inline: true }
     )
     .setFooter({ text: `Choose your move! (${settings.roundTimeSeconds}s per round)` })
     .setTimestamp();
@@ -400,54 +509,57 @@ function buildFloorEmbed(user, run, settings) {
 function buildCombatEmbed(user, run, settings, lastRoundText) {
   const floorReward = calculateFloorReward(run.floor, settings);
 
-  // Show last 3 rounds of log
-  const recentLog = run.roundLog.slice(-3).map((r, i) => {
-    const roundNum = run.roundLog.length - (run.roundLog.slice(-3).length - 1 - i);
-    return `**R${roundNum}:** ${r.description}`;
-  }).join('\n');
+  // Show only the last round of log
+  const lastRound = run.roundLog.length > 0 ? run.roundLog[run.roundLog.length - 1] : null;
+  const recentLog = lastRound ? `**R${run.roundLog.length}:** ${lastRound.description}` : '';
 
   return new EmbedBuilder()
     .setColor(0x9b59b6)
     .setTitle(`🏰 DUNGEON — Floor ${run.floor} / ${settings.maxFloors}`)
     .setDescription(`Fighting ${run.enemy.emoji} **${run.enemy.name}**`)
+    .setImage('attachment://monster.png')
     .addFields(
       { name: '❤️ Your HP', value: `${createHealthBar(run.playerHp, run.playerMaxHp)} ${run.playerHp}%`, inline: true },
       { name: `${run.enemy.emoji} Enemy HP`, value: `${createHealthBar(run.enemy.hp, run.enemy.maxHp)} ${run.enemy.hp}%`, inline: true },
-      { name: '💰 Gold Earned', value: `${run.goldEarned.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '📜 Combat Log', value: recentLog || 'No actions yet', inline: false }
+      { name: ' Combat Log', value: recentLog || 'No actions yet', inline: false }
     )
     .setFooter({ text: `Choose your move! (${settings.roundTimeSeconds}s per round)` })
     .setTimestamp();
 }
 
-function buildMoveButtons(userId, grappleCooldown) {
-  return new ActionRowBuilder().addComponents(
+function buildMoveButtons(userId, restoreCooldown) {
+  const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`dungeon_move_strike_${userId}`)
-      .setLabel('Slash')
+      .setCustomId(`dungeon_move_spam_${userId}`)
+      .setLabel('Spam')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(`dungeon_move_isolate_${userId}`)
+      .setLabel('Isolate')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(`dungeon_move_override_${userId}`)
+      .setLabel('Override')
       .setStyle(ButtonStyle.Danger)
-      .setEmoji('⚔️'),
-    new ButtonBuilder()
-      .setCustomId(`dungeon_move_takedown_${userId}`)
-      .setLabel('Tackle')
-      .setStyle(ButtonStyle.Danger)
-      .setEmoji('🛡️'),
-    new ButtonBuilder()
-      .setCustomId(`dungeon_move_choke_${userId}`)
-      .setLabel('Subdue')
-      .setStyle(ButtonStyle.Danger)
-      .setEmoji('🪤'),
-    new ButtonBuilder()
-      .setCustomId(`dungeon_move_grapple_${userId}`)
-      .setLabel(grappleCooldown > 0 ? `Heal (${grappleCooldown}cd)` : 'Heal')
-      .setStyle(ButtonStyle.Success)
-      .setEmoji('💚')
-      .setDisabled(grappleCooldown > 0)
   );
+  return row1;
 }
 
-function buildEscapeButton(userId) {
+function buildRestoreEscapeRow(userId, restoreCooldown) {
   return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`dungeon_move_exploit_${userId}`)
+      .setLabel('Exploit')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(`dungeon_move_corrupt_${userId}`)
+      .setLabel('Corrupt')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(`dungeon_move_restore_${userId}`)
+      .setLabel(restoreCooldown > 0 ? `Restore (${restoreCooldown}cd)` : 'Restore')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(restoreCooldown > 0),
     new ButtonBuilder()
       .setCustomId(`dungeon_escape_${userId}`)
       .setLabel('🏃 Escape')

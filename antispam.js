@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   cooldownSeconds: 30,      // Seconds between messages that count
   minMessageLength: 5,      // Minimum characters for message to count
   buttonCooldownSeconds: 3, // Seconds between button interactions that count
+  baseValueGrowth: 0.075,   // Permanent base_value gain per counted message
   enabled: true
 };
 
@@ -38,6 +39,13 @@ function initAntiSpam(database) {
     // Column already exists, ignore error
   }
   
+  // Add base_value_growth column if it doesn't exist
+  try {
+    db.run(`ALTER TABLE spam_settings ADD COLUMN base_value_growth REAL DEFAULT 0.075`);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
+  
   console.log('🛡️ Anti-spam system initialized');
 }
 
@@ -60,6 +68,7 @@ function getSpamSettings(guildId) {
         cooldownSeconds: settings.cooldown_seconds,
         minMessageLength: settings.min_message_length,
         buttonCooldownSeconds: settings.button_cooldown_seconds || 3,
+        baseValueGrowth: settings.base_value_growth != null ? settings.base_value_growth : 0.075,
         enabled: settings.enabled === 1
       };
       
@@ -77,13 +86,14 @@ function saveSpamSettings(guildId, settings) {
   
   db.run(`
     INSERT OR REPLACE INTO spam_settings 
-    (guild_id, cooldown_seconds, min_message_length, button_cooldown_seconds, enabled)
-    VALUES (?, ?, ?, ?, ?)
+    (guild_id, cooldown_seconds, min_message_length, button_cooldown_seconds, base_value_growth, enabled)
+    VALUES (?, ?, ?, ?, ?, ?)
   `, [
     guildId,
     settings.cooldownSeconds,
     settings.minMessageLength,
     settings.buttonCooldownSeconds,
+    settings.baseValueGrowth,
     settings.enabled ? 1 : 0
   ]);
   
@@ -177,6 +187,12 @@ function updateButtonCooldown(guildId, seconds) {
   saveSpamSettings(guildId, settings);
 }
 
+function updateBaseValueGrowth(guildId, rate) {
+  const settings = getSpamSettings(guildId);
+  settings.baseValueGrowth = rate;
+  saveSpamSettings(guildId, settings);
+}
+
 function setAntiSpamEnabled(guildId, enabled) {
   const settings = getSpamSettings(guildId);
   settings.enabled = enabled;
@@ -209,5 +225,6 @@ module.exports = {
   updateCooldown,
   updateMinLength,
   updateButtonCooldown,
+  updateBaseValueGrowth,
   setAntiSpamEnabled
 };

@@ -1,6 +1,11 @@
 // Internal economy system - replacement for UBB
 const { getDb } = require('./database');
 
+// Validate amount is a positive finite number — blocks NaN, Infinity, negatives, non-numbers
+function isValidAmount(amount) {
+  return typeof amount === 'number' && isFinite(amount) && amount > 0;
+}
+
 // Get user's balance
 function getBalance(guildId, userId) {
   const db = getDb();
@@ -56,6 +61,10 @@ function logTransaction(guildId, userId, amount, balanceType, reason = '') {
 
 // Add money to user's cash
 async function addMoney(guildId, userId, amount, reason = 'Transaction') {
+  if (!isValidAmount(amount)) {
+    console.error(`[ECONOMY GUARD] addMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    return false;
+  }
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -75,6 +84,10 @@ async function addMoney(guildId, userId, amount, reason = 'Transaction') {
 
 // Add money directly to user's bank
 async function addToBank(guildId, userId, amount, reason = 'Deposit') {
+  if (!isValidAmount(amount)) {
+    console.error(`[ECONOMY GUARD] addToBank rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    return false;
+  }
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -94,6 +107,10 @@ async function addToBank(guildId, userId, amount, reason = 'Deposit') {
 
 // Remove money from user's cash
 async function removeMoney(guildId, userId, amount, reason = 'Transaction') {
+  if (!isValidAmount(amount)) {
+    console.error(`[ECONOMY GUARD] removeMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    return false;
+  }
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -120,6 +137,10 @@ async function removeMoney(guildId, userId, amount, reason = 'Transaction') {
 // Force remove money from user's cash (allows negative balance/debt)
 // Used for robbery to prevent deposit exploit during fight-back period
 async function forceRemoveMoney(guildId, userId, amount, reason = 'Transaction') {
+  if (!isValidAmount(amount)) {
+    console.error(`[ECONOMY GUARD] forceRemoveMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    return false;
+  }
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -139,6 +160,10 @@ async function forceRemoveMoney(guildId, userId, amount, reason = 'Transaction')
 
 // Remove money from user's bank
 async function removeFromBank(guildId, userId, amount, reason = 'Withdrawal') {
+  if (!isValidAmount(amount)) {
+    console.error(`[ECONOMY GUARD] removeFromBank rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    return false;
+  }
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -187,6 +212,10 @@ async function hasEnoughInBank(guildId, userId, amount) {
 
 // Remove money from total balance (cash first, then bank)
 async function removeFromTotal(guildId, userId, amount, reason = 'Purchase') {
+  if (!isValidAmount(amount)) {
+    console.error(`[ECONOMY GUARD] removeFromTotal rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    return { success: false, error: 'Invalid amount' };
+  }
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -290,6 +319,10 @@ function getAllBalances(guildId) {
 }
 // Apply a fine - can put user into negative cash balance
 async function applyFine(guildId, userId, amount, reason = 'Fine') {
+  if (!isValidAmount(amount)) {
+    console.error(`[ECONOMY GUARD] applyFine rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    return false;
+  }
   try {
     const db = getDb();
     ensureBalance(guildId, userId);

@@ -13,6 +13,7 @@ module.exports = {
         .setRequired(false)),
 
   async execute(interaction) {
+    await interaction.deferReply();
     const guildId = interaction.guildId;
     const targetUser = interaction.options.getUser('user') || interaction.user;
     const userId = targetUser.id;
@@ -35,6 +36,6 @@ module.exports = {
       .setFooter({ text: rank > 0 ? `Rank #${rank} of ${totalUsers}` : 'Unranked' })
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   }
 };

@@ -12,6 +12,7 @@ module.exports = {
     .setDescription('View interactive leaderboard with multiple views'),
 
   async execute(interaction) {
+    await interaction.deferReply();
     await showLeaderboardPanel(interaction, 'stocks', 0);
   }
 };
@@ -96,6 +97,8 @@ async function showLeaderboardPanel(interaction, type = 'stocks', page = 0, isUp
 
   if (isUpdate) {
     await interaction.update({ embeds: [embed], components: [typeButtons, navButtons] });
+  } else if (interaction.deferred) {
+    await interaction.editReply({ embeds: [embed], components: [typeButtons, navButtons] });
   } else {
     await interaction.reply({ embeds: [embed], components: [typeButtons, navButtons] });
   }

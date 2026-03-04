@@ -449,8 +449,14 @@ async function promptCurrentPlayer(game, channel) {
   game._turnTimer = setTimeout(async () => {
     const current = getGame(game.guildId);
     if (!current || current.status !== 'playing') return;
+
+    // If a button click is already processing this turn, let it handle progression
+    if (current._actionLock) return;
+
     const curId = getCurrentPlayerId(current);
     if (curId !== currentId) return; // already moved on
+
+    current._actionLock = true;
 
     // Auto-knock on timeout
     const result = processAction(current, currentId, 'knock');
@@ -459,10 +465,16 @@ async function promptCurrentPlayer(game, channel) {
       await channel.send({ content: `⏰ **${player.name}** ran out of time — auto-knocked!` });
     } catch {}
 
-    if (result.roundOver) {
-      await handleRoundEnd(current, channel);
-    } else {
-      await promptCurrentPlayer(current, channel);
+    try {
+      if (result.roundOver) {
+        await handleRoundEnd(current, channel);
+      } else {
+        await promptCurrentPlayer(current, channel);
+      }
+    } catch (err) {
+      console.error('SYN: Error progressing game after timeout:', err);
+    } finally {
+      current._actionLock = false;
     }
   }, turnTimeMs);
 }
@@ -474,6 +486,11 @@ async function handleViewCard(interaction) {
 
   if (!game || game.status !== 'playing') {
     return interaction.reply({ content: '❌ No active game.', ephemeral: true });
+  }
+
+  // If an action is already being processed (e.g. auto-knock timer fired), reject
+  if (game._actionLock) {
+    return interaction.reply({ content: '⏳ Turn is being processed...', ephemeral: true });
   }
 
   const currentId = getCurrentPlayerId(game);
@@ -631,19 +648,32 @@ async function handleGameAction(interaction, action) {
     return interaction.reply({ content: '❌ It\'s not your turn!', ephemeral: true });
   }
 
+  // Prevent race between button click and auto-knock timer
+  if (game._actionLock) {
+    return interaction.reply({ content: '⏳ Processing...', ephemeral: true });
+  }
+  game._actionLock = true;
+
   // Clear turn timer
   if (game._turnTimer) clearTimeout(game._turnTimer);
 
   const result = processAction(game, userId, action);
   if (!result.success) {
+    game._actionLock = false;
     return interaction.reply({ content: `❌ ${result.error}`, ephemeral: true });
   }
 
-  // Acknowledge the button press ephemerally
-  const ackMsg = action === 'pass' ? '📤 You passed!' : '✊ You knocked!';
-  await interaction.reply({ content: ackMsg, ephemeral: true });
-
+  // From here, game state has been advanced — we MUST call handleRoundEnd/promptCurrentPlayer
   const channel = game._channel;
+
+  try {
+    // Acknowledge the button press ephemerally
+    const ackMsg = action === 'pass' ? '📤 You passed!' : '✊ You knocked!';
+    await interaction.reply({ content: ackMsg, ephemeral: true });
+  } catch (err) {
+    // Interaction may have expired — continue anyway, game state already advanced
+    console.error('SYN: Failed to ack button:', err.message);
+  }
 
   // Send action feedback
   let feedbackMsg = result.description;
@@ -667,10 +697,16 @@ async function handleGameAction(interaction, action) {
     }
   }
 
-  if (result.roundOver) {
-    await handleRoundEnd(game, channel);
-  } else {
-    await promptCurrentPlayer(game, channel);
+  try {
+    if (result.roundOver) {
+      await handleRoundEnd(game, channel);
+    } else {
+      await promptCurrentPlayer(game, channel);
+    }
+  } catch (err) {
+    console.error('SYN: Error progressing game after action:', err);
+  } finally {
+    game._actionLock = false;
   }
 }
 

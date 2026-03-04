@@ -13,6 +13,7 @@ module.exports = {
         .setRequired(true)),
 
   async execute(interaction) {
+    await interaction.deferReply();
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     const amountInput = interaction.options.getString('amount');
@@ -26,12 +27,11 @@ module.exports = {
     } else {
       amount = parseInt(amountInput);
       if (isNaN(amount) || amount <= 0) {
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [new EmbedBuilder()
             .setColor(0xe74c3c)
             .setTitle('❌ Invalid Amount')
-            .setDescription('Please enter a valid number or "all".')],
-          ephemeral: true
+            .setDescription('Please enter a valid number or "all".')]
         });
       }
       // Cap at max cash if user enters more than they have
@@ -41,7 +41,7 @@ module.exports = {
     }
 
     if (amount <= 0 || balance.cash === 0) {
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Insufficient Funds')
@@ -53,7 +53,7 @@ module.exports = {
     // Move money from cash to bank
     const removed = await removeMoney(guildId, userId, amount, 'Deposit to bank');
     if (!removed) {
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Deposit Failed')
@@ -83,6 +83,6 @@ module.exports = {
       .setFooter({ text: rank > 0 ? `Rank #${rank} of ${totalUsers}` : 'Unranked' })
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   }
 };

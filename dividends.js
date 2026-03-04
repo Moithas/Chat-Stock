@@ -916,6 +916,15 @@ function executeSplit(guildId, stockUserId, ratio, currentPrice, getAllStockHold
     adjustAvgBuyPrice(stockUserId, multiplier);
   }
   
+  // Adjust purchase history records for capital gains accuracy
+  // shares * multiplier, price / multiplier (keeps total cost basis the same)
+  try {
+    const { adjustPurchaseHistoryForSplit } = require('./market');
+    adjustPurchaseHistoryForSplit(stockUserId, multiplier);
+  } catch (e) {
+    console.error('Failed to adjust purchase history for split:', e);
+  }
+  
   // Calculate new price (inverse of share multiplier)
   const newPrice = currentPrice / multiplier;
   
@@ -957,6 +966,15 @@ function executeReverseSplit(guildId, stockUserId, ratio, currentPrice, getAllSt
   // When shares decrease, the cost basis per share should increase proportionally
   if (adjustAvgBuyPrice) {
     adjustAvgBuyPrice(stockUserId, multiplier);
+  }
+  
+  // Adjust purchase history records for capital gains accuracy
+  // shares * multiplier, price / multiplier (keeps total cost basis the same)
+  try {
+    const { adjustPurchaseHistoryForSplit } = require('./market');
+    adjustPurchaseHistoryForSplit(stockUserId, multiplier);
+  } catch (e) {
+    console.error('Failed to adjust purchase history for reverse split:', e);
   }
   
   // Calculate new price (inverse of share multiplier)
@@ -1012,6 +1030,7 @@ function getRecentSplitters(sinceTimestamp) {
 // ============ DIVIDEND SCHEDULER ============
 
 let dividendSchedulerInterval = null;
+let isDividendProcessing = false;
 
 function startDividendScheduler(client) {
   // Clear any existing scheduler
@@ -1022,6 +1041,13 @@ function startDividendScheduler(client) {
   // Function to process dividends
   const processDividends = async () => {
     if (!client || !client.guilds) return;
+    
+    if (isDividendProcessing) {
+      console.log('💰 Dividend processing already in progress, skipping this cycle.');
+      return;
+    }
+    isDividendProcessing = true;
+    try {
     
     for (const guild of client.guilds.cache.values()) {
       try {
@@ -1223,6 +1249,10 @@ function startDividendScheduler(client) {
       } catch (error) {
         console.error(`Error processing dividends for guild ${guild.id}:`, error);
       }
+    }
+
+    } finally {
+      isDividendProcessing = false;
     }
   };
   

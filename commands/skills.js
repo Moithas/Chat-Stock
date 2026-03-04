@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getBalance, addMoney } = require('../economy');
+const { getBalance, addMoney, removeMoney } = require('../economy');
 const { 
   getUserSkills, 
   getXpProgress, 
@@ -188,6 +188,7 @@ module.exports = {
   customIds: BUTTON_IDS,
   
   async execute(interaction) {
+    await interaction.deferReply({ flags: 64 });
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     
@@ -214,7 +215,7 @@ module.exports = {
     const embed = buildSkillsEmbed(interaction, skills, hackBonuses, robBonuses, hackProgress, robProgress, notifications);
     const buttons = buildTrainingButtons(guildId, userId);
     
-    await interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.editReply({ embeds: [embed], components: [buttons] });
   },
   
   async handleButton(interaction) {
@@ -311,12 +312,19 @@ module.exports = {
     }
     
     // Deduct cost and start training
-    addMoney(guildId, userId, -trainingInfo.cost, 'cash');
+    const paid = await removeMoney(guildId, userId, trainingInfo.cost, `${skillName} training`);
+    if (!paid) {
+      return interaction.reply({
+        content: `❌ Failed to deduct training cost. Please try again.`,
+        ephemeral: true
+      });
+    }
+    
     const result = startTraining(guildId, userId, skill);
     
     if (!result.success) {
-      // Refund if something went wrong
-      addMoney(guildId, userId, trainingInfo.cost, 'cash');
+      // Refund since training failed to start
+      await addMoney(guildId, userId, trainingInfo.cost, `${skillName} training refund`);
       return interaction.reply({
         content: `❌ Failed to start training: ${result.error}`,
         ephemeral: true

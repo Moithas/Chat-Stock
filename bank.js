@@ -188,6 +188,14 @@ function initBank(database) {
     )
   `);
 
+  // Migration: Add prepaid_amount column to loans table
+  try {
+    db.exec(`SELECT prepaid_amount FROM loans LIMIT 1`);
+  } catch (e) {
+    db.run(`ALTER TABLE loans ADD COLUMN prepaid_amount INTEGER DEFAULT 0`);
+    console.log('🏦 Added prepaid_amount column to loans table');
+  }
+
   // Create indexes for faster lookups
   db.run(`CREATE INDEX IF NOT EXISTS idx_loans_guild_user ON loans(guild_id, user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_loans_status ON loans(guild_id, status)`);
@@ -372,10 +380,24 @@ function recordLoanPayment(loanId, guildId, userId, amount, type = 'scheduled') 
     VALUES (?, ?, ?, ?, ?, ?)
   `, [loanId, guildId, userId, amount, type, Date.now()]);
   
-  // Update loan
-  db.run(`
-    UPDATE loans SET amount_paid = amount_paid + ? WHERE id = ?
-  `, [amount, loanId]);
+  // Update loan - for manual payments, also track prepaid amount toward next scheduled payment
+  if (type === 'manual') {
+    db.run(`
+      UPDATE loans SET amount_paid = amount_paid + ?, prepaid_amount = prepaid_amount + ? WHERE id = ?
+    `, [amount, amount, loanId]);
+  } else {
+    db.run(`
+      UPDATE loans SET amount_paid = amount_paid + ? WHERE id = ?
+    `, [amount, loanId]);
+  }
+}
+
+// Get the effective next payment amount (accounting for prepayments and remaining balance)
+function getEffectiveNextPayment(loan) {
+  const remaining = loan.total_owed - loan.amount_paid;
+  const prepaid = loan.prepaid_amount || 0;
+  const scheduledAmount = Math.min(loan.payment_amount, remaining);
+  return Math.max(0, scheduledAmount - prepaid);
 }
 
 function updateLoanNextPayment(loanId, nextTime) {
@@ -1096,20 +1118,48 @@ async function processLoanPayments() {
       if (!guild) continue;
       
       const remaining = loan.total_owed - loan.amount_paid;
-      const paymentAmount = Math.min(loan.payment_amount, remaining);
+      const scheduledAmount = Math.min(loan.payment_amount, remaining);
+      const prepaid = loan.prepaid_amount || 0;
+      const actualCharge = Math.max(0, scheduledAmount - prepaid);
+      const prepaidUsed = Math.min(prepaid, scheduledAmount);
+      const newPrepaid = Math.max(0, prepaid - scheduledAmount);
       
-      // Try to take payment from bank
-      const success = await removeFromBank(loan.guild_id, loan.user_id, paymentAmount, 'Loan payment');
+      // Update prepaid amount (consume what was used this cycle, carry over excess)
+      db.run('UPDATE loans SET prepaid_amount = ? WHERE id = ?', [newPrepaid, loan.id]);
       
-      if (success) {
-        // Record successful payment
-        recordLoanPayment(loan.id, loan.guild_id, loan.user_id, paymentAmount, 'scheduled');
-        recordCreditEvent(loan.guild_id, loan.user_id, 'on_time_payment', loan.principal, paymentAmount);
+      // If fully covered by prepayment, no bank deduction needed
+      if (actualCharge === 0) {
+        // Still counts as on-time payment
+        recordCreditEvent(loan.guild_id, loan.user_id, 'on_time_payment', loan.principal, prepaidUsed);
         
-        const newPaid = loan.amount_paid + paymentAmount;
+        const newPaid = loan.amount_paid; // already counted when manual payment was made
         if (newPaid >= loan.total_owed) {
           completeLoan(loan.id);
-          recordCreditEvent(loan.guild_id, loan.user_id, 'completed', loan.principal, paymentAmount);
+          recordCreditEvent(loan.guild_id, loan.user_id, 'completed', loan.principal, 0);
+          console.log(`✅ Loan ${loan.id} completed for user ${loan.user_id} (fully prepaid)`);
+        } else {
+          // Schedule next payment
+          const intervalMs = loan.payment_interval === 'weekly' 
+            ? 7 * 24 * 60 * 60 * 1000 
+            : 24 * 60 * 60 * 1000;
+          updateLoanNextPayment(loan.id, Date.now() + intervalMs);
+        }
+        saveDatabase();
+        continue;
+      }
+      
+      // Try to take the reduced payment from bank
+      const success = await removeFromBank(loan.guild_id, loan.user_id, actualCharge, 'Loan payment');
+      
+      if (success) {
+        // Record successful payment (only the amount actually charged)
+        recordLoanPayment(loan.id, loan.guild_id, loan.user_id, actualCharge, 'scheduled');
+        recordCreditEvent(loan.guild_id, loan.user_id, 'on_time_payment', loan.principal, actualCharge + prepaidUsed);
+        
+        const newPaid = loan.amount_paid + actualCharge;
+        if (newPaid >= loan.total_owed) {
+          completeLoan(loan.id);
+          recordCreditEvent(loan.guild_id, loan.user_id, 'completed', loan.principal, actualCharge);
           console.log(`✅ Loan ${loan.id} completed for user ${loan.user_id}`);
         } else {
           // Schedule next payment
@@ -1193,6 +1243,7 @@ module.exports = {
   getUserLoanHistory,
   createLoan,
   recordLoanPayment,
+  getEffectiveNextPayment,
   updateLoanNextPayment,
   incrementMissedPayments,
   completeLoan,

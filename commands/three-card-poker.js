@@ -25,6 +25,9 @@ const { generateThreeCardPokerImage } = require('../cardImages');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
+// Prevent double-click processing
+const processingUsers = new Set();
+
 // Generate bet options based on settings
 function generateBetOptions(minBet, maxBet, includeNone = false) {
   const standardAmounts = [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
@@ -342,14 +345,24 @@ module.exports = {
       return interaction.reply({ content: '❌ This is not your game!', flags: 64 });
     }
     
+    // Allow non-money actions without processing guard
+    if (action === 'cancel' || action === 'done') {
+      const game = getActiveGame(userId);
+      if (action === 'cancel') return handleCancel(interaction, game);
+      if (action === 'done') return handleDone(interaction);
+    }
+    
+    if (processingUsers.has(userId)) {
+      return interaction.reply({ content: '⏳ Processing your last action...', flags: 64 });
+    }
+    processingUsers.add(userId);
+    try {
+    
     const game = getActiveGame(userId);
     
     switch (action) {
       case 'deal':
         await handleDeal(interaction, game);
-        break;
-      case 'cancel':
-        await handleCancel(interaction, game);
         break;
       case 'play':
         await handlePlay(interaction, game);
@@ -366,9 +379,10 @@ module.exports = {
         };
         await handlePlayAgain(interaction, bets);
         break;
-      case 'done':
-        await handleDone(interaction);
-        break;
+    }
+    
+    } finally {
+      processingUsers.delete(userId);
     }
   },
   
@@ -467,15 +481,13 @@ async function handleDeal(interaction, game) {
     if (currentGame && currentGame.phase === 'playing') {
       const timeoutResult = forceEndGame(userId, 'timeout');
       if (timeoutResult && !timeoutResult.cancelled) {
-        // Refund side bet wins if any
-        if (timeoutResult.results.totalResult > 0) {
-          await addMoney(guildId, userId, timeoutResult.results.totalResult + game.anteBet + game.pairPlusBet + game.sixCardBet);
-        } else if (timeoutResult.results.pairPlusResult > 0 || timeoutResult.results.sixCardResult > 0) {
-          // Partial refund for side bet wins
-          const sideWins = Math.max(0, timeoutResult.results.pairPlusResult) + Math.max(0, timeoutResult.results.sixCardResult);
-          if (sideWins > 0) {
-            await addMoney(guildId, userId, sideWins);
-          }
+        // Pay out using same logic as handleFold
+        const sideBetWins = Math.max(0, timeoutResult.results.pairPlusResult) + Math.max(0, timeoutResult.results.sixCardResult);
+        const sideBetLosses = Math.min(0, timeoutResult.results.pairPlusResult) + Math.min(0, timeoutResult.results.sixCardResult);
+        const sideBetTotal = game.pairPlusBet + game.sixCardBet;
+        const sideReturn = sideBetTotal + sideBetWins + sideBetLosses;
+        if (sideReturn > 0) {
+          await addMoney(guildId, userId, sideReturn);
         }
         
         try {

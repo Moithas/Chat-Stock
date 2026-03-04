@@ -3,7 +3,7 @@ const { Client, GatewayIntentBits, Collection, REST, Routes, ActivityType } = re
 const { initDatabase, createUser, updateMessageCount, calculateStockPrice, logPrice, getUser, getDb, getStreakInfo } = require('./database');
 const { initTicker, sendStreakAnnouncement, sendStreakExpiredAnnouncement } = require('./ticker');
 const { initFees } = require('./fees');
-const { initAntiSpam, shouldCountMessage, shouldCountButtonInteraction } = require('./antispam');
+const { initAntiSpam, shouldCountMessage, shouldCountButtonInteraction, getSpamSettings } = require('./antispam');
 const { initAdmin } = require('./admin');
 const { initMarketProtection } = require('./market');
 const { initProperty, scheduleCardDistribution } = require('./property');
@@ -28,6 +28,7 @@ const { initialize: initThreeCardPoker } = require('./threecardpoker');
 const { initMaintenance, startCleanupScheduler, logError, checkCommandCooldown, updateCommandCooldown } = require('./maintenance');
 const { initDungeon } = require('./dungeon');
 const { initSYN } = require('./screwyourneighbor');
+const { initLuckyPenny } = require('./luckypenny');
 const fs = require('fs');
 const path = require('path');
 
@@ -392,6 +393,9 @@ client.once('clientReady', async () => {
   // Initialize Screw Your Neighbor
   initSYN(getDb());
 
+  // Initialize Lucky Penny system
+  initLuckyPenny(getDb());
+
   // Initialize maintenance system (cleanup, error logging, rate limiting)
   initMaintenance(getDb(), client);
 
@@ -499,7 +503,8 @@ client.on('messageCreate', async (message) => {
   }
   
   // Update message count
-  updateMessageCount(Date.now(), userId);
+  const spamSettings = getSpamSettings(guildId);
+  updateMessageCount(Date.now(), userId, spamSettings.baseValueGrowth);
   
   // Check for streak milestones and announce
   const streakInfo = getStreakInfo(userId);
@@ -529,12 +534,19 @@ client.on('messageReactionAdd', async (reaction, user) => {
   
   const userId = user.id;
   const username = user.username;
+  const guildId = reaction.message.guildId;
   
   // Create user if doesn't exist
   createUser(userId, username);
   
-  // Count this reaction as activity
-  updateMessageCount(Date.now(), userId);
+  // Check if reaction should count (respects same cooldown as buttons)
+  const { shouldCount } = shouldCountButtonInteraction(guildId, userId);
+  
+  if (shouldCount) {
+    // Count this reaction as activity
+    const spamSettings = getSpamSettings(guildId);
+    updateMessageCount(Date.now(), userId, spamSettings.baseValueGrowth);
+  }
 });
 
 // Handle slash commands and interactions
@@ -548,8 +560,7 @@ client.on('interactionCreate', async (interaction) => {
     // Create user if doesn't exist
     createUser(userId, username);
     
-    // Update message count for slash command
-    updateMessageCount(Date.now(), userId);
+    // Note: message count is tracked later in the main command handler (avoid double-counting)
     
     // Also count toward events (vault, market events)
     // Create a mock message object for handleEventMessage
@@ -572,7 +583,8 @@ client.on('interactionCreate', async (interaction) => {
     
     if (shouldCount) {
       // Count this interaction as activity
-      updateMessageCount(Date.now(), userId);
+      const spamSettings = getSpamSettings(guildId);
+      updateMessageCount(Date.now(), userId, spamSettings.baseValueGrowth);
     } else if (reason) {
       // Optionally log the cooldown reason for debugging
       // console.log(`[ANTISPAM] Button interaction blocked for ${interaction.user.username}: ${reason}`);
@@ -849,18 +861,11 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
-  // Handle blackjack buttons and modals
+  // Handle blackjack buttons
   if (interaction.isButton() && interaction.customId.startsWith('bj_')) {
     try {
-      if (interaction.customId.startsWith('bj_table_')) {
-        // Multiplayer blackjack table buttons
-        const { handleTableButton } = require('./commands/blackjack-table');
-        await handleTableButton(interaction);
-      } else {
-        // Single-player blackjack buttons
-        const { handleBlackjackButton } = require('./commands/blackjack');
-        await handleBlackjackButton(interaction);
-      }
+      const { handleBlackjackButton } = require('./commands/blackjack');
+      await handleBlackjackButton(interaction);
     } catch (error) {
       console.error('Error handling blackjack button:', error);
       try {
@@ -869,38 +874,6 @@ client.on('interactionCreate', async (interaction) => {
         } else {
           await interaction.followUp({ content: 'An error occurred.', flags: 64 });
         }
-      } catch (e) {
-        // Ignore - interaction may have expired
-      }
-    }
-    return;
-  }
-
-  // Handle blackjack table modals
-  if (interaction.isModalSubmit() && interaction.customId === 'bj_table_custom_bet') {
-    try {
-      const { handleCustomBetModal } = require('./commands/blackjack-table');
-      await handleCustomBetModal(interaction);
-    } catch (error) {
-      console.error('Error handling blackjack modal:', error);
-      try {
-        await interaction.reply({ content: 'An error occurred.', flags: 64 });
-      } catch (e) {
-        // Ignore - interaction may have expired
-      }
-    }
-    return;
-  }
-
-  // Handle blackjack table change bet modal
-  if (interaction.isModalSubmit() && interaction.customId === 'bj_table_change_bet_modal') {
-    try {
-      const { handleChangeBetModal } = require('./commands/blackjack-table');
-      await handleChangeBetModal(interaction);
-    } catch (error) {
-      console.error('Error handling blackjack change bet modal:', error);
-      try {
-        await interaction.reply({ content: 'An error occurred.', flags: 64 });
       } catch (e) {
         // Ignore - interaction may have expired
       }
@@ -1277,13 +1250,14 @@ client.on('interactionCreate', async (interaction) => {
       'admin_skills_view_levels', 'back_admin_skills',
       'modal_admin_skills_xp', 'modal_admin_skills_hack', 'modal_admin_skills_rob',
       'admin_items', 'items_toggle', 'items_add', 'items_manage', 'items_stats',
-      'items_init_defaults', 'items_prev', 'items_next', 'back_items',
+      'items_init_defaults', 'items_prev', 'items_next', 'back_items', 'items_owners',
       'items_fulfillments', 'items_fulfill_prev', 'items_fulfill_next', 'items_ticket_settings',
       'items_create_continue', 'items_create_cancel', 'items_create_role',
       'items_give', 'items_give_confirm', 'items_give_cancel',
       'items_give_user', 'items_give_item',
       'items_take', 'items_take_confirm', 'items_take_cancel',
       'items_take_user', 'items_take_item',
+      'items_owners_select',
       'items_select', 'items_category_filter', 'items_effect_select',
       'items_ticket_category', 'items_ticket_log',
       'items_create_category', 'items_create_effect',
@@ -1295,7 +1269,11 @@ client.on('interactionCreate', async (interaction) => {
       'modal_dungeon_settings',
       // SYN
       'admin_syn', 'syn_toggle', 'syn_edit_settings', 'syn_edit_timing', 'back_syn',
-      'modal_syn_settings', 'modal_syn_timing'
+      'modal_syn_settings', 'modal_syn_timing',
+      // Lucky Penny
+      'admin_luckypenny', 'admin_lp_toggle', 'admin_lp_edit_general', 'admin_lp_edit_buffs',
+      'admin_lp_edit_currency', 'back_admin_lp',
+      'modal_admin_lp_general', 'modal_admin_lp_buffs', 'modal_admin_lp_currency'
     ];
     
     // Check for exact match OR dynamic card/property edit IDs
@@ -1352,6 +1330,7 @@ client.on('interactionCreate', async (interaction) => {
                            interaction.customId.startsWith('items_delete_') ||
                            interaction.customId.startsWith('items_toggle_') ||
                            interaction.customId.startsWith('items_usable_') ||
+                           interaction.customId.startsWith('items_owners_') ||
                            interaction.customId.startsWith('modal_items_edit_') ||
                            interaction.customId.startsWith('items_complete_') ||
                            interaction.customId.startsWith('items_cancel_') ||
@@ -1396,7 +1375,8 @@ client.on('interactionCreate', async (interaction) => {
   const commandName = interaction.commandName;
   
   createUser(userId, username);
-  updateMessageCount(Date.now(), userId);
+  const cmdSpamSettings = getSpamSettings(guildId);
+  updateMessageCount(Date.now(), userId, cmdSpamSettings.baseValueGrowth);
   
   // Check command rate limit (separate from built-in cooldowns)
   const cooldownCheck = checkCommandCooldown(guildId, userId, commandName);

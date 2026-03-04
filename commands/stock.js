@@ -16,7 +16,8 @@ const {
   setShares,
   setPriceModifier,
   getPriceModifier,
-  adjustAvgBuyPrice
+  adjustAvgBuyPrice,
+  calculateStreakInfo
 } = require('../database');
 const QuickChart = require('quickchart-js');
 const { 
@@ -34,6 +35,7 @@ const { isEnabled, hasEnoughMoney, hasEnoughInBank, removeMoney, removeFromBank,
 const { calculateBuyFee, calculateSellFee, getGuildSettings } = require('../fees');
 const { recordPurchase, recordPriceImpact, getMarketSettings, checkSellCooldown, consumePurchaseShares, calculateCapitalGainsTax, previewCapitalGainsTax } = require('../market');
 const { getActiveMarketEvent } = require('../events');
+const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -640,12 +642,30 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
   const stockPrice = calculateStockPrice(targetUserId, guildId);
   const shareholders = getAllStockHolders(targetUserId);
   const stockRank = getStockRank(targetUserId);
+  const streakInfo = calculateStreakInfo(targetUserId);
   
   let totalShares = 0;
   for (const holder of shareholders) {
     totalShares += holder.shares;
   }
   const marketCap = totalShares * stockPrice;
+  
+  // Build streak display
+  let streakText = 'No active streak';
+  if (streakInfo.days > 0) {
+    const tierInfo = {
+      0: { emoji: '', name: '' },
+      1: { emoji: '🔥', name: 'Bronze' },
+      2: { emoji: '🔥🔥', name: 'Silver' },
+      3: { emoji: '🔥🔥🔥', name: 'Gold' }
+    };
+    const ti = tierInfo[streakInfo.tier];
+    if (streakInfo.tier > 0) {
+      streakText = `${ti.emoji} **${streakInfo.days} days** — ${ti.name} (+${Math.round(streakInfo.bonus * 100)}%)`;
+    } else {
+      streakText = `**${streakInfo.days} days** (next tier at 7)`;
+    }
+  }
   
   // Check for active market event
   const activeEvent = getActiveMarketEvent(guildId);
@@ -654,6 +674,7 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
     .setColor(0x3498db)
     .setTitle(`📊 ${targetUser.username}'s Stock`)
     .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
+    .setDescription(`📅 **Chat Streak:** ${streakText}`)
     .addFields(
       { name: '💰 Current Price', value: `**${Math.round(stockPrice).toLocaleString()}** ${CURRENCY}`, inline: true },
       { name: '📈 Total Shares', value: `**${totalShares.toLocaleString()}**`, inline: true },
@@ -796,7 +817,11 @@ async function showBuyAmountButtons(interaction, guildId, userId, targetUserId, 
   // Ensure target user exists in database
   createUser(targetUserId, username);
   
-  const currentPrice = calculateStockPrice(targetUserId, guildId);
+  const basePrice = calculateStockPrice(targetUserId, guildId);
+  const lpBuyMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
+  const currentPrice = lpBuyMod !== 0
+    ? Math.max(0.01, Math.round(basePrice * (1 + lpBuyMod / 100) * 100) / 100)
+    : basePrice;
   
   let balance = 0;
   if (isEnabled()) {
@@ -812,12 +837,13 @@ async function showBuyAmountButtons(interaction, guildId, userId, targetUserId, 
   // Max shares = (balance - fixedFee) / (price * (1 + feePercent))
   const maxShares = Math.floor((balance - fixedFee) / (currentPrice * (1 + feePercent)));
   
+  const lpNote = lpBuyMod !== 0 ? ` (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}% LP)` : '';
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71)
     .setTitle(`💵 Buy ${username}`)
     .setDescription(`**Your Bank:** ${Math.round(balance).toLocaleString()} ${CURRENCY}`)
     .addFields(
-      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}${lpNote}`, inline: true },
       { name: 'Max Buyable', value: `${Math.max(0, maxShares).toLocaleString()} shares`, inline: true }
     );
   
@@ -925,7 +951,11 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
     username = user.username;
   } catch (e) {}
   
-  const currentPrice = calculateStockPrice(targetUserId, guildId);
+  const basePrice = calculateStockPrice(targetUserId, guildId);
+  const lpBuyMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
+  const currentPrice = lpBuyMod !== 0
+    ? Math.max(0.01, Math.round(basePrice * (1 + lpBuyMod / 100) * 100) / 100)
+    : basePrice;
   
   // Get balance and calculate max shares
   let balance = 0;
@@ -977,8 +1007,18 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
       { name: '💰 Trading Fee', value: `${fee.toLocaleString()} ${CURRENCY}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
       { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${CURRENCY}`, inline: false }
-    )
-    .setFooter({ text: 'Do you want to proceed with this purchase?' });
+    );
+  
+  // Add Lucky Penny modifier line if active
+  if (lpBuyMod !== 0) {
+    const lpDiff = subtotal - Math.round(basePrice * shares);
+    const lpSign = lpDiff >= 0 ? '+' : '';
+    embed.spliceFields(3, 0,
+      { name: `🪙 Lucky Penny (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${CURRENCY}`, inline: false }
+    );
+  }
+  
+  embed.setFooter({ text: 'Do you want to proceed with this purchase?' });
   
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -1006,7 +1046,11 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
     username = user.username;
   } catch (e) {}
   
-  const currentPrice = calculateStockPrice(targetUserId, guildId);
+  const basePrice = calculateStockPrice(targetUserId, guildId);
+  const lpBuyMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
+  const currentPrice = lpBuyMod !== 0
+    ? Math.max(0.01, Math.round(basePrice * (1 + lpBuyMod / 100) * 100) / 100)
+    : basePrice;
   
   // Get balance and calculate max shares
   let balance = 0;
@@ -1058,8 +1102,18 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
       { name: '💰 Trading Fee', value: `${fee.toLocaleString()} ${CURRENCY}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
       { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${CURRENCY}`, inline: false }
-    )
-    .setFooter({ text: 'Do you want to proceed with this purchase?' });
+    );
+  
+  // Add Lucky Penny modifier line if active
+  if (lpBuyMod !== 0) {
+    const lpDiff = subtotal - Math.round(basePrice * shares);
+    const lpSign = lpDiff >= 0 ? '+' : '';
+    embed.spliceFields(3, 0,
+      { name: `🪙 Lucky Penny (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${CURRENCY}`, inline: false }
+    );
+  }
+  
+  embed.setFooter({ text: 'Do you want to proceed with this purchase?' });
   
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -1121,7 +1175,11 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
     username = user.username;
   } catch (e) {}
   
-  const currentPrice = calculateStockPrice(targetUserId, guildId);
+  const baseSellPrice = calculateStockPrice(targetUserId, guildId);
+  const lpSellMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
+  const currentPrice = lpSellMod !== 0
+    ? Math.max(0.01, Math.round(baseSellPrice * (1 + lpSellMod / 100) * 100) / 100)
+    : baseSellPrice;
   const grossValue = Math.round(currentPrice * shares);
   const fee = calculateSellFee(guildId, grossValue);
   
@@ -1143,6 +1201,15 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
       { name: '💰 Trading Fee', value: `-${fee.toLocaleString()} ${CURRENCY}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true }
     );
+  
+  // Add Lucky Penny modifier line if active
+  if (lpSellMod !== 0) {
+    const lpDiff = grossValue - Math.round(baseSellPrice * shares);
+    const lpSign = lpDiff >= 0 ? '+' : '';
+    embed.addFields(
+      { name: `🪙 Lucky Penny (${lpSellMod > 0 ? '+' : ''}${lpSellMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${CURRENCY}`, inline: false }
+    );
+  }
   
   // Add capital gains tax breakdown if applicable
   if (totalTax > 0) {
@@ -1198,6 +1265,9 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
   }
   pendingTransactions.add(transactionKey);
   
+  let moneyDeducted = false;
+  let totalCost = 0;
+  try {
   // Always use deferUpdate for button clicks (even from modal confirmation flow)
   await interaction.deferUpdate();
   
@@ -1211,7 +1281,12 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
   createUser(userId, interaction.user.username);
   createUser(targetUserId, username);
   
-  const currentPrice = calculateStockPrice(targetUserId, guildId);
+  const baseBuyPrice = calculateStockPrice(targetUserId, guildId);
+  // Apply Lucky Penny stock price modifier (personal to the buyer)
+  const lpBuyStockMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
+  const currentPrice = lpBuyStockMod !== 0 
+    ? Math.max(0.01, Math.round(baseBuyPrice * (1 + lpBuyStockMod / 100) * 100) / 100)
+    : baseBuyPrice;
   
   // Get balance and calculate max shares
   let balance = 0;
@@ -1228,27 +1303,24 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
   const shares = amount === 'max' ? maxShares : parseInt(amount);
   
   if (isNaN(shares) || shares < 1) {
-    pendingTransactions.delete(transactionKey);
     const msg = { content: `❌ Invalid amount. Please enter a valid number.`, embeds: [], components: [] };
     return fromModal ? interaction.editReply(msg) : interaction.editReply(msg);
   }
   
   if (shares > maxShares) {
-    pendingTransactions.delete(transactionKey);
     const msg = { content: `❌ Cannot buy ${shares} shares. Max: ${maxShares}`, embeds: [], components: [] };
     return fromModal ? interaction.editReply(msg) : interaction.editReply(msg);
   }
   
   const subtotal = Math.round(currentPrice * shares);
   const fee = calculateBuyFee(guildId, subtotal);
-  const totalCost = subtotal + fee;
+  totalCost = subtotal + fee;
   
   // Check and deduct balance
   if (isEnabled()) {
     const hasEnough = await hasEnoughInBank(guildId, userId, totalCost);
     
     if (!hasEnough) {
-      pendingTransactions.delete(transactionKey);
       return interaction.editReply({ 
         content: `❌ Insufficient funds! Need **${totalCost.toLocaleString()}** ${CURRENCY}`, 
         embeds: [], 
@@ -1256,65 +1328,65 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
       });
     }
     
-    try {
-      await removeFromBank(guildId, userId, totalCost, `Bought ${shares} shares of ${username} (fee: ${fee})`);
-    } catch (error) {
-      console.error('UnbelievaBoat error:', error);
-      pendingTransactions.delete(transactionKey);
-      return interaction.editReply({ content: '❌ Error processing payment.', embeds: [], components: [] });
-    }
+    await removeFromBank(guildId, userId, totalCost, `Bought ${shares} shares of ${username} (fee: ${fee})`);
+    moneyDeducted = true;
+  }
+  
+  buyStock(userId, targetUserId, shares, currentPrice);
+  logTransaction(userId, targetUserId, shares, currentPrice, 'BUY', Date.now());
+  recordPurchase(userId, targetUserId, shares, currentPrice);
+  recordPriceImpact(targetUserId, shares);
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle('✅ Purchase Successful!')
+    .setDescription(`**${interaction.user.displayName}** bought **${shares}** shares of **${username}**`)
+    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+    .addFields(
+      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: 'Subtotal', value: `${subtotal.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: 'Fee', value: `${fee.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: 'Total Paid', value: `**${totalCost.toLocaleString()}** ${CURRENCY}`, inline: true }
+    );
+  
+  // Show market protection info
+  const marketSettings = getMarketSettings(guildId);
+  const notices = [];
+  if (marketSettings.sellCooldownEnabled) {
+    notices.push(`⏱️ Hold for ${marketSettings.sellCooldownMinutes}min before selling`);
+  }
+  if (marketSettings.priceImpactEnabled) {
+    notices.push(`📈 Price impact applies over ${marketSettings.priceImpactDelayMinutes}min`);
+  }
+  if (notices.length > 0) {
+    embed.addFields({ name: '📋 Market Rules', value: notices.join('\n'), inline: false });
+  }
+  
+  // For modal confirmations, clear the ephemeral confirmation message
+  // For regular flow, update the panel
+  if (fromModal) {
+    await interaction.editReply({ content: '✅ Purchase complete!', embeds: [], components: [] });
+  } else {
+    await showStockPanel(interaction, guildId, userId, true, true);
   }
   
   try {
-    buyStock(userId, targetUserId, shares, currentPrice);
-    logTransaction(userId, targetUserId, shares, currentPrice, 'BUY', Date.now());
-    recordPurchase(userId, targetUserId, shares, currentPrice);
-    recordPriceImpact(targetUserId, shares);
-    
-    const embed = new EmbedBuilder()
-      .setColor(0x2ecc71)
-      .setTitle('✅ Purchase Successful!')
-      .setDescription(`**${interaction.user.displayName}** bought **${shares}** shares of **${username}**`)
-      .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-      .addFields(
-        { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: 'Subtotal', value: `${subtotal.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: 'Fee', value: `${fee.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: 'Total Paid', value: `**${totalCost.toLocaleString()}** ${CURRENCY}`, inline: true }
-      );
-    
-    // Show market protection info
-    const marketSettings = getMarketSettings(guildId);
-    const notices = [];
-    if (marketSettings.sellCooldownEnabled) {
-      notices.push(`⏱️ Hold for ${marketSettings.sellCooldownMinutes}min before selling`);
-    }
-    if (marketSettings.priceImpactEnabled) {
-      notices.push(`📈 Price impact applies over ${marketSettings.priceImpactDelayMinutes}min`);
-    }
-    if (notices.length > 0) {
-      embed.addFields({ name: '📋 Market Rules', value: notices.join('\n'), inline: false });
-    }
-    
-    pendingTransactions.delete(transactionKey);
-    
-    // For modal confirmations, clear the ephemeral confirmation message
-    // For regular flow, update the panel
-    if (fromModal) {
-      await interaction.editReply({ content: '✅ Purchase complete!', embeds: [], components: [] });
-    } else {
-      await showStockPanel(interaction, guildId, userId, true, true);
-    }
-    
-    try {
-      await interaction.channel.send({ embeds: [embed] });
-    } catch (e) {
-      // Channel send failed (missing permissions), but purchase succeeded
-    }
+    await interaction.channel.send({ embeds: [embed] });
+  } catch (e) {
+    // Channel send failed (missing permissions), but purchase succeeded
+  }
+
   } catch (error) {
     console.error('Error buying stock:', error);
+    // Refund money if it was already deducted but shares weren't recorded
+    if (moneyDeducted) {
+      try { await addMoney(guildId, userId, totalCost, 'Buy refund - transaction error'); } catch (e) { console.error('Failed to refund buy:', e); }
+    }
+    try {
+      await interaction.editReply({ content: '❌ Error processing purchase.', embeds: [], components: [] });
+    } catch (e) {}
+  } finally {
     pendingTransactions.delete(transactionKey);
-    await interaction.editReply({ content: '❌ Error processing purchase.', embeds: [], components: [] });
   }
 }
 
@@ -1398,15 +1470,20 @@ async function showSellAmountButtons(interaction, guildId, userId, targetUserId,
     username = user.username;
   } catch (e) {}
   
-  const currentPrice = calculateStockPrice(targetUserId, guildId);
+  const basePrice = calculateStockPrice(targetUserId, guildId);
+  const lpSellMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
+  const currentPrice = lpSellMod !== 0
+    ? Math.max(0.01, Math.round(basePrice * (1 + lpSellMod / 100) * 100) / 100)
+    : basePrice;
   const totalValue = Math.round(currentPrice * stock.shares);
   
+  const lpNote = lpSellMod !== 0 ? ` (${lpSellMod > 0 ? '+' : ''}${lpSellMod}% LP)` : '';
   const embed = new EmbedBuilder()
     .setColor(0xe74c3c)
     .setTitle(`💰 Sell ${username}`)
     .setDescription(`You own **${stock.shares}** shares\nCurrent value: **${totalValue.toLocaleString()}** ${CURRENCY}`)
     .addFields(
-      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true }
+      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}${lpNote}`, inline: true }
     );
   
   // Create amount buttons based on shares owned
@@ -1459,10 +1536,13 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
   }
   pendingTransactions.add(transactionKey);
   
+  let sharesSold = false;
+  let soldShares = 0;
+  let soldPrice = 0;
+  try {
   const stock = getStock(userId, targetUserId);
   
   if (!stock) {
-    pendingTransactions.delete(transactionKey);
     const msg = { content: '❌ You don\'t own this stock!', embeds: [], components: [] };
     return fromModal ? interaction.reply({ ...msg, flags: 64 }) : interaction.update(msg);
   }
@@ -1470,13 +1550,11 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
   const shares = amount === 'all' ? stock.shares : parseInt(amount);
   
   if (isNaN(shares) || shares < 1) {
-    pendingTransactions.delete(transactionKey);
     const msg = { content: '❌ Invalid amount. Please enter a valid number.', embeds: [], components: [] };
     return fromModal ? interaction.reply({ ...msg, flags: 64 }) : interaction.update(msg);
   }
   
   if (shares > stock.shares) {
-    pendingTransactions.delete(transactionKey);
     const msg = { content: `❌ You only own **${stock.shares}** shares!`, embeds: [], components: [] };
     return fromModal ? interaction.reply({ ...msg, flags: 64 }) : interaction.update(msg);
   }
@@ -1484,7 +1562,6 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
   // Check sell cooldown
   const cooldownCheck = checkSellCooldown(guildId, userId, targetUserId, shares, stock.shares);
   if (!cooldownCheck.canSell) {
-    pendingTransactions.delete(transactionKey);
     const msg = { 
       content: `❌ ${cooldownCheck.reason}\n⏱️ Wait **${cooldownCheck.waitMinutes} minutes**.`, 
       embeds: [], 
@@ -1502,7 +1579,12 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     username = user.username;
   } catch (e) {}
   
-  const currentPrice = calculateStockPrice(targetUserId, guildId);
+  const baseSellPrice = calculateStockPrice(targetUserId, guildId);
+  // Apply Lucky Penny stock price modifier (personal to the seller)
+  const lpSellStockMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
+  const currentPrice = lpSellStockMod !== 0 
+    ? Math.max(0.01, Math.round(baseSellPrice * (1 + lpSellStockMod / 100) * 100) / 100)
+    : baseSellPrice;
   const grossValue = Math.round(currentPrice * shares);
   const fee = calculateSellFee(guildId, grossValue);
   
@@ -1511,46 +1593,54 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
   
   const netValue = Math.max(0, grossValue - fee - totalTax);
   
+  sellStock(shares, userId, targetUserId);
+  deleteStock(userId, targetUserId);
+  soldShares = shares;
+  soldPrice = currentPrice;
+  sharesSold = true;
+  logTransaction(userId, targetUserId, shares, currentPrice, 'SELL', Date.now());
+  recordPriceImpact(targetUserId, -shares);
+  
+  if (isEnabled() && netValue > 0) {
+    await addMoney(guildId, userId, netValue, `Sold ${shares} shares of ${username}`);
+  }
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle('✅ Sold!')
+    .setDescription(`**${interaction.user.displayName}** sold **${shares}** shares of **${username}**`)
+    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+    .addFields(
+      { name: 'Gross Value', value: `${grossValue.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: 'Fees/Tax', value: `-${(fee + totalTax).toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: 'You Received', value: `**${netValue.toLocaleString()}** ${CURRENCY}`, inline: true }
+    );
+  
+  // For modal confirmations, clear the ephemeral confirmation message
+  // For regular flow, update the panel
+  if (fromModal) {
+    await interaction.editReply({ content: '✅ Sale complete!', embeds: [], components: [] });
+  } else {
+    await showStockPanel(interaction, guildId, userId, true, true);
+  }
+  
   try {
-    sellStock(shares, userId, targetUserId);
-    deleteStock(userId, targetUserId);
-    logTransaction(userId, targetUserId, shares, currentPrice, 'SELL', Date.now());
-    recordPriceImpact(targetUserId, -shares);
-    
-    if (isEnabled()) {
-      await addMoney(guildId, userId, netValue, `Sold ${shares} shares of ${username}`);
-    }
-    
-    const embed = new EmbedBuilder()
-      .setColor(0x2ecc71)
-      .setTitle('✅ Sold!')
-      .setDescription(`**${interaction.user.displayName}** sold **${shares}** shares of **${username}**`)
-      .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-      .addFields(
-        { name: 'Gross Value', value: `${grossValue.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: 'Fees/Tax', value: `-${(fee + totalTax).toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: 'You Received', value: `**${netValue.toLocaleString()}** ${CURRENCY}`, inline: true }
-      );
-    
-    pendingTransactions.delete(transactionKey);
-    
-    // For modal confirmations, clear the ephemeral confirmation message
-    // For regular flow, update the panel
-    if (fromModal) {
-      await interaction.editReply({ content: '✅ Sale complete!', embeds: [], components: [] });
-    } else {
-      await showStockPanel(interaction, guildId, userId, true, true);
-    }
-    
-    try {
-      await interaction.channel.send({ embeds: [embed] });
-    } catch (e) {
-      // Channel send failed (missing permissions), but sale succeeded
-    }
+    await interaction.channel.send({ embeds: [embed] });
+  } catch (e) {
+    // Channel send failed (missing permissions), but sale succeeded
+  }
+
   } catch (error) {
     console.error('Error selling stock:', error);
+    // Rollback: re-add shares if they were already removed but payment failed
+    if (sharesSold) {
+      try { buyStock(userId, targetUserId, soldShares, soldPrice); } catch (e) { console.error('Failed to rollback sell:', e); }
+    }
+    try {
+      await interaction.editReply({ content: '❌ Error selling stock.', embeds: [], components: [] });
+    } catch (e) {}
+  } finally {
     pendingTransactions.delete(transactionKey);
-    await interaction.editReply({ content: '❌ Error selling stock.', embeds: [], components: [] });
   }
 }
 

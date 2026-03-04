@@ -46,6 +46,11 @@ async function initDatabase() {
   } catch (e) {
     // Column already exists
   }
+  try {
+    db.run(`ALTER TABLE users ADD COLUMN streak_reset_time INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists
+  }
 
   db.run(`
     CREATE TABLE IF NOT EXISTS stocks (
@@ -137,8 +142,8 @@ function saveDatabase() {
   }
 }
 
-// Save every 30 seconds
-setInterval(saveDatabase, 30000);
+// Save every 10 seconds
+setInterval(saveDatabase, 10000);
 
 // Save on exit
 process.on('exit', saveDatabase);
@@ -185,10 +190,10 @@ function createUser(userId, username) {
   }
 }
 
-function updateMessageCount(timestamp, userId) {
+function updateMessageCount(timestamp, userId, baseValueGrowth = 0.075) {
   if (!db) return; // Database not ready yet
-  // Increment message count and update last message time
-  db.run('UPDATE users SET total_messages = total_messages + 1, last_message_time = ? WHERE user_id = ?', [timestamp, userId]);
+  // Increment message count, update last message time, and grow base_value permanently
+  db.run('UPDATE users SET total_messages = total_messages + 1, last_message_time = ?, base_value = base_value + ? WHERE user_id = ?', [timestamp, baseValueGrowth, userId]);
   // Also log as a transaction for 15-day window tracking
   db.run('INSERT INTO transactions (buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, 0, 0, "MESSAGE", ?)',
     [userId, userId, timestamp]);
@@ -281,19 +286,25 @@ function getPriceHistoryByTimeRange(userId, startTime) {
 }
 
 // Calculate activity streak and bonus (with 7-day expiration at max tier)
-function getStreakInfo(userId) {
+// Pure streak calculation — NO side effects, safe to call from anywhere
+// Used by calculateStockPrice, stock panel display, etc.
+function calculateStreakInfo(userId) {
   const user = getUser(userId);
-  if (!user) return { days: 0, tier: 0, bonus: 0, newTier: false };
+  if (!user) return { days: 0, tier: 0, bonus: 0 };
   
   const oneDayMs = 24 * 60 * 60 * 1000;
   const sevenDaysMs = 7 * oneDayMs;
   const now = Date.now();
   const sixtyDaysAgo = now - (60 * oneDayMs);
   
-  // Get all message timestamps from last 60 days in a single query
+  // Respect streak_reset_time — only count activity AFTER reset
+  const resetTime = user.streak_reset_time || 0;
+  const cutoffTime = Math.max(sixtyDaysAgo, resetTime);
+  
+  // Get all message timestamps since cutoff
   const messagesResult = db.exec(
     'SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = "MESSAGE" ORDER BY timestamp DESC',
-    [userId, sixtyDaysAgo]
+    [userId, cutoffTime]
   );
   
   // Build a set of days (as day numbers from epoch) that have activity
@@ -333,20 +344,51 @@ function getStreakInfo(userId) {
     bonus = 0.02; // +2%
   }
   
-  // Check for max tier expiration (7 days at tier 3)
+  // Check for max tier expiration (7 days at tier 3) — read-only check
   const storedTier = user.streak_tier || 0;
   const tierReachedTime = user.streak_tier_reached || 0;
   
   if (currentTier === 3 && storedTier === 3 && tierReachedTime > 0) {
-    // Check if 7 days have passed since reaching max tier
     if (now - tierReachedTime >= sevenDaysMs) {
-      // Reset streak bonus - they've had it for 7 days
-      bonus = 0;
-      currentTier = 0;
-      // Reset the stored tier
-      db.run('UPDATE users SET streak_tier = 0, streak_tier_reached = 0 WHERE user_id = ?', [userId]);
+      // Gold has expired — show no bonus (actual reset happens in getStreakInfo)
+      return { days: streakDays, tier: 0, bonus: 0 };
+    }
+  }
+  
+  return { days: streakDays, tier: currentTier, bonus };
+}
+
+// Full streak info with side effects — ONLY call from message handler in bot.js
+// Handles DB writes for tier tracking, expiration, and announcements
+function getStreakInfo(userId) {
+  const user = getUser(userId);
+  if (!user) return { days: 0, tier: 0, bonus: 0, newTier: false };
+  
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const sevenDaysMs = 7 * oneDayMs;
+  const now = Date.now();
+  
+  // Get the pure calculation first
+  const info = calculateStreakInfo(userId);
+  const streakDays = info.days;
+  
+  // Recalculate currentTier from days (need the raw tier before expiration check)
+  let currentTier = 0;
+  if (streakDays >= 30) currentTier = 3;
+  else if (streakDays >= 14) currentTier = 2;
+  else if (streakDays >= 7) currentTier = 1;
+  
+  const storedTier = user.streak_tier || 0;
+  const tierReachedTime = user.streak_tier_reached || 0;
+  
+  // Check for Gold expiration (7 days at tier 3) → FULL STREAK RESET
+  if (currentTier === 3 && storedTier === 3 && tierReachedTime > 0) {
+    if (now - tierReachedTime >= sevenDaysMs) {
+      // Gold expired — reset entire streak
+      db.run('UPDATE users SET streak_tier = 0, streak_tier_reached = 0, streak_reset_time = ? WHERE user_id = ?', 
+        [now, userId]);
       saveDatabase();
-      return { days: streakDays, tier: 0, bonus: 0, expired: true, newTier: false };
+      return { days: 0, tier: 0, bonus: 0, expired: true, newTier: false };
     }
   }
   
@@ -365,7 +407,7 @@ function getStreakInfo(userId) {
     saveDatabase();
   }
   
-  return { days: streakDays, tier: currentTier, bonus, newTier };
+  return { days: streakDays, tier: currentTier, bonus: info.bonus, newTier };
 }
 
 // Get activity tier settings for a guild
@@ -512,11 +554,11 @@ function calculateStockPrice(userId, guildId = null) {
     recentActivityMultiplier = 1 + Math.min(recentMessages * 0.002, 0.60);
   }
   
-  // Get streak info (includes expiration logic)
-  const streakInfo = getStreakInfo(userId);
+  // Get streak info (pure calculation — no side effects)
+  const streakInfo = calculateStreakInfo(userId);
   const streakBonus = streakInfo.bonus;
   
-  // Base value grows permanently by +0.01 per message (handled in updateMessageCount)
+  // Base value grows permanently per message (rate configurable via admin panel, default 0.075)
   let price = user.base_value * recentActivityMultiplier * (1 + streakBonus);
 
   // Apply inactivity penalty if no chat in 3+ days
@@ -777,6 +819,7 @@ module.exports = {
   getPriceHistoryByTimeRange,
   calculateStockPrice,
   getStreakInfo,
+  calculateStreakInfo,
   getLeaderboard,
   getStockRank,
   getPortfolioRank,

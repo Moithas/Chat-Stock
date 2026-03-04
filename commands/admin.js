@@ -17,6 +17,7 @@ const adminSkills = require('./admin-skills');
 const adminItems = require('./admin-items');
 const adminDungeon = require('./admin-dungeon');
 const adminSYN = require('./admin-syn');
+const adminLuckyPenny = require('./admin-luckypenny');
 
 // ==================== MAIN DASHBOARD ====================
 async function showDashboard(interaction) {
@@ -58,6 +59,7 @@ async function showDashboard(interaction) {
         { label: 'Item Shop', value: 'items', emoji: '🛒', description: 'Shop items & effects' },
         { label: 'Dungeon', value: 'dungeon', emoji: '🏰', description: 'Solo dungeon crawl' },
         { label: 'SYN', value: 'syn', emoji: '🃏', description: 'Screw Your Neighbor card game' },
+        { label: 'Lucky Penny', value: 'luckypenny', emoji: '🪙', description: 'Buff/debuff roller' },
         { label: '⚠️ Reset Game', value: 'reset_game', emoji: '🔄', description: 'DANGER: Reset all player data' }
       )
   );
@@ -120,6 +122,7 @@ module.exports.handleAdminInteraction = async function(interaction) {
         case 'items': await adminItems.showItemsPanel(interaction, guildId); break;
         case 'dungeon': await adminDungeon.showDungeonPanel(interaction, guildId); break;
         case 'syn': await adminSYN.showSYNPanel(interaction, guildId); break;
+        case 'luckypenny': await adminLuckyPenny.showLuckyPennyPanel(interaction, guildId); break;
         case 'reset_game': await showResetGamePanel(interaction, guildId); break;
       }
       return;
@@ -140,6 +143,7 @@ module.exports.handleAdminInteraction = async function(interaction) {
     if (await adminItems.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Items'); return; }
     if (await adminDungeon.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Dungeon'); return; }
     if (await adminSYN.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by SYN'); return; }
+    if (await adminLuckyPenny.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by LuckyPenny'); return; }
     console.log('[Admin] No handler matched for:', interaction.customId);
 
     // Back to dashboard button

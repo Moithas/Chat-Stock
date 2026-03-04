@@ -952,6 +952,9 @@ async function spawnVault(guildId) {
     
     const message = await channel.send({ embeds: [embed], components: [row] });
     
+    // Record spawn time for reaction timing
+    const spawnTime = Date.now();
+    
     // Determine if there's a booby trap (30% chance) and which slot (1, 2, or 3)
     const hasBoobyTrap = Math.random() < 0.30;
     const boobyTrapSlot = hasBoobyTrap ? Math.floor(Math.random() * 3) + 1 : null;
@@ -961,10 +964,12 @@ async function spawnVault(guildId) {
       guildId,
       collectors: new Set(),
       rewards: [],
+      lateClickers: [], // 4th and 5th clickers with reaction times
       minReward: settings.minReward,
       maxReward: settings.maxReward,
       boobyTrapSlot: boobyTrapSlot,
-      boobyTrapTriggered: false
+      boobyTrapTriggered: false,
+      spawnTime
     });
     
     // Set up button collector
@@ -976,13 +981,25 @@ async function spawnVault(guildId) {
       const vaultData = activeVaults.get(message.id);
       if (!vaultData) return;
       
-      // Check if user already claimed
-      if (vaultData.collectors.has(interaction.user.id)) {
-        return interaction.reply({ content: '❌ You already claimed from this vault!', ephemeral: true });
+      const reactionMs = Date.now() - vaultData.spawnTime;
+      const reactionDisplay = reactionMs < 1000 
+        ? `${reactionMs}ms` 
+        : `${(reactionMs / 1000).toFixed(2)}s`;
+      
+      // Check if user already claimed or was late
+      if (vaultData.collectors.has(interaction.user.id) || vaultData.lateClickers.some(l => l.userId === interaction.user.id)) {
+        return interaction.reply({ content: '❌ You already clicked this vault!', ephemeral: true });
       }
       
-      // Check if all 3 spots taken
+      // 4th and 5th clickers — record reaction time but deny reward
       if (vaultData.collectors.size >= 3) {
+        if (vaultData.lateClickers.length < 5) {
+          vaultData.lateClickers.push({ userId: interaction.user.id, username: interaction.user.username, reactionMs, reactionDisplay });
+          // Show them the 3rd place time so they can compare
+          const thirdPlace = vaultData.rewards[2];
+          const thirdTimeStr = thirdPlace ? ` (3rd place was ⏱️ **${thirdPlace.reactionDisplay}**)` : '';
+          return interaction.reply({ content: `❌ **${interaction.user.username}** was too late! ⏱️ **${reactionDisplay}**${thirdTimeStr}` });
+        }
         return interaction.reply({ content: '❌ The vault is empty!', ephemeral: true });
       }
       
@@ -996,7 +1013,7 @@ async function spawnVault(guildId) {
         
         // Generate penalty (same range as reward)
         const penalty = Math.floor(Math.random() * (vaultData.maxReward - vaultData.minReward + 1)) + vaultData.minReward;
-        vaultData.rewards.push({ userId: interaction.user.id, username: interaction.user.username, reward: -penalty, isTrap: true });
+        vaultData.rewards.push({ userId: interaction.user.id, username: interaction.user.username, reward: -penalty, isTrap: true, reactionMs, reactionDisplay });
         
         // Take money
         try {
@@ -1007,12 +1024,12 @@ async function spawnVault(guildId) {
         }
         
         await interaction.reply({ 
-          content: `💥 **BOOBY TRAP!** ${interaction.user.username} triggered a security system and lost **${penalty.toLocaleString()}** ${CURRENCY}! 🚨`
+          content: `💥 **BOOBY TRAP!** ${interaction.user.username} triggered a security system and lost **${penalty.toLocaleString()}** ${CURRENCY}! 🚨 ⏱️ **${reactionDisplay}**`
         });
       } else {
         // Normal reward
         const reward = Math.floor(Math.random() * (vaultData.maxReward - vaultData.minReward + 1)) + vaultData.minReward;
-        vaultData.rewards.push({ userId: interaction.user.id, username: interaction.user.username, reward });
+        vaultData.rewards.push({ userId: interaction.user.id, username: interaction.user.username, reward, reactionMs, reactionDisplay });
         
         try {
           await addMoney(guildId, interaction.user.id, reward, 'Vault');
@@ -1021,7 +1038,7 @@ async function spawnVault(guildId) {
         }
         
         await interaction.reply({ 
-          content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${CURRENCY} from the vault!`
+          content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${CURRENCY} from the vault! ⏱️ **${reactionDisplay}**`
         });
       }
       
@@ -1053,13 +1070,26 @@ async function spawnVault(guildId) {
       let resultsText = '';
       if (vaultData && vaultData.rewards.length > 0) {
         resultsText = vaultData.rewards.map((r, i) => {
+          const timeStr = r.reactionDisplay ? ` ⏱️ ${r.reactionDisplay}` : '';
           if (r.isTrap) {
-            return `${i + 1}. 💥 **${r.username}** - ${r.reward.toLocaleString()} ${CURRENCY} (BOOBY TRAP!)`;
+            return `${i + 1}. 💥 **${r.username}** — ${r.reward.toLocaleString()} ${CURRENCY} (BOOBY TRAP!)${timeStr}`;
           }
-          return `${i + 1}. 💰 **${r.username}** - +${r.reward.toLocaleString()} ${CURRENCY}`;
+          return `${i + 1}. 💰 **${r.username}** — +${r.reward.toLocaleString()} ${CURRENCY}${timeStr}`;
         }).join('\n');
       } else {
         resultsText = 'Nobody claimed the vault!';
+      }
+      
+      // Add late clickers with timestamps so they can see they were slower
+      if (vaultData && vaultData.lateClickers.length > 0) {
+        resultsText += '\n\n**Too Slow:**';
+        for (const late of vaultData.lateClickers) {
+          const behindMs = vaultData.rewards.length >= 3 
+            ? late.reactionMs - vaultData.rewards[2].reactionMs 
+            : 0;
+          const behindStr = behindMs > 0 ? ` (+${behindMs < 1000 ? `${behindMs}ms` : `${(behindMs / 1000).toFixed(2)}s`} behind 3rd)` : '';
+          resultsText += `\n🐌 **${late.username}** — ⏱️ ${late.reactionDisplay}${behindStr}`;
+        }
       }
       
       const endEmbed = new EmbedBuilder()

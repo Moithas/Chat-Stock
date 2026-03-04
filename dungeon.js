@@ -22,21 +22,21 @@ const defaultSettings = {
 
 // Enemy types with themed names and move tendencies
 const ENEMY_TYPES = [
-  { name: 'Script Kiddie', emoji: '👶', bias: { strike: 40, takedown: 30, choke: 20, grapple: 10 } },
-  { name: 'Rogue Bot', emoji: '🤖', bias: { strike: 25, takedown: 25, choke: 25, grapple: 25 } },
-  { name: 'Corrupt Firewall', emoji: '🔥', bias: { strike: 20, takedown: 40, choke: 30, grapple: 10 } },
-  { name: 'Data Wraith', emoji: '👻', bias: { strike: 15, takedown: 20, choke: 45, grapple: 20 } },
-  { name: 'Malware Golem', emoji: '🧟', bias: { strike: 35, takedown: 35, choke: 10, grapple: 20 } },
-  { name: 'Phishing Phantom', emoji: '🎣', bias: { strike: 20, takedown: 15, choke: 40, grapple: 25 } },
-  { name: 'Ransomware Demon', emoji: '😈', bias: { strike: 30, takedown: 25, choke: 30, grapple: 15 } },
-  { name: 'Trojan Sentinel', emoji: '🛡️', bias: { strike: 20, takedown: 30, choke: 15, grapple: 35 } },
-  { name: 'Zero-Day Specter', emoji: '💀', bias: { strike: 25, takedown: 20, choke: 40, grapple: 15 } },
-  { name: 'DDoS Swarm', emoji: '🐝', bias: { strike: 45, takedown: 25, choke: 20, grapple: 10 } },
-  { name: 'Cryptojacker', emoji: '⛏️', bias: { strike: 20, takedown: 30, choke: 25, grapple: 25 } },
-  { name: 'Worm Cluster', emoji: '🪱', bias: { strike: 30, takedown: 20, choke: 30, grapple: 20 } },
-  { name: 'Rootkit Shade', emoji: '🌑', bias: { strike: 15, takedown: 25, choke: 35, grapple: 25 } },
-  { name: 'Keylogger Stalker', emoji: '👁️', bias: { strike: 35, takedown: 15, choke: 35, grapple: 15 } },
-  { name: 'Botnet Overlord', emoji: '👑', bias: { strike: 25, takedown: 30, choke: 30, grapple: 15 } }
+  { name: 'Script Kiddie', emoji: '👶', bias: { exploit: 30, corrupt: 10, isolate: 10, spam: 35, override: 15 } },
+  { name: 'Rogue Bot', emoji: '🤖', bias: { exploit: 20, corrupt: 20, isolate: 20, spam: 20, override: 20 } },
+  { name: 'Corrupt Firewall', emoji: '🔥', bias: { exploit: 15, corrupt: 35, isolate: 20, spam: 10, override: 20 } },
+  { name: 'Data Wraith', emoji: '👻', bias: { exploit: 10, corrupt: 15, isolate: 40, spam: 15, override: 20 } },
+  { name: 'Malware Golem', emoji: '🧟', bias: { exploit: 30, corrupt: 25, isolate: 10, spam: 20, override: 15 } },
+  { name: 'Phishing Phantom', emoji: '🎣', bias: { exploit: 15, corrupt: 10, isolate: 30, spam: 25, override: 20 } },
+  { name: 'Ransomware Demon', emoji: '😈', bias: { exploit: 20, corrupt: 30, isolate: 15, spam: 20, override: 15 } },
+  { name: 'Trojan Sentinel', emoji: '🛡️', bias: { exploit: 15, corrupt: 15, isolate: 25, spam: 15, override: 30 } },
+  { name: 'Zero-Day Specter', emoji: '💀', bias: { exploit: 35, corrupt: 20, isolate: 15, spam: 15, override: 15 } },
+  { name: 'DDoS Swarm', emoji: '🐝', bias: { exploit: 10, corrupt: 10, isolate: 10, spam: 50, override: 20 } },
+  { name: 'Cryptojacker', emoji: '⛏️', bias: { exploit: 20, corrupt: 25, isolate: 20, spam: 15, override: 20 } },
+  { name: 'Worm Cluster', emoji: '🪱', bias: { exploit: 20, corrupt: 20, isolate: 15, spam: 30, override: 15 } },
+  { name: 'Rootkit Shade', emoji: '🌑', bias: { exploit: 10, corrupt: 15, isolate: 35, spam: 15, override: 25 } },
+  { name: 'Keylogger Stalker', emoji: '👁️', bias: { exploit: 30, corrupt: 15, isolate: 20, spam: 25, override: 10 } },
+  { name: 'Botnet Overlord', emoji: '👑', bias: { exploit: 20, corrupt: 25, isolate: 20, spam: 15, override: 20 } }
 ];
 
 // Floor flavor text
@@ -48,40 +48,72 @@ const FLOOR_INTROS = [
   "The system's defenses intensify around you..."
 ];
 
-// Damage values (same as fight system)
+// Damage values
 const DAMAGE = {
-  STRIKE: 15,
-  TAKEDOWN: 20,
-  CHOKE: 25,
-  GRAPPLE_HEAL: 25,
-  DOUBLE_GRAPPLE_HEAL: 5
+  SPAM: 15,
+  ISOLATE: 15,
+  OVERRIDE: 20,
+  EXPLOIT: 20,
+  CORRUPT: 25,
+  RESTORE_HEAL: 25,
+  DOUBLE_RESTORE_HEAL: 5
 };
 
-// Move matrix (same as fight system)
+// Move matrix — 5-way cycle
+// Exploit > Corrupt, Isolate | loses to Spam, Override
+// Corrupt > Isolate, Spam | loses to Override, Exploit
+// Isolate > Spam, Override | loses to Exploit, Corrupt
+// Spam > Override, Exploit | loses to Isolate, Corrupt
+// Override > Exploit, Corrupt | loses to Spam, Isolate
+// Restore heals but takes damage from any attack
 const MOVE_MATRIX = {
-  strike: {
-    strike: { winner: 'none', damage: 0 },
-    takedown: { winner: 'attacker', damage: DAMAGE.STRIKE },
-    choke: { winner: 'defender', damage: DAMAGE.CHOKE },
-    grapple: { winner: 'both', attackerDamage: DAMAGE.STRIKE, defenderHeal: DAMAGE.GRAPPLE_HEAL }
+  exploit: {
+    exploit:  { winner: 'none', damage: 0 },
+    corrupt:  { winner: 'attacker', damage: DAMAGE.EXPLOIT },
+    isolate:  { winner: 'attacker', damage: DAMAGE.EXPLOIT },
+    spam:     { winner: 'defender', damage: DAMAGE.SPAM },
+    override: { winner: 'defender', damage: DAMAGE.OVERRIDE },
+    restore:  { winner: 'both', attackerDamage: DAMAGE.EXPLOIT, defenderHeal: DAMAGE.RESTORE_HEAL }
   },
-  takedown: {
-    strike: { winner: 'defender', damage: DAMAGE.STRIKE },
-    takedown: { winner: 'none', damage: 0 },
-    choke: { winner: 'attacker', damage: DAMAGE.TAKEDOWN },
-    grapple: { winner: 'both', attackerDamage: DAMAGE.TAKEDOWN, defenderHeal: DAMAGE.GRAPPLE_HEAL }
+  corrupt: {
+    exploit:  { winner: 'defender', damage: DAMAGE.EXPLOIT },
+    corrupt:  { winner: 'none', damage: 0 },
+    isolate:  { winner: 'attacker', damage: DAMAGE.CORRUPT },
+    spam:     { winner: 'attacker', damage: DAMAGE.CORRUPT },
+    override: { winner: 'defender', damage: DAMAGE.OVERRIDE },
+    restore:  { winner: 'both', attackerDamage: DAMAGE.CORRUPT, defenderHeal: DAMAGE.RESTORE_HEAL }
   },
-  choke: {
-    strike: { winner: 'attacker', damage: DAMAGE.CHOKE },
-    takedown: { winner: 'defender', damage: DAMAGE.TAKEDOWN },
-    choke: { winner: 'none', damage: 0 },
-    grapple: { winner: 'both', attackerDamage: DAMAGE.CHOKE, defenderHeal: DAMAGE.GRAPPLE_HEAL }
+  isolate: {
+    exploit:  { winner: 'defender', damage: DAMAGE.EXPLOIT },
+    corrupt:  { winner: 'defender', damage: DAMAGE.CORRUPT },
+    isolate:  { winner: 'none', damage: 0 },
+    spam:     { winner: 'attacker', damage: DAMAGE.ISOLATE },
+    override: { winner: 'attacker', damage: DAMAGE.ISOLATE },
+    restore:  { winner: 'both', attackerDamage: DAMAGE.ISOLATE, defenderHeal: DAMAGE.RESTORE_HEAL }
   },
-  grapple: {
-    strike: { winner: 'both', defenderDamage: DAMAGE.STRIKE, attackerHeal: DAMAGE.GRAPPLE_HEAL },
-    takedown: { winner: 'both', defenderDamage: DAMAGE.TAKEDOWN, attackerHeal: DAMAGE.GRAPPLE_HEAL },
-    choke: { winner: 'both', defenderDamage: DAMAGE.CHOKE, attackerHeal: DAMAGE.GRAPPLE_HEAL },
-    grapple: { winner: 'stalemate', heal: DAMAGE.DOUBLE_GRAPPLE_HEAL }
+  spam: {
+    exploit:  { winner: 'attacker', damage: DAMAGE.SPAM },
+    corrupt:  { winner: 'defender', damage: DAMAGE.CORRUPT },
+    isolate:  { winner: 'defender', damage: DAMAGE.ISOLATE },
+    spam:     { winner: 'none', damage: 0 },
+    override: { winner: 'attacker', damage: DAMAGE.SPAM },
+    restore:  { winner: 'both', attackerDamage: DAMAGE.SPAM, defenderHeal: DAMAGE.RESTORE_HEAL }
+  },
+  override: {
+    exploit:  { winner: 'attacker', damage: DAMAGE.OVERRIDE },
+    corrupt:  { winner: 'attacker', damage: DAMAGE.OVERRIDE },
+    isolate:  { winner: 'defender', damage: DAMAGE.ISOLATE },
+    spam:     { winner: 'defender', damage: DAMAGE.SPAM },
+    override: { winner: 'none', damage: 0 },
+    restore:  { winner: 'both', attackerDamage: DAMAGE.OVERRIDE, defenderHeal: DAMAGE.RESTORE_HEAL }
+  },
+  restore: {
+    exploit:  { winner: 'both', defenderDamage: DAMAGE.EXPLOIT, attackerHeal: DAMAGE.RESTORE_HEAL },
+    corrupt:  { winner: 'both', defenderDamage: DAMAGE.CORRUPT, attackerHeal: DAMAGE.RESTORE_HEAL },
+    isolate:  { winner: 'both', defenderDamage: DAMAGE.ISOLATE, attackerHeal: DAMAGE.RESTORE_HEAL },
+    spam:     { winner: 'both', defenderDamage: DAMAGE.SPAM, attackerHeal: DAMAGE.RESTORE_HEAL },
+    override: { winner: 'both', defenderDamage: DAMAGE.OVERRIDE, attackerHeal: DAMAGE.RESTORE_HEAL },
+    restore:  { winner: 'stalemate', heal: DAMAGE.DOUBLE_RESTORE_HEAL }
   }
 };
 
@@ -297,38 +329,40 @@ function generateEnemy(floor, settings) {
   };
 }
 
-function getEnemyMove(enemy, grappleCooldown = 0) {
-  // If grapple is on cooldown, redistribute its weight to other moves
-  const { strike, takedown, choke, grapple } = enemy.bias;
-  let s = strike, t = takedown, c = choke;
+function getEnemyMove(enemy, restoreCooldown = 0) {
+  const { exploit, corrupt, isolate, spam, override } = enemy.bias;
+  // Enemy also has a small chance to use restore (not in bias — fixed 8% weight)
+  const restoreWeight = 8;
+  const moves = [
+    { name: 'exploit', weight: exploit },
+    { name: 'corrupt', weight: corrupt },
+    { name: 'isolate', weight: isolate },
+    { name: 'spam', weight: spam },
+    { name: 'override', weight: override }
+  ];
 
-  if (grappleCooldown > 0) {
-    // Distribute grapple weight proportionally among other moves
-    const otherTotal = s + t + c;
-    if (otherTotal > 0) {
-      s += grapple * (s / otherTotal);
-      t += grapple * (t / otherTotal);
-      c += grapple * (c / otherTotal);
-    } else {
-      s = t = c = 100 / 3;
-    }
+  if (restoreCooldown <= 0) {
+    moves.push({ name: 'restore', weight: restoreWeight });
   }
 
-  const total = s + t + c + (grappleCooldown > 0 ? 0 : grapple);
-  const roll = Math.random() * total;
+  const total = moves.reduce((sum, m) => sum + m.weight, 0);
+  let roll = Math.random() * total;
 
-  if (roll < s) return 'strike';
-  if (roll < s + t) return 'takedown';
-  if (roll < s + t + c) return 'choke';
-  return 'grapple';
+  for (const m of moves) {
+    roll -= m.weight;
+    if (roll <= 0) return m.name;
+  }
+  return moves[0].name;
 }
 
 // Display names for moves
 const MOVE_NAMES = {
-  strike: 'SLASH',
-  takedown: 'TACKLE',
-  choke: 'SUBDUE',
-  grapple: 'HEAL'
+  exploit: 'EXPLOIT',
+  corrupt: 'CORRUPT',
+  isolate: 'ISOLATE',
+  spam: 'SPAM',
+  override: 'OVERRIDE',
+  restore: 'RESTORE'
 };
 
 // ==================== COMBAT RESOLUTION ====================
@@ -355,7 +389,7 @@ function resolveRound(playerMove, enemyMove) {
 
   if (interaction.winner === 'both') {
     // One attacked, one healed
-    const playerAttacked = playerMove !== 'grapple';
+    const playerAttacked = playerMove !== 'restore';
     if (playerAttacked) {
       return {
         playerDamage: 0,

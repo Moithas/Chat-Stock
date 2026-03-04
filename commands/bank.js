@@ -10,6 +10,7 @@ const {
   getBondConfig,
   purchaseBond,
   recordLoanPayment,
+  getEffectiveNextPayment,
   getUserLoanHistory,
   getBondHistory,
   getTotalBondsCollected,
@@ -44,6 +45,7 @@ module.exports = {
     .setDescription('Access bank services - loans, bonds, and more'),
 
   async execute(interaction) {
+    await interaction.deferReply({ flags: 64 });
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     
@@ -118,14 +120,19 @@ async function showBankPanel(interaction, guildId, userId, isUpdate = false) {
   if (activeLoan) {
     const remaining = activeLoan.total_owed - activeLoan.amount_paid;
     const nextPayment = activeLoan.next_payment_time;
+    const effectivePayment = getEffectiveNextPayment(activeLoan);
     const progressPercent = Math.round((activeLoan.amount_paid / activeLoan.total_owed) * 100);
     const progressBar = createProgressBar(progressPercent);
+    
+    const paymentDisplay = effectivePayment < activeLoan.payment_amount
+      ? `~~${activeLoan.payment_amount.toLocaleString()}~~ **${effectivePayment.toLocaleString()}** ${CURRENCY} (${activeLoan.payment_interval})`
+      : `${effectivePayment.toLocaleString()} ${CURRENCY} (${activeLoan.payment_interval})`;
     
     embed.addFields({
       name: '💳 Active Loan',
       value: [
         `**Remaining:** ${remaining.toLocaleString()} ${CURRENCY}`,
-        `**Payment:** ${activeLoan.payment_amount.toLocaleString()} ${CURRENCY} (${activeLoan.payment_interval})`,
+        `**Payment:** ${paymentDisplay}`,
         `**Next Payment:** <t:${Math.floor(nextPayment / 1000)}:R>`,
         `**Progress:** ${progressBar} ${progressPercent}%`,
         activeLoan.missed_payments > 0 ? `⚠️ **Missed Payments:** ${activeLoan.missed_payments}` : ''
@@ -386,18 +393,25 @@ async function showPayLoanPanel(interaction, guildId, userId) {
   
   const balance = await getBalance(guildId, userId);
   const remaining = loan.total_owed - loan.amount_paid;
+  const effectivePayment = getEffectiveNextPayment(loan);
   const progressPercent = Math.round((loan.amount_paid / loan.total_owed) * 100);
   const progressBar = createProgressBar(progressPercent);
+  
+  const prepaidNote = effectivePayment < loan.payment_amount 
+    ? effectivePayment === 0 
+      ? '\n✅ *Next payment fully covered by prepayment!*' 
+      : `\n💡 *Reduced from ${loan.payment_amount.toLocaleString()} by prepayment*`
+    : '';
   
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle('💳 Loan Payment')
-    .setDescription('Choose how much to pay toward your loan.')
+    .setDescription(`Choose how much to pay toward your loan.${prepaidNote}`)
     .addFields(
       { name: '💰 Your Bank Balance', value: `${balance.bank.toLocaleString()} ${CURRENCY}`, inline: true },
       { name: '📊 Remaining Balance', value: `${remaining.toLocaleString()} ${CURRENCY}`, inline: true },
       { name: '\u200B', value: '\u200B', inline: true },
-      { name: '📅 Next Payment Due', value: `${loan.payment_amount.toLocaleString()} ${CURRENCY} <t:${Math.floor(loan.next_payment_time / 1000)}:R>`, inline: true },
+      { name: '📅 Next Payment Due', value: `${effectivePayment.toLocaleString()} ${CURRENCY} <t:${Math.floor(loan.next_payment_time / 1000)}:R>`, inline: true },
       { name: '📈 Progress', value: `${progressBar} ${progressPercent}%`, inline: true }
     )
     .setFooter({ text: 'Payments are deducted from your bank balance' });
@@ -405,9 +419,9 @@ async function showPayLoanPanel(interaction, guildId, userId) {
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('bank_pay_scheduled')
-      .setLabel(`Pay Scheduled (${loan.payment_amount.toLocaleString()})`)
+      .setLabel(`Pay Scheduled (${effectivePayment.toLocaleString()})`)
       .setStyle(ButtonStyle.Primary)
-      .setDisabled(balance.bank < loan.payment_amount),
+      .setDisabled(effectivePayment === 0 || balance.bank < effectivePayment),
     new ButtonBuilder()
       .setCustomId('bank_pay_full')
       .setLabel(`Pay in Full (${remaining.toLocaleString()})`)
@@ -945,7 +959,11 @@ async function handleBankInteraction(interaction) {
       return interaction.reply({ content: '❌ No active loan found.', flags: 64 });
     }
     
-    await processPayment(interaction, guildId, userId, loan, loan.payment_amount);
+    const effectiveAmount = getEffectiveNextPayment(loan);
+    if (effectiveAmount <= 0) {
+      return interaction.reply({ content: '✅ Your next payment is already covered by prepayment!', flags: 64 });
+    }
+    await processPayment(interaction, guildId, userId, loan, effectiveAmount);
   }
 
   // Pay full amount

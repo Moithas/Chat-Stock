@@ -22,13 +22,21 @@ const helpPages = {
       {
         name: '💰 Ways to Earn Money',
         value: 
-          `• **Work** - Safe, steady income\n` +
-          `• **Slut** - Higher risk/reward\n` +
-          `• **Crime** - Highest risk/reward\n` +
-          `• **Gambling** - Blackjack, Roulette, Poker & more\n` +
+          `• **Work / Crime** - Steady or risky income\n` +
+          `• **Lucky Penny** - Roll for random buffs, debuffs, or cash\n` +
+          `• **Gambling** - Blackjack, Roulette, Poker, SYN & more\n` +
           `• **Stock Trading** - Buy low, sell high\n` +
-          `• **Rob/Hack** - Steal from other players\n` +
-          `• **Dividends** - Own stock shares for daily payouts`,
+          `• **Rob / Hack** - Steal from other players\n` +
+          `• **Dividends** - Own stock shares for daily payouts\n` +
+          `• **Dungeon** - Battle monsters for gold rewards`,
+        inline: false
+      },
+      {
+        name: '🏆 Tracking Progress',
+        value:
+          `• \`/leaderboard\` - See rankings for stocks, portfolios, balances & fights\n` +
+          `• \`/stock\` **Price** - View any user's stock, chart & chat streak\n` +
+          `• **Dashboard** - Auto-updating market board in the ticker channel`,
         inline: false
       },
       {
@@ -48,11 +56,21 @@ const helpPages = {
         name: '💬 How Stock Prices Work',
         value: 
           `Your stock price is calculated from:\n` +
-          `• **Base Value**: 100 ${CURRENCY}\n` +
-          `• **Activity**: Messages in the last 15 days boost price\n` +
-          `• **Activity Tiers**: First msgs/day = full value, then diminishing returns\n` +
-          `• **Demand**: More shares owned by others = higher demand\n` +
-          `• **Streak Bonus**: Daily activity streaks boost price`,
+          `• **Base Value**: Grows permanently with each message\n` +
+          `• **Activity Tiers**: Daily messages boost price with diminishing returns\n` +
+          `• **Demand**: More shares owned by others = higher demand multiplier\n` +
+          `• **Chat Streak**: Consecutive active days grant bonus tiers\n` +
+          `• **Inactivity**: 3+ days without chatting applies a decay penalty`,
+        inline: false
+      },
+      {
+        name: '🔥 Chat Streak Tiers',
+        value:
+          `Consecutive days of activity unlock bonuses:\n` +
+          `• **7 days** — 🔥 Bronze Streak (+2% stock price)\n` +
+          `• **14 days** — 🔥🔥 Silver Streak (+4% stock price)\n` +
+          `• **30 days** — 🔥🔥🔥 Gold Streak (+7% stock price)\n` +
+          `Gold expires after 7 days and your streak resets to 0.\nMissing a full day breaks your streak!`,
         inline: false
       },
       {
@@ -60,13 +78,13 @@ const helpPages = {
         value: 
           `Use \`/stock\` to open the **Stock Panel** - your hub for all trading!\n\n` +
           `**Panel Features:**\n` +
-          `• 📈 **Price** - View any user's stock price & chart\n` +
+          `• 📈 **Price** - View any user's stock price, chart & streak\n` +
           `• 💰 **Buy** - Purchase shares of a user\n` +
           `• 💵 **Sell** - Sell shares you own\n` +
           `• 📁 **Portfolio** - View your or others' holdings\n` +
           `• ✂️ **Split** - Split your stock when price is high\n` +
-          `• 📜 **History** - See Dividend and Bonus History\n`+
-          `• 👥 **Shareholders** - See who owns shares of your stock or another stock`,
+          `• 📜 **History** - See Dividend and Bonus History\n` +
+          `• 👥 **Shareholders** - See who owns shares of your stock`,
         inline: false
       },
       {
@@ -79,12 +97,28 @@ const helpPages = {
         inline: false
       },
       {
+        name: '💵 Dividends & CEO Bonus',
+        value:
+          `• **Dividends**: Shareholders receive periodic payouts based on stock price\n` +
+          `• **CEO Bonus**: You earn 5% of total dividends your stock pays out\n` +
+          `• Payout time is set by admins — check the ticker for announcements`,
+        inline: false
+      },
+      {
+        name: '📰 Market Events & Dashboard',
+        value: 
+          `• **Market Events** trigger after a number of server messages\n` +
+          `• Events temporarily boost or crash all stock prices (±3–30%)\n` +
+          `• The **Dashboard** auto-updates in the ticker channel with top stocks, gainers/losers & market trends`,
+        inline: false
+      },
+      {
         name: '💡 Trading Tips',
         value: 
           `• Buy stocks of consistently active chatters\n` +
           `• Watch the dashboard for top gainers/losers\n` +
-          `• Market events can temporarily boost/crash sectors\n` +
-          `• Dividends pay out based on shares you own`,
+          `• Check a user's chat streak before buying — streaks boost price\n` +
+          `• Use \`/leaderboard\` to find top stocks and portfolios`,
         inline: false
       }
     ]
@@ -109,7 +143,8 @@ const helpPages = {
           `\`/balance\` - Check your cash & bank balance\n` +
           `\`/deposit [amount|all]\` - Move cash to bank\n` +
           `\`/withdraw [amount|all]\` - Move bank to cash\n` +
-          `\`/give @user [amount|all]\` - Send money to someone`,
+          `\`/give @user [amount|all]\` - Send money to someone\n` +
+          `\`/bank\` - Open the full banking panel`,
         inline: false
       },
       {
@@ -118,8 +153,8 @@ const helpPages = {
           `Need quick cash? Take out a loan!\n` +
           `• Borrow money with interest\n` +
           `• Make payments on schedule\n` +
-          `• Missing payments has consequences\n`+
-          `• Loans may have requirments like level or propertyto qualify`,
+          `• Missing payments has consequences\n` +
+          `• Loans may have requirements like level or property to qualify`,
         inline: false
       },
       {
@@ -130,6 +165,33 @@ const helpPages = {
           `• Bonds come in multiple tiers with varying rates\n` +
           `• You can only have one active bond at a time`,
         inline: false
+      },
+      {
+        name: '📊 Credit Score',
+        value:
+          `Your credit score is tracked based on financial behavior.\n` +
+          `• Affects your loan eligibility and interest rates\n` +
+          `• Good credit unlocks better loan terms\n` +
+          `• View your score in the \`/bank\` panel`,
+        inline: false
+      },
+      {
+        name: '🛡️ Rob Immunity',
+        value:
+          `Purchase protection from being robbed.\n` +
+          `• Multiple tiers of immunity available\n` +
+          `• Higher tiers last longer\n` +
+          `• Buy from the \`/bank\` panel`,
+        inline: false
+      },
+      {
+        name: '💰 Wealth Tax',
+        value:
+          `A periodic tax on total net worth (cash + stocks + properties).\n` +
+          `• Progressive tiers — higher net worth = higher rate\n` +
+          `• Tax collected goes to the lottery jackpot\n` +
+          `• Check your estimated tax in the \`/bank\` panel`,
+        inline: false
       }
     ]
   },
@@ -137,10 +199,10 @@ const helpPages = {
   income: {
     title: '💼 Income Commands',
     color: 0xf39c12,
-    description: `Earn money through work, with varying risk/reward levels.`,
+    description: `Earn money through work and various income sources. Use \`/income\` to open the panel.`,
     fields: [
       {
-        name: '💼 /income work',
+        name: '💼 Work',
         value: 
           `**Safe & Reliable**\n` +
           `• Guaranteed payout every time\n` +
@@ -149,16 +211,7 @@ const helpPages = {
         inline: true
       },
       {
-        name: '💋 /income slut',
-        value: 
-          `**Medium Risk**\n` +
-          `• Higher potential payout\n` +
-          `• Chance of getting caught (fine)\n` +
-          `• Fines can't exceed your balance`,
-        inline: true
-      },
-      {
-        name: '🔫 /income crime',
+        name: '🔫 Crime',
         value: 
           `**High Risk**\n` +
           `• Highest potential rewards\n` +
@@ -167,11 +220,35 @@ const helpPages = {
         inline: true
       },
       {
+        name: '🪙 Lucky Penny',
+        value:
+          `**Random Roller**\n` +
+          `• Roll for a random outcome\n` +
+          `• **Buff**: Temporary boost to various stats\n` +
+          `• **Debuff**: Temporary penalty\n` +
+          `• **Cash**: Instant currency reward\n` +
+          `• **Nothing**: Shorter cooldown`,
+        inline: true
+      },
+      {
+        name: '🪙 Lucky Penny Effects',
+        value:
+          `Buffs/debuffs can affect:\n` +
+          `• Work payout, Hack/Rob success rates\n` +
+          `• Hack/Rob cooldowns and fines\n` +
+          `• Hack/Rob XP earned\n` +
+          `• Your personal stock price\n` +
+          `Effects are temporary and show in relevant commands.`,
+        inline: false
+      },
+      {
         name: '📈 Collect',
         value: 
-          `Collect earns income from your level on the server.\n` +
-          `Bonds, Passive income from stocks, and Server Booster bonus are collected here as well.\n` +
-          `All income sources have a cooldown between uses. Refer to the income panel to see details.`,
+          `\`/income collect\` gathers all passive income:\n` +
+          `• **Stock Bonus** — Income from your stock value & holders\n` +
+          `• **Bond Interest** — From your active savings bond\n` +
+          `• **Role Income** — Server Booster and other role bonuses\n` +
+          `All income sources have independent cooldowns.`,
         inline: false
       }
     ]
@@ -224,11 +301,21 @@ const helpPages = {
         inline: true
       },
       {
-        name: '🎰 /scratch',
+        name: '🃏 /syn [bet]',
+        value:
+          `Screw Your Neighbor (multiplayer).\n` +
+          `• Avoid having the lowest card\n` +
+          `• Trade cards with your neighbor\n` +
+          `• Last player standing wins!`,
+        inline: true
+      },
+      {
+        name: '🎰 /scratch & /scratcher',
         value: 
           `Buy and scratch lottery tickets!\n` +
-          `• Match symbols to win\n` +
-          `• Different ticket types available`,
+          `• \`/scratcher\` — Full scratch card shop & panel\n` +
+          `• \`/scratch\` — Quick scratch game\n` +
+          `• Match symbols to win prizes`,
         inline: true
       },
       {
@@ -236,8 +323,8 @@ const helpPages = {
         value: 
           `Server-wide lottery drawings.\n` +
           `• Buy tickets for a chance to win the pot\n` +
-          `• Drawings happen on schedule`,
-        inline: false
+          `• Funded by wealth tax collections`,
+        inline: true
       }
     ]
   },
@@ -263,10 +350,10 @@ const helpPages = {
         value: 
           `Attempt to hack into someone's **bank account**.\n` +
           `• Targets banked money (more lucrative)\n` +
-          `• Victim can deply virus and counter-hack\n` +
+          `• Victim can deploy virus and counter-hack\n` +
           `• Train your hack skill to improve odds\n` +
           `• After an attempted hack, the hacker goes on a cooldown.\n` +
-          `• After succefully being hacked, the victim goes on a cooldown where they can't be hacked again for a period of time.`,
+          `• After being hacked, the victim has temporary immunity.`,
         inline: false
       },
       {
@@ -282,6 +369,7 @@ const helpPages = {
         name: '🛡️ Protection',
         value: 
           `• Keep money in the bank (safe from /rob)\n` +
+          `• Purchase **Rob Immunity** from the \`/bank\` panel\n` +
           `• Watch for hack attempts on your bank\n` +
           `• Trace attackers for a revenge bonus\n` +
           `• When someone Robs or Hacks, act quickly!`,
@@ -359,9 +447,9 @@ const helpPages = {
   },
   
   fight: {
-    title: '🥊 Fight System',
+    title: '🥊 Fight & Dungeon',
     color: 0xff5722,
-    description: `Challenge other players to fights and wager money!`,
+    description: `Challenge other players to fights or enter the dungeon solo!`,
     fields: [
       {
         name: '🥊 /fight @user [wager]',
@@ -369,15 +457,76 @@ const helpPages = {
           `Challenge someone to a fight!\n` +
           `• Both players wager money\n` +
           `• Winner takes the pot\n` +
-          `• Outcome based on various factors`,
+          `• Fights are turn-based with multiple attack types`,
         inline: false
       },
       {
-        name: '⚔️ Fight Mechanics',
+        name: '⚔️ Fight Moves (3-Way Cycle)',
         value: 
-          `• Fights are turn-based\n` +
-          `• Watch for patterns in attacks\n` +
-          `• Don't bet more than you can afford to lose!`,
+          `**👊 Strike** beats 🤼 Takedown (15 dmg)\n` +
+          `**🤼 Takedown** beats 🤝 Choke (20 dmg)\n` +
+          `**🤝 Choke** beats 👊 Strike (25 dmg)\n` +
+          `**💚 Grapple** — Heal 25 HP, but take damage from any attack. Has a cooldown.\n` +
+          `Same move vs same move = stalemate (no damage)`,
+        inline: false
+      },
+      {
+        name: '🏰 /dungeon',
+        value:
+          `Solo PvE dungeon crawl through 5 floors!\n` +
+          `• Battle progressively harder NPC enemies\n` +
+          `• Rewards scale per floor cleared\n` +
+          `• **Escape** after any floor to keep your earnings\n` +
+          `• **Death** = lose 50% of earned earnings\n` +
+          `• Has a cooldown between runs`,
+        inline: false
+      },
+      {
+        name: '⚔️ Dungeon Moves (5-Way Cycle)',
+        value:
+          `**💥 Exploit** beats Corrupt & Isolate | loses to Spam & Override\n` +
+          `**☠️ Corrupt** beats Isolate & Spam | loses to Override & Exploit\n` +
+          `**🔒 Isolate** beats Spam & Override | loses to Exploit & Corrupt\n` +
+          `**📡 Spam** beats Override & Exploit | loses to Isolate & Corrupt\n` +
+          `**🔄 Override** beats Exploit & Corrupt | loses to Spam & Isolate\n` +
+          `**💚 Restore** — Heal 25 HP, but take damage from any attack. Has a cooldown.`,
+        inline: false
+      }
+    ]
+  },
+
+  events: {
+    title: '🎪 Server Events',
+    color: 0xff9800,
+    description: `Special events that happen as the server stays active!`,
+    fields: [
+      {
+        name: '📰 Market Events',
+        value:
+          `Triggered after a number of server messages.\n` +
+          `• **Bull Events** temporarily boost all stock prices\n` +
+          `• **Bear Events** temporarily drop all stock prices\n` +
+          `• Effects last 1-4 hours\n` +
+          `• Announced in the ticker channel`,
+        inline: false
+      },
+      {
+        name: '🏦 Vault',
+        value:
+          `A Vault randomly spawns in the ticker channel after enough messages.\n` +
+          `• Click the button to claim a random cash reward\n` +
+          `• First-come-first-served — react fast!\n` +
+          `• Watch out for booby traps`,
+        inline: false
+      },
+      {
+        name: '📊 Leaderboard',
+        value:
+          `Use \`/leaderboard\` to see server rankings!\n` +
+          `• **Stock Prices** — Highest valued stocks\n` +
+          `• **Portfolios** — Biggest portfolio values\n` +
+          `• **Balances** — Richest players by cash + bank\n` +
+          `• **Fighters** — Best fight win records`,
         inline: false
       }
     ]
@@ -432,6 +581,34 @@ const helpPages = {
         name: '🔧 /admin maintenance',
         value: `Bot maintenance and data tools.`,
         inline: true
+      },
+      {
+        name: '🪙 /admin lucky-penny',
+        value: `Configure Lucky Penny settings.`,
+        inline: true
+      },
+      {
+        name: '🥊 /admin fight',
+        value: `Configure fight & dungeon settings.`,
+        inline: true
+      },
+      {
+        name: '💰 /admin wealth-tax',
+        value: `Configure wealth tax brackets.`,
+        inline: true
+      },
+      {
+        name: '⚙️ /admin system',
+        value: `System settings, channels & events.`,
+        inline: true
+      },
+      {
+        name: '🔨 Admin-Only Commands',
+        value: 
+          `\`/addmoney\` - Add/remove money from a user\n` +
+          `\`/liquidate\` - Force-liquidate a user's stock\n` +
+          `\`/purge-users\` - Remove departed users from DB`,
+        inline: false
       }
     ]
   }
@@ -457,14 +634,15 @@ function buildHelpEmbed(pageKey) {
 function buildHelpMenu(currentPage = 'overview', isAdmin = false) {
   const options = [
     { label: 'Overview', description: 'Getting started & basics', value: 'overview', emoji: '📊', default: currentPage === 'overview' },
-    { label: 'Stock Market', description: 'Trading stocks & splits', value: 'stocks', emoji: '📈', default: currentPage === 'stocks' },
-    { label: 'Banking & Money', description: 'Bank, deposits & dividends', value: 'banking', emoji: '🏦', default: currentPage === 'banking' },
-    { label: 'Income Commands', description: 'Work, slut & crime', value: 'income', emoji: '💼', default: currentPage === 'income' },
+    { label: 'Stock Market', description: 'Trading, streaks & dividends', value: 'stocks', emoji: '📈', default: currentPage === 'stocks' },
+    { label: 'Banking & Money', description: 'Bank, loans, bonds & taxes', value: 'banking', emoji: '🏦', default: currentPage === 'banking' },
+    { label: 'Income Commands', description: 'Work, crime & Lucky Penny', value: 'income', emoji: '💼', default: currentPage === 'income' },
     { label: 'Gambling', description: 'Casino games & betting', value: 'gambling', emoji: '🎰', default: currentPage === 'gambling' },
     { label: 'Rob & Hack', description: 'Stealing from players', value: 'crime', emoji: '🔓', default: currentPage === 'crime' },
     { label: 'Property', description: 'Real estate & passive income', value: 'property', emoji: '🏠', default: currentPage === 'property' },
     { label: 'Shop & Items', description: 'Buying & using items', value: 'items', emoji: '🛒', default: currentPage === 'items' },
-    { label: 'Fight System', description: 'PvP battles & wagers', value: 'fight', emoji: '🥊', default: currentPage === 'fight' }
+    { label: 'Fight & Dungeon', description: 'PvP battles & PvE dungeon', value: 'fight', emoji: '🥊', default: currentPage === 'fight' },
+    { label: 'Events & Leaderboard', description: 'Market events, vault & rankings', value: 'events', emoji: '🎪', default: currentPage === 'events' }
   ];
   
   // Only show admin option to admins

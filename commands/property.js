@@ -49,19 +49,19 @@ module.exports = {
     .setDescription('Property management panel'),
 
   async execute(interaction) {
+    await interaction.deferReply({ flags: 64 });
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     
     const settings = getPropertySettings(guildId);
     
     if (!settings.enabled) {
-      return interaction.reply({ 
-        content: '❌ The property system is currently disabled.',
-          flags: 64 
+      return interaction.editReply({ 
+        content: '❌ The property system is currently disabled.'
       });
     }
 
-    await showPropertyPanel(interaction, guildId, userId, settings);
+    await showPropertyPanel(interaction, guildId, userId, settings, false, true);
   },
 
   async handleButton(interaction) {

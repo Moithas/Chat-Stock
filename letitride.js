@@ -2,7 +2,6 @@
 // Classic poker variant - player vs house
 
 let db = null;
-let forceEnabledOnStartup = true; // Flag to force enable on first settings access
 
 // Card constants
 const SUITS = ['♠', '♥', '♦', '♣'];
@@ -89,14 +88,6 @@ function initialize(database) {
   // Clear any stale cache entries
   guildSettings.clear();
   
-  // Enable the game by default on startup
-  try {
-    db.run(`UPDATE letitride_settings SET enabled = 1`);
-    console.log('🎰 Let It Ride: Force-enabled all existing settings');
-  } catch (err) {
-    console.error('🎰 Let It Ride: Error enabling on startup:', err);
-  }
-  
   console.log('🎰 Let It Ride system initialized');
 }
 
@@ -116,23 +107,15 @@ function getSettings(guildId) {
     return { ...DEFAULT_SETTINGS };
   }
   
-  const row = db.prepare('SELECT * FROM letitride_settings WHERE guild_id = ?').get(guildId);
+  const stmt = db.prepare('SELECT * FROM letitride_settings WHERE guild_id = ?');
+  stmt.bind([guildId]);
   
-  if (row) {
-    // Always use defaults for any missing/null values
-    let enabled = row.enabled !== null ? !!row.enabled : DEFAULT_SETTINGS.enabled;
-    
-    // Force enable on first access after bot startup
-    if (forceEnabledOnStartup && !enabled) {
-      console.log('[Let It Ride] Force-enabling game on first access after startup');
-      enabled = true;
-      // Update the database too
-      db.run(`UPDATE letitride_settings SET enabled = 1 WHERE guild_id = ?`, [guildId]);
-      forceEnabledOnStartup = false; // Only do this once per restart
-    }
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    stmt.free();
     
     const settings = {
-      enabled: enabled,
+      enabled: row.enabled !== null ? !!row.enabled : DEFAULT_SETTINGS.enabled,
       minBet: row.min_bet ?? DEFAULT_SETTINGS.minBet,
       maxBet: row.max_bet ?? DEFAULT_SETTINGS.maxBet,
       timerSeconds: row.timer_seconds ?? DEFAULT_SETTINGS.timerSeconds
@@ -140,6 +123,7 @@ function getSettings(guildId) {
     guildSettings.set(guildId, settings);
     return settings;
   }
+  stmt.free();
   
   // Insert default settings (enabled by default)
   const settings = { ...DEFAULT_SETTINGS };
@@ -149,7 +133,6 @@ function getSettings(guildId) {
   `, [guildId, settings.enabled ? 1 : 0, settings.minBet, settings.maxBet, settings.timerSeconds]);
   
   guildSettings.set(guildId, settings);
-  forceEnabledOnStartup = false; // Clear flag after first settings access
   return settings;
 }
 
@@ -429,9 +412,10 @@ function forceEndGame(userId, reason = 'timeout') {
     clearTimeout(game.timer);
   }
   
-  // If not resolved, auto let-it-ride to finish
+  // If not resolved, auto pull-back remaining bets (conservative, player-friendly)
   while (game.status !== 'resolved') {
-    letItRide(userId);
+    const betNum = game.status === 'decision_1' ? 1 : 2;
+    pullBackBet(userId, betNum);
   }
   
   game.timeoutReason = reason;
@@ -562,9 +546,16 @@ function recordHistory(game) {
 function getStats(guildId, userId) {
   if (!db) return null;
   
-  return db.prepare(`
-    SELECT * FROM letitride_stats WHERE guild_id = ? AND user_id = ?
-  `).get(guildId, userId);
+  const stmt = db.prepare('SELECT * FROM letitride_stats WHERE guild_id = ? AND user_id = ?');
+  stmt.bind([guildId, userId]);
+  
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    stmt.free();
+    return row;
+  }
+  stmt.free();
+  return null;
 }
 
 // ============ UTILITY FUNCTIONS ============

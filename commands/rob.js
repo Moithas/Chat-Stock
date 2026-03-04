@@ -3,6 +3,7 @@ const { getBalance, removeMoney, forceRemoveMoney, addMoney, applyFine } = requi
 const { getRobSettings, canRob, canBeRobbed, canRobTarget, recordTargetRobbed, recordGiftProtection, checkGiftProtection, calculateSuccessRate, attemptRob, calculateStolenAmount, calculateFine, recordRob, isUserImmune, hasActiveImmunity } = require('../rob');
 const { getRobBonuses, addXp, checkTrainingComplete } = require('../skills');
 const { hasActiveEffect, getEffectValue, EFFECT_TYPES } = require('../items');
+const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -199,6 +200,9 @@ module.exports = {
       });
     }
 
+    // Record target protection immediately to prevent simultaneous robs
+    recordTargetRobbed(guildId, targetId);
+
     // Check if this target counts for XP (anti-farming - still allows rob, just no XP)
     const uniqueTargetCheck = canRobTarget(guildId, robberId, targetId);
     const awardsXp = uniqueTargetCheck.canRob;
@@ -217,8 +221,10 @@ module.exports = {
       return interaction.reply({ content: response });
     }
 
-    // Check cooldown (with skill reduction)
-    const cooldownCheck = canRob(guildId, robberId, robBonuses.cooldownReduction);
+    // Check cooldown (with skill reduction + LP buff)
+    const lpRobCooldown = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_COOLDOWN);
+    const totalRobCooldownReduction = robBonuses.cooldownReduction + (-lpRobCooldown);
+    const cooldownCheck = canRob(guildId, robberId, totalRobCooldownReduction);
     if (!cooldownCheck.canRob) {
       let response = `❌ ${cooldownCheck.reason}`;
       if (trainingResult) {
@@ -245,9 +251,11 @@ module.exports = {
       });
     }
 
-    // Calculate success rate (with skill bonus and item bonus)
+    // Calculate success rate (with skill bonus, item bonus, LP buff, and target defense)
     const itemSuccessBoost = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_SUCCESS_BOOST);
-    const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost;
+    const lpRobSuccess = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_SUCCESS);
+    const targetRobDefense = getEffectValue(guildId, targetId, EFFECT_TYPES.ROB_DEFENSE);
+    const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost + lpRobSuccess - targetRobDefense;
     const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, totalSuccessBonus);
 
     // Build training notification if applicable
@@ -256,8 +264,7 @@ module.exports = {
       trainingNotification = `✅ **Rob training complete!** +${trainingResult.xpGained} XP${trainingResult.levelUp ? ` → **Level ${trainingResult.newLevel}!**` : ''}\n\n`;
     }
 
-    // Record that this target is being robbed (starts target cooldown)
-    recordTargetRobbed(guildId, targetId);
+    // Record that this target is being robbed (target cooldown already started above)
 
     // Check if defenses are enabled and send defense prompt
     if (settings.defensesEnabled) {
@@ -364,7 +371,8 @@ module.exports = {
               .setFooter({ text: xpFooter });
           } else {
             const itemFineReduction = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_FINE_REDUCTION);
-            const totalFineReduction = robBonuses.fineReduction + itemFineReduction;
+            const lpRobFine = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_FINES);
+            const totalFineReduction = robBonuses.fineReduction + itemFineReduction + (-lpRobFine);
             const fine = calculateFine(robberBalance.total, settings, totalFineReduction);
             await applyFine(guildId, robberId, fine, `Failed rob attempt on ${targetUser.username}`);
             recordRob(guildId, robberId, targetId, false, fine);
@@ -454,9 +462,10 @@ module.exports = {
 
       await interaction.reply({ content: trainingNotification || null, embeds: [embed] });
     } else {
-      // Rob failed - calculate fine (with skill reduction and item reduction)
+      // Rob failed - calculate fine (with skill reduction, item reduction, and LP buff)
       const itemFineReduction2 = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_FINE_REDUCTION);
-      const totalFineReduction2 = robBonuses.fineReduction + itemFineReduction2;
+      const lpRobFine2 = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_FINES);
+      const totalFineReduction2 = robBonuses.fineReduction + itemFineReduction2 + (-lpRobFine2);
       const fine = calculateFine(robberBalance.total, settings, totalFineReduction2);
 
       // Apply fine (can put user into negative balance)
@@ -496,7 +505,8 @@ module.exports = {
 async function processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseType, elapsedSeconds, settings, robBonuses, awardsXp, robProtectionValue = 0) {
   const CURRENCY = '<:babybel:1418824333664452608>';
   const itemSuccessBoost = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_SUCCESS_BOOST);
-  const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost;
+  const lpRobSuccessDef = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_SUCCESS);
+  const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost + lpRobSuccessDef;
   const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, totalSuccessBonus);
   const stolenAmount = calculateStolenAmount(targetBalance.cash, settings, robBonuses.minStealBonus, robBonuses.maxStealBonus);
   let actualStolen = Math.min(stolenAmount, targetBalance.cash);
@@ -507,7 +517,8 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
   }
   
   const itemFineReduction = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_FINE_REDUCTION);
-  const totalFineReduction = robBonuses.fineReduction + itemFineReduction;
+  const lpRobFineDef = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_FINES);
+  const totalFineReduction = robBonuses.fineReduction + itemFineReduction + (-lpRobFineDef);
   const fine = calculateFine(robberBalance.total, settings, totalFineReduction);
   
   // Variable to track XP result for footer

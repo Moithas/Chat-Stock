@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
-const { getBalance, removeMoney } = require('../economy');
+const { getBalance, removeMoney, addMoney } = require('../economy');
 const { 
   getShopItems, 
   getShopItem, 
@@ -68,6 +68,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    await interaction.deferReply();
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     const categoryFilter = interaction.options.getString('category');
@@ -75,9 +76,8 @@ module.exports = {
     // Check if shop is enabled
     const settings = getItemSettings(guildId);
     if (!settings.shopEnabled) {
-      return interaction.reply({ 
-        content: '🚫 The shop is currently closed!', 
-        ephemeral: true 
+      return interaction.editReply({ 
+        content: '🚫 The shop is currently closed!'
       });
     }
     
@@ -89,9 +89,8 @@ module.exports = {
     const items = getShopItems(guildId, category, true);
     
     if (items.length === 0) {
-      return interaction.reply({ 
-        content: '📦 The shop is empty! Ask an admin to add some items.', 
-        ephemeral: true 
+      return interaction.editReply({ 
+        content: '📦 The shop is empty! Ask an admin to add some items.'
       });
     }
     
@@ -102,10 +101,9 @@ module.exports = {
     const embed = createShopEmbed(items, 0, balance.cash, categoryFilter);
     const components = createShopComponents(items, 0, guildId, userId);
     
-    const response = await interaction.reply({ 
+    const response = await interaction.editReply({ 
       embeds: [embed], 
-      components,
-      fetchReply: true 
+      components
     });
     
     // Create collector for interactions
@@ -178,16 +176,24 @@ module.exports = {
             });
           }
           
-          // Process purchase - check max_stack first
+          // Process purchase - deduct money first, then add item
+          const paid = await removeMoney(guildId, userId, item.price, `Shop purchase: ${item.name}`);
+          if (!paid) {
+            return i.reply({ 
+              content: `❌ Failed to process payment. Make sure you have enough cash!`, 
+              ephemeral: true 
+            });
+          }
+          
           const addResult = addToInventory(guildId, userId, item.id, 1);
           if (!addResult.success) {
+            // Refund the money since we couldn't add the item
+            await addMoney(guildId, userId, item.price, `Shop refund: ${item.name} (inventory error)`);
             return i.reply({ 
               content: `❌ ${addResult.error}`, 
               ephemeral: true 
             });
           }
-          
-          await removeMoney(guildId, userId, item.price, `Shop purchase: ${item.name}`);
           recordPurchase(guildId, userId, item, 1, item.price);
           
           // Check if this is a service item
@@ -412,6 +418,8 @@ function getEffectDisplayName(effectType) {
   const names = {
     'rob_protection': '🛡️ Rob Protection',
     'hack_protection': '🔥 Hack Protection',
+    'rob_defense': '🛡️ Rob Defense',
+    'hack_defense': '🔒 Hack Defense',
     'rob_success_boost': '🍀 Rob Success Boost',
     'hack_success_boost': '💻 Hack Success Boost',
     'work_boost': '💼 Work Earnings Boost',

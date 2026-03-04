@@ -269,6 +269,9 @@ function buildResultButtons(userId, betAmount) {
 
 // ==================== BUTTON HANDLERS ====================
 
+// Prevent double-click processing
+const processingUsers = new Set();
+
 async function handleButton(interaction) {
   const guildId = interaction.guildId;
   const userId = interaction.user.id;
@@ -305,6 +308,10 @@ async function handleButton(interaction) {
     return;
   }
   
+  if (processingUsers.has(userId)) {
+    return interaction.reply({ content: '⏳ Processing your last action...', flags: 64 });
+  }
+  
   const game = getActiveGame(userId);
   
   if (!game) {
@@ -315,6 +322,8 @@ async function handleButton(interaction) {
     return interaction.reply({ content: '❌ This is not your game!', flags: 64 });
   }
   
+  processingUsers.add(userId);
+  try {
   try {
     await interaction.deferUpdate();
   } catch (err) {
@@ -372,6 +381,9 @@ async function handleButton(interaction) {
       await interaction.followUp({ content: '❌ An error occurred processing your action.', flags: 64 });
     } catch (e) { /* ignore */ }
   }
+  } finally {
+    processingUsers.delete(userId);
+  }
 }
 
 async function processResult(interaction, game) {
@@ -390,9 +402,18 @@ async function handleTimeout(client, userId) {
   const game = getActiveGame(userId);
   if (!game) return;
   
-  // Force end the game (auto let-it-ride)
+  // Remember how many bets were active before force-end
+  const betsBeforeEnd = (game.bet1 ? 1 : 0) + (game.bet2 ? 1 : 0) + 1;
+  
+  // Force end the game (auto pull-back remaining bets)
   const result = forceEndGame(userId, 'timeout');
   if (!result) return;
+  
+  // Refund pulled-back bets (bets that were active before but got pulled by forceEndGame)
+  const pulledBets = betsBeforeEnd - result.betsRemaining;
+  if (pulledBets > 0) {
+    await addMoney(result.guildId, userId, result.betAmount * pulledBets, 'Let It Ride timeout bet refund');
+  }
   
   // Process payouts
   if (result.payout > 0) {

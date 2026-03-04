@@ -344,6 +344,23 @@ function calculateCapitalGainsTax(guildId, consumedPurchases, currentPrice) {
   return { totalTax, breakdown };
 }
 
+// ============ Purchase History Split Adjustment ============
+
+// Adjust all purchase records when a stock splits
+// Shares get multiplied, price gets divided (to keep total cost basis the same)
+function adjustPurchaseHistoryForSplit(stockUserId, multiplier) {
+  if (!db) return;
+  
+  // For a 2:1 split: shares * 2, price / 2
+  // For a 1:2 reverse split: shares * 0.5, price / 0.5 (= price * 2)
+  db.run(`
+    UPDATE stock_purchases 
+    SET shares = MAX(1, CAST(shares * ? AS INTEGER)), 
+        price = price / ?
+    WHERE stock_user_id = ? AND shares > 0
+  `, [multiplier, multiplier, stockUserId]);
+}
+
 // ============ Setting Update Functions ============
 
 function updateSellCooldown(guildId, minutes, enabled) {
@@ -440,5 +457,6 @@ module.exports = {
   previewCapitalGainsTax,
   updateSellCooldown,
   updatePriceImpactDelay,
-  updateCapitalGainsTax
+  updateCapitalGainsTax,
+  adjustPurchaseHistoryForSplit
 };

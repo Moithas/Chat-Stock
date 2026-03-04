@@ -9,6 +9,10 @@ const EFFECT_TYPES = {
   ROB_PROTECTION: 'rob_protection',       // Prevents being robbed
   HACK_PROTECTION: 'hack_protection',     // Prevents being hacked
   
+  // Defense effects (reduce attacker's success rate)
+  ROB_DEFENSE: 'rob_defense',               // Reduces rob success rate for attackers
+  HACK_DEFENSE: 'hack_defense',             // Reduces hack success rate for attackers
+  
   // Boost effects
   ROB_SUCCESS_BOOST: 'rob_success_boost', // Increases rob success rate
   HACK_SUCCESS_BOOST: 'hack_success_boost', // Increases hack success rate
@@ -50,6 +54,8 @@ const EFFECT_TYPES = {
 const EFFECT_TYPE_NAMES = {
   [EFFECT_TYPES.ROB_PROTECTION]: 'Rob Protection',
   [EFFECT_TYPES.HACK_PROTECTION]: 'Hack Protection',
+  [EFFECT_TYPES.ROB_DEFENSE]: 'Rob Defense',
+  [EFFECT_TYPES.HACK_DEFENSE]: 'Hack Defense',
   [EFFECT_TYPES.ROB_SUCCESS_BOOST]: 'Rob Success Boost',
   [EFFECT_TYPES.HACK_SUCCESS_BOOST]: 'Hack Success Boost',
   [EFFECT_TYPES.WORK_BOOST]: 'Work Boost',
@@ -584,6 +590,25 @@ function initializeDefaultItems(guildId) {
 // ===== INVENTORY MANAGEMENT =====
 
 // Get user's inventory
+// Get all users who own a specific item and their quantities
+function getItemOwners(guildId, itemId) {
+  if (!db) return [];
+  
+  const result = db.exec(`
+    SELECT ui.user_id, ui.quantity, ui.purchased_at
+    FROM user_inventory ui
+    WHERE ui.guild_id = ? AND ui.item_id = ? AND ui.quantity > 0
+    ORDER BY ui.quantity DESC
+  `, [guildId, itemId]);
+  
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  
+  return result[0].values.map(row => {
+    const cols = result[0].columns;
+    return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
+  });
+}
+
 function getUserInventory(guildId, userId) {
   if (!db) return [];
   
@@ -1015,6 +1040,8 @@ function getEffectTypeName(effectType) {
   const names = {
     [EFFECT_TYPES.ROB_PROTECTION]: 'Rob Protection',
     [EFFECT_TYPES.HACK_PROTECTION]: 'Hack Protection',
+    [EFFECT_TYPES.ROB_DEFENSE]: 'Rob Defense',
+    [EFFECT_TYPES.HACK_DEFENSE]: 'Hack Defense',
     [EFFECT_TYPES.ROB_SUCCESS_BOOST]: 'Rob Success Boost',
     [EFFECT_TYPES.HACK_SUCCESS_BOOST]: 'Hack Success Boost',
     [EFFECT_TYPES.WORK_BOOST]: 'Work Earnings Boost',
@@ -1334,6 +1361,7 @@ module.exports = {
   // Inventory
   getUserInventory,
   getInventoryItem,
+  getItemOwners,
   addToInventory,
   removeFromInventory,
   

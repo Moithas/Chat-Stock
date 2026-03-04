@@ -25,6 +25,9 @@ const { generateBlackjackImage } = require('../cardImages');
 const CURRENCY = '<:babybel:1418824333664452608>';
 const DEALER_CARD_DELAY = 1200; // milliseconds between dealer cards
 
+// Prevent double-click processing on buttons
+const processingUsers = new Set();
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('blackjack')
@@ -270,6 +273,11 @@ function createGameButtons(game, canDouble, canSplit = false) {
 module.exports.handleBlackjackButton = async function(interaction) {
   const userId = interaction.user.id;
   const guildId = interaction.guildId;
+
+  if (processingUsers.has(userId)) {
+    return interaction.reply({ content: '⏳ Processing your last action...', flags: 64 });
+  }
+
   const game = getBlackjackGame(userId);
 
   if (!game) {
@@ -278,6 +286,9 @@ module.exports.handleBlackjackButton = async function(interaction) {
       flags: 64
     });
   }
+
+  processingUsers.add(userId);
+  try {
 
   const action = interaction.customId;
 
@@ -470,6 +481,9 @@ module.exports.handleBlackjackButton = async function(interaction) {
 
   // Dealer's turn - animate card by card
   await playDealerTurnAnimated(interaction, userId, guildId, updatedGame);
+  } finally {
+    processingUsers.delete(userId);
+  }
 };
 
 // Animate dealer's turn - reveal cards one at a time

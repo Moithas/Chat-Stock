@@ -162,7 +162,7 @@ function updateWorkSettings(guildId, updates) {
   guildWorkSettings.set(guildId, settings);
 }
 
-function canWork(guildId, userId) {
+function canWork(guildId, userId, cooldownReduction = 0) {
   if (!db) return { canWork: false, reason: 'Database not initialized' };
   
   const settings = getWorkSettings(guildId);
@@ -181,7 +181,8 @@ function canWork(guildId, userId) {
   stmt.free();
   
   const now = Date.now();
-  const cooldownMs = settings.cooldownHours * 60 * 60 * 1000;
+  const baseCooldownMs = settings.cooldownHours * 60 * 60 * 1000;
+  const cooldownMs = baseCooldownMs * (1 - cooldownReduction / 100);
   const timeSinceWork = now - lastWorkTime;
   
   if (timeSinceWork < cooldownMs) {

@@ -10,6 +10,7 @@ const {
   recordHackerCooldown,
   recordTargetHacked,
   clearTargetCooldown,
+  clearHackerCooldown,
   calculateSuccessRate,
   calculateStealAmount,
   calculateFine,
@@ -23,6 +24,7 @@ const {
   checkTrainingComplete 
 } = require('../skills');
 const { hasActiveEffect, getEffectValue, EFFECT_TYPES } = require('../items');
+const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -164,6 +166,7 @@ module.exports = {
     ),
   
   async execute(interaction) {
+    await interaction.deferReply();
     const guildId = interaction.guildId;
     const hackerId = interaction.user.id;
     const targetUser = interaction.options.getUser('target');
@@ -171,14 +174,14 @@ module.exports = {
 
     // Check if trying to hack self
     if (hackerId === targetId) {
-      return interaction.reply({
+      return interaction.editReply({
         content: '❌ You can\'t hack yourself! That\'s just checking your own balance.'
       });
     }
 
     // Check if trying to hack a bot
     if (targetUser.bot) {
-      return interaction.reply({
+      return interaction.editReply({
         content: '❌ You can\'t hack bots! They don\'t have bank accounts.'
       });
     }
@@ -187,7 +190,7 @@ module.exports = {
 
     // Check if hacking is enabled
     if (!settings.enabled) {
-      return interaction.reply({
+      return interaction.editReply({
         content: '❌ Hacking is currently disabled on this server.'
       });
     }
@@ -198,7 +201,7 @@ module.exports = {
     if (targetMember) {
       const targetRoles = targetMember.roles.cache.map(role => role.id);
       if (isUserImmuneToHack(guildId, targetRoles)) {
-        return interaction.reply({
+        return interaction.editReply({
           content: `❌ **${targetUser.username}** has hack immunity and cannot be hacked!`
         });
       }
@@ -207,7 +210,7 @@ module.exports = {
     // Check if target has item-based hack protection (100% = full immunity)
     const hackProtectionValue = getEffectValue(guildId, targetId, EFFECT_TYPES.HACK_PROTECTION);
     if (hackProtectionValue >= 100) {
-      return interaction.reply({
+      return interaction.editReply({
         content: `❌ **${targetUser.username}** has a 🔥 **Firewall** protecting them and cannot be hacked!`
       });
     }
@@ -215,7 +218,7 @@ module.exports = {
     // Check if target can be hacked (cooldown + not currently being hacked)
     const targetCooldownCheck = canBeHacked(guildId, targetId);
     if (!targetCooldownCheck.canBeHacked) {
-      return interaction.reply({
+      return interaction.editReply({
         content: `❌ ${targetCooldownCheck.reason}`
       });
     }
@@ -227,15 +230,25 @@ module.exports = {
     // Check for completed training and get skill bonuses
     const trainingResult = checkTrainingComplete(guildId, hackerId, 'hack');
     const hackBonuses = getHackBonuses(guildId, hackerId);
+    const targetBonuses = getHackBonuses(guildId, targetId);
+    
+    // Skill difference affects defense: each level the target has over the hacker adds +5% defense chance
+    // Each level the hacker has over the target reduces defense chance by 3%
+    const skillDifference = targetBonuses.level - hackBonuses.level;
+    const defenseSkillMod = skillDifference > 0 
+      ? skillDifference * 5   // Target is higher: +5% defense per level advantage
+      : skillDifference * 3;  // Hacker is higher: -3% defense per level advantage (skillDiff is negative)
 
-    // Check hacker cooldown (with skill reduction)
-    const hackerCooldownCheck = canHack(guildId, hackerId, hackBonuses.cooldownReduction);
+    // Check hacker cooldown (with skill reduction + LP buff)
+    const lpHackCooldown = getLuckyPennyEffect(guildId, hackerId, LP_EFFECT_TYPES.HACK_COOLDOWN);
+    const totalHackCooldownReduction = hackBonuses.cooldownReduction + (-lpHackCooldown);
+    const hackerCooldownCheck = canHack(guildId, hackerId, totalHackCooldownReduction);
     if (!hackerCooldownCheck.canHack) {
       let response = `❌ ${hackerCooldownCheck.reason}`;
       if (trainingResult) {
         response = `✅ **Hack training complete!** +${trainingResult.xpGained} XP${trainingResult.levelUp ? ` → **Level ${trainingResult.newLevel}!**` : ''}\n\n` + response;
       }
-      return interaction.reply({ content: response });
+      return interaction.editReply({ content: response });
     }
 
     // Get balances
@@ -245,22 +258,24 @@ module.exports = {
     // Check if target has bank debt - can't hack players with negative bank
     // (negative cash is fine, we're stealing from bank not cash)
     if (targetBalance.bank < 0) {
-      return interaction.reply({
+      return interaction.editReply({
         content: `❌ You cannot hack ${targetUser.username} - their bank account is in debt!`
       });
     }
 
     // Check if target has any bank balance to steal
     if (targetBalance.bank === 0) {
-      return interaction.reply({
+      return interaction.editReply({
         content: `❌ ${targetUser.username} has no money in the bank to hack!`
       });
     }
 
-    // Calculate success rate (with skill bonus and item bonus)
+    // Calculate success rate (with skill bonus, item bonus, LP buff, and target defense)
     // Uses total balance (cash + bank) for both parties
     const itemSuccessBoost = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_SUCCESS_BOOST);
-    const totalSuccessBonus = hackBonuses.successRateBonus + itemSuccessBoost;
+    const lpHackSuccess = getLuckyPennyEffect(guildId, hackerId, LP_EFFECT_TYPES.HACK_SUCCESS);
+    const targetHackDefense = getEffectValue(guildId, targetId, EFFECT_TYPES.HACK_DEFENSE);
+    const totalSuccessBonus = hackBonuses.successRateBonus + itemSuccessBoost + lpHackSuccess - targetHackDefense;
     const hackerTotal = hackerBalance.cash + hackerBalance.bank;
     const targetTotal = targetBalance.cash + targetBalance.bank;
     const successRate = calculateSuccessRate(targetTotal, hackerTotal, totalSuccessBonus);
@@ -291,7 +306,7 @@ module.exports = {
     const initialEmbed = createHackEmbed(hackerId, targetUser, 0, settings, targetBalance.bank, hackBonuses.maxStealBonus, hackBonuses.level);
     const defenseRow = createDefenseButton(hackerId);
     
-    await interaction.reply({ content: `${trainingNotification}💻 Initiating hack on ${targetUser.username}...` });
+    await interaction.editReply({ content: `${trainingNotification}💻 Initiating hack on ${targetUser.username}...` });
     
     const hackMessage = await interaction.channel.send({
       content: `<@${targetId}> ⚠️ **YOUR BANK IS BEING HACKED!**`,
@@ -309,6 +324,8 @@ module.exports = {
       if (!hackCompleted) {
         console.error(`⚠️ HACK FAILSAFE triggered for hacker=${hackerId}, target=${targetId} — forcing cleanup`);
         endActiveHack(guildId, targetId);
+        clearTargetCooldown(guildId, targetId);
+        clearHackerCooldown(guildId, hackerId);
         hackCompleted = true;
       }
     }, 45000);
@@ -320,7 +337,8 @@ module.exports = {
     defenseCollector.on('collect', async (buttonInteraction) => {
       defenseCollector.stop('defended');
       
-      const defenseChance = getDefenseChance(progress);
+      const baseDefenseChance = getDefenseChance(progress);
+      const defenseChance = Math.min(95, Math.max(5, baseDefenseChance + defenseSkillMod));
       const defenseRoll = Math.random() * 100;
       const defenseSuccess = defenseRoll < defenseChance;
       
@@ -338,7 +356,8 @@ module.exports = {
         // Otherwise early defense (e.g. 0% progress) results in zero fine
         const potentialSteal = calculateStealAmount(targetBalance.bank, 100, settings, hackBonuses.maxStealBonus);
         const itemFineReduction = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_FINE_REDUCTION);
-        const fineReduction = (hackBonuses.level * 3) + itemFineReduction; // 3% reduction per level + item
+        const lpHackFine = getLuckyPennyEffect(guildId, hackerId, LP_EFFECT_TYPES.HACK_FINES);
+        const fineReduction = (hackBonuses.level * 3) + itemFineReduction + (-lpHackFine); // 3% per level + item + LP
         const baseFine = calculateFine(potentialSteal, settings);
         const fine = Math.floor(baseFine * (1 - fineReduction / 100));
         
@@ -548,7 +567,8 @@ module.exports = {
           const potentialSteal = calculateStealAmount(targetBalance.bank, 100, settings, hackBonuses.maxStealBonus);
           const baseFine = calculateFine(potentialSteal, settings);
           const itemFineReduction = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_FINE_REDUCTION);
-          const fineReduction = hackBonuses.traceReduction + itemFineReduction; // Use trace reduction + item
+          const lpHackFine2 = getLuckyPennyEffect(guildId, hackerId, LP_EFFECT_TYPES.HACK_FINES);
+          const fineReduction = hackBonuses.traceReduction + itemFineReduction + (-lpHackFine2); // trace + item + LP
           const fine = Math.floor(baseFine * (1 - fineReduction / 100));
           
           await applyFine(guildId, hackerId, fine, `Failed hack attempt on ${targetUser.username}`);
@@ -669,9 +689,10 @@ module.exports = {
         
         } catch (err) {
           console.error(`❌ HACK ERROR during completion for hacker=${hackerId}, target=${targetId}:`, err);
-          // Make sure active hack is always cleaned up
+          // Make sure active hack and cooldowns are always cleaned up
           endActiveHack(guildId, targetId);
           clearTargetCooldown(guildId, targetId);
+          clearHackerCooldown(guildId, hackerId);
           try {
             await hackMessage.edit({ 
               content: `❌ An error occurred during the hack. No money was transferred.`,
@@ -703,6 +724,7 @@ module.exports = {
         hackCompleted = true;
         endActiveHack(guildId, targetId);
         clearTargetCooldown(guildId, targetId);
+        clearHackerCooldown(guildId, hackerId);
       }
     }, 5000);
   }

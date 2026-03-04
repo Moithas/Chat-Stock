@@ -13,6 +13,7 @@ const {
   initializeDefaultItems,
   addToInventory,
   getUserInventory,
+  getItemOwners,
   removeFromInventory,
   EFFECT_TYPES,
   ITEM_CATEGORIES,
@@ -67,7 +68,7 @@ function parseEmojiForSelect(emojiStr) {
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [
   'admin_items', 'items_toggle', 'items_add', 'items_manage', 'items_stats',
-  'items_init_defaults', 'items_prev', 'items_next', 'back_items',
+  'items_init_defaults', 'items_prev', 'items_next', 'back_items', 'items_owners',
   'items_fulfillments', 'items_fulfill_prev', 'items_fulfill_next',
   'items_ticket_settings', 'items_create_continue', 'items_create_cancel',
   'items_give', 'items_give_confirm', 'items_give_cancel',
@@ -81,6 +82,7 @@ const MODAL_IDS = [
 const SELECT_IDS = [
   'items_select', 'items_category_filter', 'items_effect_select',
   'items_ticket_category', 'items_ticket_log',
+  'items_owners_select',
   'items_create_category', 'items_create_effect',
   'items_give_user', 'items_give_item',
   'items_take_user', 'items_take_item',
@@ -106,12 +108,17 @@ async function handleInteraction(interaction, guildId) {
   // Handle button interactions
   if (interaction.isButton()) {
     // Check for dynamic item IDs
-    if (customId.startsWith('items_edit_') || customId.startsWith('items_delete_') || customId.startsWith('items_toggle_') || customId.startsWith('items_usable_')) {
+    if (customId.startsWith('items_edit_') || customId.startsWith('items_delete_') || customId.startsWith('items_toggle_') || customId.startsWith('items_usable_') || customId.startsWith('items_owners_')) {
       const parts = customId.split('_');
       const action = parts[1];
       const itemId = parseInt(parts[2]);
       
-      if (action === 'edit') {
+      if (action === 'owners') {
+        const itemId = parseInt(parts[2]);
+        await interaction.deferUpdate();
+        await showItemOwnersPanel(interaction, guildId, itemId);
+        return true;
+      } else if (action === 'edit') {
         await showEditItemModal(interaction, guildId, itemId);
         return true;
       } else if (action === 'delete') {
@@ -174,6 +181,10 @@ async function handleInteraction(interaction, guildId) {
       case 'items_manage':
         await interaction.deferUpdate();
         await showManageItemsPanel(interaction, guildId, 0);
+        return true;
+      case 'items_owners':
+        await interaction.deferUpdate();
+        await showOwnersItemSelectPanel(interaction, guildId);
         return true;
       case 'items_stats':
         await interaction.deferUpdate();
@@ -264,6 +275,9 @@ async function handleInteraction(interaction, guildId) {
     if (!SELECT_IDS.includes(customId)) return false;
     
     switch (customId) {
+      case 'items_owners_select':
+        await handleOwnersItemSelect(interaction, guildId);
+        return true;
       case 'items_select':
         await handleItemSelect(interaction, guildId);
         return true;
@@ -410,7 +424,16 @@ async function showItemsPanel(interaction, guildId) {
         .setLabel('Add Default Items')
         .setStyle(ButtonStyle.Secondary)
         .setEmoji('📦')
-        .setDisabled(items.length > 0),
+        .setDisabled(items.length > 0)
+    );
+  
+  const row3 = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId('items_owners')
+        .setLabel('View Owners')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('👥'),
       new ButtonBuilder()
         .setCustomId('back_dashboard')
         .setLabel('Back')
@@ -418,7 +441,7 @@ async function showItemsPanel(interaction, guildId) {
         .setEmoji('◀️')
     );
   
-  await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+  await interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
 }
 
 async function showManageItemsPanel(interaction, guildId, page = 0, categoryFilter = null) {
@@ -596,6 +619,11 @@ async function showItemDetailPanel(interaction, guildId, itemId) {
   const row2 = new ActionRowBuilder()
     .addComponents(
       new ButtonBuilder()
+        .setCustomId(`items_owners_${item.id}`)
+        .setLabel('View Owners')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('👥'),
+      new ButtonBuilder()
         .setCustomId(`items_delete_${item.id}`)
         .setLabel('Delete')
         .setStyle(ButtonStyle.Danger)
@@ -695,6 +723,8 @@ async function showItemCreationPanel(interaction, guildId) {
     // Protection
     { label: '🛡️ Rob Protection', value: 'rob_protection', description: 'Protects from being robbed' },
     { label: '🔒 Hack Protection', value: 'hack_protection', description: 'Protects from being hacked' },
+    { label: '🛡️ Rob Defense', value: 'rob_defense', description: 'Reduces attacker rob success rate' },
+    { label: '🔒 Hack Defense', value: 'hack_defense', description: 'Reduces attacker hack success rate' },
     // Boosts
     { label: '💼 Work Boost', value: 'work_boost', description: 'Increases work earnings' },
     { label: '🔫 Crime Boost', value: 'crime_boost', description: 'Increases crime earnings' },
@@ -865,6 +895,8 @@ async function updateCreationPanel(interaction, state) {
   const effectNames = {
     'rob_protection': '🛡️ Rob Protection',
     'hack_protection': '🔒 Hack Protection',
+    'rob_defense': '🛡️ Rob Defense',
+    'hack_defense': '🔒 Hack Defense',
     'work_boost': '💼 Work Boost',
     'crime_boost': '🔫 Crime Boost',
     'slut_boost': '💋 Slut Boost',
@@ -923,7 +955,9 @@ async function updateCreationPanel(interaction, state) {
     { label: '🏆 Cosmetic (No Effect)', value: 'cosmetic', description: 'Collectible with no gameplay effect', default: currentEffect === 'cosmetic' },
     { label: '🛡️ Rob Protection', value: 'rob_protection', description: 'Protects from being robbed', default: currentEffect === 'rob_protection' },
     { label: '🔒 Hack Protection', value: 'hack_protection', description: 'Protects from being hacked', default: currentEffect === 'hack_protection' },
-    { label: '💼 Work Boost', value: 'work_boost', description: 'Increases work earnings', default: currentEffect === 'work_boost' },
+    { label: '�️ Rob Defense', value: 'rob_defense', description: 'Reduces attacker rob success rate', default: currentEffect === 'rob_defense' },
+    { label: '🔒 Hack Defense', value: 'hack_defense', description: 'Reduces attacker hack success rate', default: currentEffect === 'hack_defense' },
+    { label: '�💼 Work Boost', value: 'work_boost', description: 'Increases work earnings', default: currentEffect === 'work_boost' },
     { label: '🔫 Crime Boost', value: 'crime_boost', description: 'Increases crime earnings', default: currentEffect === 'crime_boost' },
     { label: '💋 Slut Boost', value: 'slut_boost', description: 'Increases slut earnings', default: currentEffect === 'slut_boost' },
     { label: '🎯 Rob Success Boost', value: 'rob_success_boost', description: 'Increases rob success rate', default: currentEffect === 'rob_success_boost' },
@@ -2123,6 +2157,114 @@ async function handlePageNav(interaction, guildId, direction) {
   
   await interaction.deferUpdate();
   await showManageItemsPanel(interaction, guildId, newPage, state.category);
+}
+
+// ==================== ITEM OWNERS ====================
+
+async function showOwnersItemSelectPanel(interaction, guildId) {
+  const items = getShopItems(guildId, null, false);
+  
+  if (items.length === 0) {
+    return interaction.editReply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xe74c3c)
+        .setTitle('❌ No Items')
+        .setDescription('There are no items in the shop yet.')],
+      components: [new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('back_items')
+          .setLabel('Back')
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('◀️')
+      )]
+    });
+  }
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x3498db)
+    .setTitle('👥 View Item Owners')
+    .setDescription('Select an item to see all users who own it.');
+  
+  // Show up to 25 items in the select menu (Discord limit)
+  const selectItems = items.slice(0, 25);
+  
+  const selectRow = new ActionRowBuilder()
+    .addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('items_owners_select')
+        .setPlaceholder('🔍 Select an item...')
+        .addOptions(
+          selectItems.map(item => ({
+            label: item.name,
+            value: item.id.toString(),
+            description: `${item.price.toLocaleString()} - ${item.category}`,
+            emoji: parseEmojiForSelect(item.emoji)
+          }))
+        )
+    );
+  
+  const backRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('back_items')
+      .setLabel('Back')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('◀️')
+  );
+  
+  await interaction.editReply({ embeds: [embed], components: [selectRow, backRow] });
+}
+
+async function handleOwnersItemSelect(interaction, guildId) {
+  const itemId = parseInt(interaction.values[0]);
+  await interaction.deferUpdate();
+  await showItemOwnersPanel(interaction, guildId, itemId);
+}
+
+async function showItemOwnersPanel(interaction, guildId, itemId) {
+  const item = getShopItem(guildId, itemId);
+  
+  if (!item) {
+    return interaction.editReply({
+      content: '❌ Item not found!',
+      embeds: [],
+      components: []
+    });
+  }
+  
+  const owners = getItemOwners(guildId, itemId);
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x3498db)
+    .setTitle(`👥 ${item.emoji} ${item.name} — Owners`)
+    .setFooter({ text: `${owners.length} user${owners.length !== 1 ? 's' : ''} own this item • Total: ${owners.reduce((sum, o) => sum + o.quantity, 0)} held` });
+  
+  if (owners.length === 0) {
+    embed.setDescription('No users currently own this item.');
+  } else {
+    let description = '';
+    for (const owner of owners.slice(0, 25)) {
+      description += `<@${owner.user_id}> — **${owner.quantity}**x\n`;
+    }
+    if (owners.length > 25) {
+      description += `\n*...and ${owners.length - 25} more*`;
+    }
+    embed.setDescription(description);
+  }
+  
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('items_owners')
+      .setLabel('Pick Another')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('🔄'),
+    new ButtonBuilder()
+      .setCustomId('back_items')
+      .setLabel('Back to Items')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('◀️')
+  );
+  
+  await interaction.editReply({ embeds: [embed], components: [row] });
 }
 
 async function handleItemSelect(interaction, guildId) {

@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { addMoney, addToBank, getBalance } = require('../economy');
+const { addMoney, addToBank, forceRemoveMoney, removeFromBank, getBalance } = require('../economy');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -50,12 +50,22 @@ module.exports = {
     // Get balance before
     const before = getBalance(guildId, userId);
 
-    // Add/remove money
+    // Add/remove money — handle negative amounts by calling removal functions
     let success;
-    if (type === 'cash') {
-      success = await addMoney(guildId, userId, amount, reason);
+    if (amount >= 0) {
+      if (type === 'cash') {
+        success = await addMoney(guildId, userId, amount, reason);
+      } else {
+        success = await addToBank(guildId, userId, amount, reason);
+      }
     } else {
-      success = await addToBank(guildId, userId, amount, reason);
+      // Negative amount = admin removal (use forceRemove to allow going into debt)
+      const absAmount = Math.abs(amount);
+      if (type === 'cash') {
+        success = await forceRemoveMoney(guildId, userId, absAmount, reason);
+      } else {
+        success = await removeFromBank(guildId, userId, absAmount, reason);
+      }
     }
 
     if (!success) {

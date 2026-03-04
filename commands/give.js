@@ -18,6 +18,7 @@ module.exports = {
         .setRequired(true)),
 
   async execute(interaction) {
+    await interaction.deferReply();
     const guildId = interaction.guildId;
     const fromUser = interaction.user;
     const toUser = interaction.options.getUser('user');
@@ -25,7 +26,7 @@ module.exports = {
 
     // Prevent self-transfers
     if (fromUser.id === toUser.id) {
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Invalid Transfer')
@@ -36,7 +37,7 @@ module.exports = {
 
     // Prevent giving to bots
     if (toUser.bot) {
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Invalid Transfer')
@@ -54,7 +55,7 @@ module.exports = {
     } else {
       amount = parseInt(amountInput);
       if (isNaN(amount) || amount <= 0) {
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [new EmbedBuilder()
             .setColor(0xe74c3c)
             .setTitle('❌ Invalid Amount')
@@ -66,7 +67,7 @@ module.exports = {
 
     // Prevent giving debt (negative cash) or zero
     if (amount <= 0) {
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ No Cash to Give')
@@ -77,7 +78,7 @@ module.exports = {
 
     // Check if sender has enough cash
     if (senderBalance.cash < amount) {
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Insufficient Funds')
@@ -90,7 +91,7 @@ module.exports = {
     const removed = await removeMoney(guildId, fromUser.id, amount, `Gift to ${toUser.username}`);
     
     if (!removed) {
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Transfer Failed')
@@ -126,6 +127,6 @@ module.exports = {
       )
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   }
 };

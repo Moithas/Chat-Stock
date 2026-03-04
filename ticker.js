@@ -1,5 +1,5 @@
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
-const { calculateStockPrice, getUser, getAllUsers, getPriceHistoryByTimeRange, getStreakInfo, getDb, saveDatabase, getActivityTierSettings } = require('./database');
+const { calculateStockPrice, getUser, getAllUsers, getPriceHistoryByTimeRange, getDb, saveDatabase, getActivityTierSettings } = require('./database');
 const { getRecentSplitters } = require('./dividends');
 const QuickChart = require('quickchart-js');
 

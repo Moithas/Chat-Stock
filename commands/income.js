@@ -1,11 +1,11 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getWorkSettings, canWork, calculateWorkReward, getRandomFlavorText, recordWork, getTotalWorked, getWorkCount } = require('../work');
-const { getSlutSettings, canSlut, attemptSlut, calculateSlutReward, calculateFine, getRandomSuccessText, getRandomFailText, recordSlut, getSlutStats } = require('../slut');
 const { getCrimeSettings, canCrime, attemptCrime, calculateCrimeReward, calculateFine: calculateCrimeFine, getRandomSuccessText: getCrimeSuccessText, getRandomFailText: getCrimeFailText, recordCrime, getCrimeStats } = require('../crime');
 const { getDividendSettings, canCollectPassiveIncome, calculatePassiveIncome, recordPassiveIncomeCollection, getTotalPassiveIncomeCollected, getCollectableRoleIncomes, recordRoleIncomeCollection, getTotalRoleIncomeCollected } = require('../dividends');
 const { calculateStockPrice, getUser, getDb } = require('../database');
 const { addMoney, removeMoney, getBalance, applyFine } = require('../economy');
 const { getEffectValue, EFFECT_TYPES } = require('../items');
+const { getLuckyPennyEffect, LP_EFFECT_TYPES, getLuckyPennySettings, canUseLuckyPenny, recordLuckyPennyUse, rollLuckyPenny, applyBuff: applyLpBuff, getActiveLuckyPennyBuffs, LP_EFFECT_EMOJI, INVERSE_EFFECTS } = require('../luckypenny');
 
 const CURRENCY = '<:babybel:1418824333664452608>';
 
@@ -26,6 +26,7 @@ module.exports = {
     .setDescription('View all income sources and collect earnings'),
 
   async execute(interaction) {
+    await interaction.deferReply({ flags: 64 });
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
 
@@ -39,19 +40,21 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
   
   // Get settings for all income sources
   const workSettings = getWorkSettings(guildId);
-  const slutSettings = getSlutSettings(guildId);
+  const lpSettings = getLuckyPennySettings(guildId);
   const crimeSettings = getCrimeSettings(guildId);
   const collectSettings = getDividendSettings(guildId);
   
-  // Check work status
-  const workStatus = canWork(guildId, userId);
+  // Check work status (with Lucky Penny cooldown buff)
+  const lpWorkCooldown = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.WORK_COOLDOWN);
+  const workCooldownReduction = -lpWorkCooldown; // negate: LP -20 (buff) → +20 reduction; LP +20 (debuff) → -20 (increase)
+  const workStatus = canWork(guildId, userId, workCooldownReduction);
   const workReady = workStatus.canWork;
   const workTime = workStatus.timeRemaining ? formatTimeRemaining(workStatus.timeRemaining) : null;
   
-  // Check slut status
-  const slutStatus = canSlut(guildId, userId);
-  const slutReady = slutStatus.canSlut;
-  const slutTime = slutStatus.timeRemaining ? formatTimeRemaining(slutStatus.timeRemaining) : null;
+  // Check Lucky Penny status
+  const lpStatus = canUseLuckyPenny(guildId, userId);
+  const lpReady = lpStatus.canUse;
+  const lpTime = lpStatus.timeRemaining ? formatTimeRemaining(lpStatus.timeRemaining) : null;
   
   // Check crime status
   const crimeStatus = canCrime(guildId, userId);
@@ -109,18 +112,18 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
     });
   }
   
-  // Slut section
-  if (slutSettings.enabled) {
+  // Lucky Penny section
+  if (lpSettings.enabled) {
     fields.push({
-      name: `💋 Slut ${slutReady ? '✅' : '⏳'}`,
-      value: slutReady 
-        ? `**Ready!**`
-        : `Ready in **${slutTime}**`,
+      name: `🪙 Lucky Penny ${lpReady ? '✅' : '⏳'}`,
+      value: lpReady 
+        ? `**Ready!** Try your luck!`
+        : `Ready in **${lpTime}**`,
       inline: true
     });
   } else {
     fields.push({
-      name: '💋 Slut ❌',
+      name: '🪙 Lucky Penny ❌',
       value: 'Disabled',
       inline: true
     });
@@ -199,13 +202,13 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
       .setDisabled(!workReady || !workSettings.enabled)
   );
   
-  // Slut button
+  // Lucky Penny button
   row1.addComponents(
     new ButtonBuilder()
-      .setCustomId('income_slut')
-      .setLabel('💋 Slut')
-      .setStyle(slutReady && slutSettings.enabled ? ButtonStyle.Success : ButtonStyle.Secondary)
-      .setDisabled(!slutReady || !slutSettings.enabled)
+      .setCustomId('income_luckypenny')
+      .setLabel('🪙 Lucky Penny')
+      .setStyle(lpReady && lpSettings.enabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+      .setDisabled(!lpReady || !lpSettings.enabled)
   );
   
   // Crime button
@@ -246,10 +249,15 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
     await interaction.editReply(replyOptions);
   } else if (isUpdate) {
     await interaction.update(replyOptions);
+  } else if (interaction.deferred) {
+    await interaction.editReply(replyOptions);
   } else {
     await interaction.reply(replyOptions);
   }
 }
+
+// Prevent double-click processing
+const processingUsers = new Set();
 
 // Handle button interactions
 async function handleIncomeButton(interaction) {
@@ -261,20 +269,30 @@ async function handleIncomeButton(interaction) {
     return showIncomePanel(interaction, guildId, userId, true);
   }
   
-  if (customId === 'income_work') {
-    return executeWork(interaction, guildId, userId);
+  // Prevent double-click on income actions
+  if (processingUsers.has(userId)) {
+    return interaction.reply({ content: '⏳ Processing your previous action...', flags: 64 });
   }
+  processingUsers.add(userId);
   
-  if (customId === 'income_slut') {
-    return executeSlut(interaction, guildId, userId);
-  }
-  
-  if (customId === 'income_crime') {
-    return executeCrime(interaction, guildId, userId);
-  }
-  
-  if (customId === 'income_collect') {
-    return executeCollect(interaction, guildId, userId);
+  try {
+    if (customId === 'income_work') {
+      return await executeWork(interaction, guildId, userId);
+    }
+    
+    if (customId === 'income_luckypenny') {
+      return await executeLuckyPenny(interaction, guildId, userId);
+    }
+    
+    if (customId === 'income_crime') {
+      return await executeCrime(interaction, guildId, userId);
+    }
+    
+    if (customId === 'income_collect') {
+      return await executeCollect(interaction, guildId, userId);
+    }
+  } finally {
+    processingUsers.delete(userId);
   }
 }
 
@@ -285,7 +303,10 @@ async function executeWork(interaction, guildId, userId) {
     return interaction.reply({ content: '❌ Work is disabled on this server.', flags: 64 });
   }
   
-  const { canWork: canDoWork, reason } = canWork(guildId, userId);
+  // Apply LP cooldown buff to work
+  const lpWorkCdBuff = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.WORK_COOLDOWN);
+  const workCdReduction = -lpWorkCdBuff; // negate: LP -20 (buff) → +20 reduction
+  const { canWork: canDoWork, reason } = canWork(guildId, userId, workCdReduction);
   if (!canDoWork) {
     return interaction.reply({ content: `⏳ ${reason}`, flags: 64 });
   }
@@ -295,12 +316,17 @@ async function executeWork(interaction, guildId, userId) {
   const baseAmount = calculateWorkReward(settings);
   const flavorText = getRandomFlavorText(settings);
   
-  // Apply item boost
+  // Apply item boost + Lucky Penny payout buff
   const workBoost = getEffectValue(guildId, userId, EFFECT_TYPES.WORK_BOOST);
-  const amount = workBoost > 0 
-    ? Math.floor(baseAmount * (1 + workBoost / 100))
-    : baseAmount;
-  const boosted = workBoost > 0;
+  const lpWorkBoost = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.WORK_PAYOUT);
+  const totalBoost = workBoost + lpWorkBoost;
+  const amount = totalBoost > 0 
+    ? Math.floor(baseAmount * (1 + totalBoost / 100))
+    : totalBoost < 0
+      ? Math.max(1, Math.floor(baseAmount * (1 + totalBoost / 100)))
+      : baseAmount;
+  const boosted = totalBoost > 0;
+  const debuffed = totalBoost < 0;
   
   // Record the work FIRST to set cooldown (prevents spam exploit)
   recordWork(guildId, userId, amount, flavorText);
@@ -335,90 +361,104 @@ async function executeWork(interaction, guildId, userId) {
   setTimeout(() => showIncomePanel(interaction, guildId, userId, 'edit'), 500);
 }
 
-async function executeSlut(interaction, guildId, userId) {
-  const settings = getSlutSettings(guildId);
+async function executeLuckyPenny(interaction, guildId, userId) {
+  const settings = getLuckyPennySettings(guildId);
   
   if (!settings.enabled) {
-    return interaction.reply({ content: '❌ This command is disabled on this server.', flags: 64 });
+    return interaction.reply({ content: '❌ Lucky Penny is currently disabled.', flags: 64 });
   }
   
-  const { canSlut: canDoSlut, reason } = canSlut(guildId, userId);
-  if (!canDoSlut) {
-    return interaction.reply({ content: `⏳ ${reason}`, flags: 64 });
+  const cooldownCheck = canUseLuckyPenny(guildId, userId);
+  if (!cooldownCheck.canUse) {
+    return interaction.reply({ content: `⏳ ${cooldownCheck.reason}`, flags: 64 });
   }
   
   await interaction.deferUpdate();
   
-  const success = attemptSlut(settings);
+  // Roll the penny first to determine outcome
+  const result = rollLuckyPenny(guildId, userId, settings);
   
-  if (success) {
-    const baseAmount = calculateSlutReward(settings);
-    const flavorText = getRandomSuccessText(settings);
-    
-    // Apply item boost
-    const slutBoost = getEffectValue(guildId, userId, EFFECT_TYPES.SLUT_BOOST);
-    const amount = slutBoost > 0 
-      ? Math.floor(baseAmount * (1 + slutBoost / 100))
-      : baseAmount;
-    const boosted = slutBoost > 0;
-    
-    // Record FIRST to set cooldown (prevents spam exploit)
-    recordSlut(guildId, userId, true, amount, flavorText);
-    await addMoney(guildId, userId, amount, 'Slut payout');
-    
-    const stats = getSlutStats(guildId, userId);
-    const netProfit = stats.totalGained - stats.totalLost;
-    
-    const embed = new EmbedBuilder()
-      .setColor(0xff69b4)
-      .setTitle('💋 Success!')
-      .setDescription(flavorText)
-      .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-      .addFields({
-        name: '💰 You Earned',
-        value: boosted 
-          ? `**+${amount.toLocaleString()}** ${CURRENCY} ⚡ (+${slutBoost}% boost!)`
-          : `**+${amount.toLocaleString()}** ${CURRENCY}`,
-        inline: true
-      })
-      .setFooter({ text: `Success rate: ${Math.round((stats.successes / (stats.successes + stats.failures)) * 100)}% | Net profit: ${netProfit >= 0 ? '+' : ''}${netProfit.toLocaleString()} | ${interaction.user.displayName}` })
-      .setTimestamp();
-
-    await interaction.channel.send({ embeds: [embed] });
+  // Record cooldown — reduced if nothing
+  if (result.type === 'nothing') {
+    recordLuckyPennyUse(guildId, userId, settings.nothingCooldownHours);
   } else {
-    let totalBalance = 0;
-    try {
-      const balance = await getBalance(guildId, userId);
-      totalBalance = balance.total;
-    } catch (err) {
-      console.error('Error fetching balance:', err);
+    recordLuckyPennyUse(guildId, userId);
+  }
+  
+  const embed = new EmbedBuilder()
+    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+    .setTimestamp();
+  
+  if (result.type === 'buff') {
+    applyLpBuff(guildId, userId, result.effectType, result.value, result.durationHours);
+    
+    const isInverse = INVERSE_EFFECTS.has(result.effectType);
+    const emojis = LP_EFFECT_EMOJI[result.effectType] || { buff: '✅', debuff: '❌' };
+    const emoji = result.isBuff ? emojis.buff : emojis.debuff;
+    
+    let effectDescription;
+    if (result.isBuff) {
+      effectDescription = isInverse
+        ? `${emoji} **${result.effectName}** reduced by **${result.displayPercent}%**`
+        : `${emoji} **${result.effectName}** increased by **${result.displayPercent}%**`;
+    } else {
+      effectDescription = isInverse
+        ? `${emoji} **${result.effectName}** increased by **${result.displayPercent}%**`
+        : `${emoji} **${result.effectName}** reduced by **${result.displayPercent}%**`;
     }
     
-    const fine = calculateFine(settings, totalBalance);
-    const flavorText = getRandomFailText(settings);
+    embed
+      .setColor(result.isBuff ? 0x2ecc71 : 0xe74c3c)
+      .setTitle(result.isBuff ? '🪙 Lucky Penny — Buff!' : '🪙 Lucky Penny — Cursed!')
+      .setDescription(`${result.flavorText}\n\n${effectDescription}`)
+      .addFields({ name: '⏱️ Duration', value: `${result.durationHours} hours`, inline: true });
     
-    // Record FIRST to set cooldown (prevents spam exploit)
-    recordSlut(guildId, userId, false, fine, flavorText);
-    await applyFine(guildId, userId, fine, 'Slut fine');
+  } else if (result.type === 'currency') {
+    await addMoney(guildId, userId, result.amount, 'Lucky Penny');
     
-    const stats = getSlutStats(guildId, userId);
-    const netProfit = stats.totalGained - stats.totalLost;
+    embed
+      .setColor(0xf1c40f)
+      .setTitle('🪙 Lucky Penny — Payday!')
+      .setDescription(result.flavorText)
+      .addFields({ name: '💰 Found', value: `${result.amount.toLocaleString()} ${CURRENCY}`, inline: true });
     
-    const embed = new EmbedBuilder()
-      .setColor(0x8b0000)
-      .setTitle('😰 Busted!')
-      .setDescription(flavorText)
-      .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-      .addFields({
-        name: '💸 Fine',
-        value: `**-${fine.toLocaleString()}** ${CURRENCY}`,
-        inline: true
-      })
-      .setFooter({ text: `Success rate: ${Math.round((stats.successes / Math.max(1, stats.successes + stats.failures)) * 100)}% | Net profit: ${netProfit >= 0 ? '+' : ''}${netProfit.toLocaleString()} | ${interaction.user.displayName}` })
-      .setTimestamp();
-
-    await interaction.channel.send({ embeds: [embed] });
+  } else {
+    const nothingCdText = settings.nothingCooldownHours < settings.cooldownHours
+      ? `\n\n⏩ *Reduced cooldown: **${settings.nothingCooldownHours}h** instead of ${settings.cooldownHours}h*`
+      : '';
+    embed
+      .setColor(0x95a5a6)
+      .setTitle('🪙 Lucky Penny — Nothing...')
+      .setDescription(result.flavorText + nothingCdText);
   }
+  
+  // Show active buffs if any
+  const activeBuffs = getActiveLuckyPennyBuffs(guildId, userId);
+  if (activeBuffs.length > 0) {
+    const buffList = activeBuffs.map(b => {
+      const timeLeft = b.expiresAt - Date.now();
+      const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
+      const minsLeft = Math.ceil((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
+      const timeStr = hoursLeft > 0 ? `${hoursLeft}h ${minsLeft}m` : `${minsLeft}m`;
+      const isInverse = INVERSE_EFFECTS.has(b.effectType);
+      let desc;
+      if (b.isBuff) {
+        desc = isInverse
+          ? `${b.emoji} ${b.name}: −${b.displayPercent}% (${timeStr})`
+          : `${b.emoji} ${b.name}: +${b.displayPercent}% (${timeStr})`;
+      } else {
+        desc = isInverse
+          ? `${b.emoji} ${b.name}: +${b.displayPercent}% (${timeStr})`
+          : `${b.emoji} ${b.name}: −${b.displayPercent}% (${timeStr})`;
+      }
+      return desc;
+    }).join('\n');
+    embed.addFields({ name: '📋 Active Effects', value: buffList, inline: false });
+  }
+  
+  embed.setFooter({ text: interaction.user.displayName });
+  
+  await interaction.channel.send({ embeds: [embed] });
   
   // Refresh the panel
   setTimeout(() => showIncomePanel(interaction, guildId, userId, 'edit'), 500);
