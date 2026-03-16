@@ -1,8 +1,13 @@
 const initSqlJs = require('sql.js');
 const fs = require('fs');
+const path = require('path');
+const log = require('./logger');
 
 let db;
 const dbPath = './chatstock.db';
+const backupDir = './backups';
+const MAX_BACKUPS = 5;
+const BACKUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
 // Initialize database
 async function initDatabase() {
@@ -93,6 +98,9 @@ async function initDatabase() {
     );
   `);
 
+  // Migration: add created_at column to balances for new player immunity tracking
+  try { db.run(`ALTER TABLE balances ADD COLUMN created_at INTEGER DEFAULT 0`); } catch (e) { /* already exists */ }
+
   db.run(`
     CREATE TABLE IF NOT EXISTS economy_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,7 +139,7 @@ async function initDatabase() {
     )
   `);
 
-  console.log('✅ Database initialized');
+  log.info('Database initialized');
 }
 
 // Save database to file
@@ -151,6 +159,43 @@ process.on('SIGINT', () => {
   saveDatabase();
   process.exit();
 });
+
+// === Database Backup System ===
+function createBackup() {
+  try {
+    if (!db) return;
+
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(backupDir, `chatstock-${timestamp}.db`);
+    const data = db.export();
+    fs.writeFileSync(backupPath, data);
+
+    // Prune old backups — keep only the most recent MAX_BACKUPS
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('chatstock-') && f.endsWith('.db'))
+      .sort()
+      .reverse();
+
+    for (let i = MAX_BACKUPS; i < files.length; i++) {
+      fs.unlinkSync(path.join(backupDir, files[i]));
+    }
+
+    const sizeMB = (data.length / 1024 / 1024).toFixed(2);
+    log.info(`Database backup created: ${backupPath} (${sizeMB} MB) — ${files.length > MAX_BACKUPS ? files.length - MAX_BACKUPS : 0} old backup(s) pruned`);
+  } catch (error) {
+    log.error(`Database backup failed: ${error.message}`);
+  }
+}
+
+// Create backup on startup (after a short delay), then every 6 hours
+setTimeout(() => {
+  createBackup();
+  setInterval(createBackup, BACKUP_INTERVAL);
+}, 30000); // Wait 30s for DB to fully initialize
 
 // User functions
 function getUser(userId) {
@@ -186,7 +231,7 @@ function createUser(userId, username) {
     
     saveDatabase();
   } catch (error) {
-    console.error('Error creating user:', error);
+    log.error('Error creating user', { error: error.message });
   }
 }
 
@@ -640,12 +685,12 @@ function getLeaderboard(limit = 10, guildId = null) {
   });
 
   // Debug logging
-  console.log('Before sort:', usersWithPrices.map(u => `${u.username}: ${u.currentPrice}`));
+  log.debug('Before sort:', usersWithPrices.map(u => `${u.username}: ${u.currentPrice}`));
 
   // Sort by price (highest first)
   const sorted = usersWithPrices.sort((a, b) => b.currentPrice - a.currentPrice);
 
-  console.log('After sort:', sorted.slice(0, limit).map(u => `${u.username}: ${u.currentPrice}`));
+  log.debug('After sort:', sorted.slice(0, limit).map(u => `${u.username}: ${u.currentPrice}`));
 
   return sorted.slice(0, limit);
 }
@@ -804,6 +849,7 @@ function adminRemoveShares(ownerId, stockUserId, shares) {
 module.exports = {
   initDatabase,
   saveDatabase,
+  createBackup,
   getUser,
   getAllUsers,
   createUser,

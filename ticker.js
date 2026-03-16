@@ -2,8 +2,9 @@ const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { calculateStockPrice, getUser, getAllUsers, getPriceHistoryByTimeRange, getDb, saveDatabase, getActivityTierSettings } = require('./database');
 const { getRecentSplitters } = require('./dividends');
 const QuickChart = require('quickchart-js');
+const { getCurrency } = require('./admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Store reference to Discord client and channel ID
 let discordClient = null;
@@ -473,7 +474,7 @@ async function buildMarketDashboard(guildId = null) {
     const changeStr = s.changePercent >= 0 ? `+${s.changePercent.toFixed(1)}%` : `${s.changePercent.toFixed(1)}%`;
     // Show split indicator instead of red dot for users who recently split
     const changeEmoji = s.recentlySplit ? '🔀' : (s.changePercent >= 0 ? '🟢' : '🔴');
-    return `${medal} **${s.username}** • ${Math.round(s.currentPrice).toLocaleString()} ${CURRENCY} ${changeEmoji} ${changeStr}`;
+    return `${medal} **${s.username}** • ${Math.round(s.currentPrice).toLocaleString()} ${getCurrency(guildId)} ${changeEmoji} ${changeStr}`;
   }).join('\n');
 
   embed.addFields({ name: `💰 Top ${dashboardSettings.topStocksCount} Stocks`, value: topStocksText || 'No data', inline: false });
@@ -500,7 +501,7 @@ async function buildMarketDashboard(guildId = null) {
   // Market summary
   embed.addFields({
     name: '📈 Market Summary',
-    value: `**Trend:** ${marketTrend}\n**Avg Change:** ${avgChange >= 0 ? '+' : ''}${avgChange.toFixed(2)}%\n**Total Stocks:** ${stockData.length}\n**Total Market Cap:** ${Math.round(totalMarketCap).toLocaleString()} ${CURRENCY}`,
+    value: `**Trend:** ${marketTrend}\n**Avg Change:** ${avgChange >= 0 ? '+' : ''}${avgChange.toFixed(2)}%\n**Total Stocks:** ${stockData.length}\n**Total Market Cap:** ${Math.round(totalMarketCap).toLocaleString()} ${getCurrency(guildId)}`,
     inline: false
   });
 
@@ -732,8 +733,8 @@ async function sendPriceAlert(alert) {
       .setTitle(`${emoji} STOCK ALERT: ${alert.username}`)
       .setDescription(`**${alert.username}**'s stock is ${direction} **${Math.abs(alert.changePercent).toFixed(1)}%**!`)
       .addFields(
-        { name: 'Previous Price', value: `${Math.round(alert.oldPrice)} ${CURRENCY}`, inline: true },
-        { name: 'Current Price', value: `${Math.round(alert.newPrice)} ${CURRENCY}`, inline: true },
+        { name: 'Previous Price', value: `${Math.round(alert.oldPrice)} ${getCurrency(guildId)}`, inline: true },
+        { name: 'Current Price', value: `${Math.round(alert.newPrice)} ${getCurrency(guildId)}`, inline: true },
         { name: 'Change', value: `${isPositive ? '+' : ''}${alert.changePercent.toFixed(2)}%`, inline: true }
       )
       .setTimestamp()
@@ -828,7 +829,7 @@ async function sendEarningsReport() {
     if (gainers.length > 0) {
       const gainersText = gainers.map((s, i) => {
         const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '📈';
-        return `${medal} **${s.username}** +${s.changePercent.toFixed(1)}% (${Math.round(s.currentPrice)} ${CURRENCY})`;
+        return `${medal} **${s.username}** +${s.changePercent.toFixed(1)}% (${Math.round(s.currentPrice)} ${getCurrency(guildId)})`;
       }).join('\n');
       embed.addFields({ name: '🚀 Top Gainers', value: gainersText, inline: false });
     } else {
@@ -838,7 +839,7 @@ async function sendEarningsReport() {
     // Top Losers
     if (losers.length > 0) {
       const losersText = losers.map((s, i) => {
-        return `📉 **${s.username}** ${s.changePercent.toFixed(1)}% (${Math.round(s.currentPrice)} ${CURRENCY})`;
+        return `📉 **${s.username}** ${s.changePercent.toFixed(1)}% (${Math.round(s.currentPrice)} ${getCurrency(guildId)})`;
       }).join('\n');
       embed.addFields({ name: '💔 Biggest Losers', value: losersText, inline: false });
     } else {
@@ -849,7 +850,7 @@ async function sendEarningsReport() {
     if (mostValuable.length > 0) {
       const valuableText = mostValuable.map((s, i) => {
         const medal = i === 0 ? '👑' : i === 1 ? '💎' : i === 2 ? '⭐' : '💰';
-        return `${medal} **${s.username}** - ${Math.round(s.currentPrice)} ${CURRENCY}`;
+        return `${medal} **${s.username}** - ${Math.round(s.currentPrice)} ${getCurrency(guildId)}`;
       }).join('\n');
       embed.addFields({ name: '💰 Most Valuable Stocks', value: valuableText, inline: false });
     }
@@ -916,7 +917,7 @@ async function sendStreakAnnouncement(userId, username, streakDays, tier) {
       .addFields(
         { name: '📅 Streak', value: `${streakDays} days`, inline: true },
         { name: '📈 Stock Bonus', value: info.bonus, inline: true },
-        { name: '💰 Current Price', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true }
+        { name: '💰 Current Price', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true }
       )
       .setTimestamp()
       .setFooter({ text: tier === 3 ? 'Chat-Stock Ticker • Gold streak expires after 7 days' : 'Chat-Stock Ticker • Keep the streak going!' });
@@ -945,7 +946,7 @@ async function sendStreakExpiredAnnouncement(userId, username) {
       .setTitle(`⏰ Gold Streak Expired`)
       .setDescription(`**${username}**'s Gold Streak bonus has expired after 7 days.`)
       .addFields(
-        { name: '💰 Current Price', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true },
+        { name: '💰 Current Price', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
         { name: '📈 Bonus Lost', value: '-7%', inline: true }
       )
       .setTimestamp()

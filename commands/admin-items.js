@@ -1,6 +1,6 @@
 // Admin Items Panel - Item Shop management
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, UserSelectMenuBuilder, RoleSelectMenuBuilder } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 const { 
   getItemSettings, 
   updateItemSettings, 
@@ -26,7 +26,7 @@ const {
 const { addMoney } = require('../economy');
 const { ChannelType } = require('discord.js');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 const ITEMS_PER_PAGE = 5;
 
 // Helper function to safely parse emoji for select menu options
@@ -108,7 +108,7 @@ async function handleInteraction(interaction, guildId) {
   // Handle button interactions
   if (interaction.isButton()) {
     // Check for dynamic item IDs
-    if (customId.startsWith('items_edit_') || customId.startsWith('items_delete_') || customId.startsWith('items_toggle_') || customId.startsWith('items_usable_') || customId.startsWith('items_owners_')) {
+    if (customId.startsWith('items_edit_') || customId.startsWith('items_delete_') || customId.startsWith('items_toggle_') || customId.startsWith('items_usable_') || customId.startsWith('items_owners_') || customId.startsWith('items_huntable_')) {
       const parts = customId.split('_');
       const action = parts[1];
       const itemId = parseInt(parts[2]);
@@ -129,6 +129,9 @@ async function handleInteraction(interaction, guildId) {
         return true;
       } else if (action === 'usable') {
         await handleToggleUsable(interaction, guildId, itemId);
+        return true;
+      } else if (action === 'huntable') {
+        await handleToggleHuntable(interaction, guildId, itemId);
         return true;
       }
     }
@@ -368,7 +371,7 @@ async function showItemsPanel(interaction, guildId) {
       { name: '🔌 Shop Status', value: settings.shopEnabled ? '✅ Enabled' : '❌ Disabled', inline: true },
       { name: '📦 Total Items', value: `${items.length}`, inline: true },
       { name: '💰 Total Sales', value: `${stats.totalSales}`, inline: true },
-      { name: '📊 Revenue', value: `${stats.totalRevenue.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '📊 Revenue', value: `${stats.totalRevenue.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '📋 Pending Requests', value: pendingCount > 0 ? `⚠️ ${pendingCount}` : '✅ None', inline: true },
       { name: '🎫 Ticket Settings', value: `Category: **${ticketCategoryName}**\nLog: ${ticketLogName}`, inline: true }
     );
@@ -467,7 +470,7 @@ async function showManageItemsPanel(interaction, guildId, page = 0, categoryFilt
     for (const item of pageItems) {
       const status = item.enabled ? '✅' : '❌';
       const effectText = item.effect_type ? ` → ${item.effect_type} (+${item.effect_value}%)` : '';
-      description += `${status} ${item.emoji} **${item.name}** - ${item.price.toLocaleString()} ${CURRENCY}${effectText}\n`;
+      description += `${status} ${item.emoji} **${item.name}** - ${item.price.toLocaleString()} ${getCurrency(guildId)}${effectText}\n`;
       description += `   ${item.description ? item.description.substring(0, 50) + (item.description.length > 50 ? '...' : '') : 'No description'}\n\n`;
     }
     embed.setDescription(description);
@@ -560,10 +563,11 @@ async function showItemDetailPanel(interaction, guildId, itemId) {
     .setTitle(`${item.emoji} ${item.name}`)
     .setDescription(item.description || 'No description')
     .addFields(
-      { name: '💰 Price', value: `${item.price.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💰 Price', value: `${item.price.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '📂 Category', value: item.category, inline: true },
       { name: '🛒 For Sale', value: isForSale ? '✅ Yes' : '❌ No', inline: true },
-      { name: '🔓 Usable', value: isUsable ? '✅ Yes' : '❌ No', inline: true }
+      { name: '🔓 Usable', value: isUsable ? '✅ Yes' : '❌ No', inline: true },
+      { name: '🏹 Hunt Eligible', value: item.hunt_eligible === 1 ? '✅ Yes' : '❌ No', inline: true }
     );
   
   // Only show effect details for items where they matter
@@ -613,7 +617,12 @@ async function showItemDetailPanel(interaction, guildId, itemId) {
         .setCustomId(`items_usable_${item.id}`)
         .setLabel(isUsable ? 'Disable Use' : 'Enable Use')
         .setStyle(isUsable ? ButtonStyle.Secondary : ButtonStyle.Success)
-        .setEmoji(isUsable ? '🔒' : '🔓')
+        .setEmoji(isUsable ? '🔒' : '🔓'),
+      new ButtonBuilder()
+        .setCustomId(`items_huntable_${item.id}`)
+        .setLabel(item.hunt_eligible === 1 ? 'Remove from Hunt' : 'Add to Hunt')
+        .setStyle(item.hunt_eligible === 1 ? ButtonStyle.Secondary : ButtonStyle.Success)
+        .setEmoji('🏹')
     );
   
   const row2 = new ActionRowBuilder()
@@ -654,7 +663,7 @@ async function showStatsPanel(interaction, guildId) {
     .addFields(
       { name: '📦 Total Items', value: `${stats.totalItems}`, inline: true },
       { name: '🛒 Total Sales', value: `${stats.totalSales}`, inline: true },
-      { name: '💰 Total Revenue', value: `${stats.totalRevenue.toLocaleString()} ${CURRENCY}`, inline: true }
+      { name: '💰 Total Revenue', value: `${stats.totalRevenue.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     );
   
   // Add category breakdown
@@ -736,6 +745,8 @@ async function showItemCreationPanel(interaction, guildId) {
     { label: '📉 Rob Fine Reduction', value: 'rob_fine_reduction', description: 'Reduces fines when caught robbing' },
     { label: '📉 Hack Fine Reduction', value: 'hack_fine_reduction', description: 'Reduces fines when caught hacking' },
     { label: '📉 Crime Fine Reduction', value: 'crime_fine_reduction', description: 'Reduces fines when caught' },
+    // Access keys
+    { label: '🗝️ Dungeon Key', value: 'dungeon_key', description: 'Required to enter the dungeon (consumed on entry)' },
     // Special
         { label: '�️ Free Lottery Ticket', value: 'lottery_free_ticket', description: 'Instant free lottery ticket (random numbers)' },
         { label: '⏱️ Cooldown Reduction', value: 'cooldown_reduction', description: 'Reduces command cooldowns' },
@@ -910,6 +921,7 @@ async function updateCreationPanel(interaction, state) {
     'lottery_free_ticket': '🎟️ Free Lottery Ticket',
     'bank_interest_boost': '🏦 Bank Interest Boost',
     'cooldown_reduction': '⏱️ Cooldown Reduction',
+    'dungeon_key': '🗝️ Dungeon Key',
     'role_grant': '🏷️ Role Grant',
     'earnings_penalty': '📉 Earnings Penalty',
     'robbery_vulnerability': '⚠️ Robbery Vulnerability',
@@ -968,6 +980,7 @@ async function updateCreationPanel(interaction, state) {
     { label: '📉 Crime Fine Reduction', value: 'crime_fine_reduction', description: 'Reduces fines when caught', default: currentEffect === 'crime_fine_reduction' },
     { label: '🎟️ Free Lottery Ticket', value: 'lottery_free_ticket', description: 'Instant free lottery ticket', default: currentEffect === 'lottery_free_ticket' },
     { label: '⏱️ Cooldown Reduction', value: 'cooldown_reduction', description: 'Reduces command cooldowns', default: currentEffect === 'cooldown_reduction' },
+    { label: '🗝️ Dungeon Key', value: 'dungeon_key', description: 'Required to enter the dungeon', default: currentEffect === 'dungeon_key' },
     { label: '🏷️ Role Grant', value: 'role_grant', description: 'Grants a Discord role when used', default: currentEffect === 'role_grant' },
     { label: '🎨 Custom Emoji (Service)', value: 'service_custom_emoji', description: 'Admin adds custom emoji', default: currentEffect === 'service_custom_emoji' },
     { label: '📝 Nickname Change (Service)', value: 'service_nickname', description: 'Admin changes nickname', default: currentEffect === 'service_nickname' },
@@ -1204,7 +1217,7 @@ async function handleItemCreationModal(interaction, guildId) {
   }
   
   // Build success message
-  let successMsg = `✅ Created item **${emoji} ${name}** for **${price.toLocaleString()}** ${CURRENCY}\n📁 Category: \`${state.category}\`\n⚡ Effect: \`${state.effectType || 'cosmetic'}\``;
+  let successMsg = `✅ Created item **${emoji} ${name}** for **${price.toLocaleString()}** ${getCurrency(guildId)}\n📁 Category: \`${state.category}\`\n⚡ Effect: \`${state.effectType || 'cosmetic'}\``;
   
   // Add role info for role_grant items
   if (isRoleGrant && state.roleId) {
@@ -1912,7 +1925,7 @@ async function handleAddItemModal(interaction, guildId) {
     `Added item: ${name} (${price} coins)`);
   
   await interaction.reply({ 
-    content: `✅ Created item **${emoji} ${name}** for **${price.toLocaleString()}** ${CURRENCY}`,
+    content: `✅ Created item **${emoji} ${name}** for **${price.toLocaleString()}** ${getCurrency(guildId)}`,
     ephemeral: true 
   });
   
@@ -2129,6 +2142,22 @@ async function handleToggleUsable(interaction, guildId, itemId) {
   
   logAdminAction(guildId, interaction.user.id, interaction.user.username, 'ITEM_USABLE_TOGGLE', 
     `${currentUsable ? 'Disabled' : 'Enabled'} use for item: ${item.name}`);
+  
+  await interaction.deferUpdate();
+  await showItemDetailPanel(interaction, guildId, itemId);
+}
+
+async function handleToggleHuntable(interaction, guildId, itemId) {
+  const item = getShopItem(guildId, itemId);
+  if (!item) {
+    return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
+  }
+  
+  const currentHuntable = item.hunt_eligible === 1;
+  updateShopItem(guildId, itemId, { hunt_eligible: currentHuntable ? 0 : 1 });
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'ITEM_HUNT_TOGGLE', 
+    `${currentHuntable ? 'Removed from' : 'Added to'} hunt pool: ${item.name}`);
   
   await interaction.deferUpdate();
   await showItemDetailPanel(interaction, guildId, itemId);

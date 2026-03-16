@@ -46,6 +46,9 @@ const EFFECT_TYPES = {
   SERVICE_CUSTOM_COLOR: 'service_custom_color',      // Admin gives user a custom role color
   SERVICE_OTHER: 'service_other',                    // Generic service item (use description)
   
+  // Access keys (consumed on use, grants entry)
+  DUNGEON_KEY: 'dungeon_key',             // Required to enter dungeon (effect_value = tier level)
+  
   // Cosmetic (no effect, just collectible)
   COSMETIC: 'cosmetic',                   // No effect, just a collectible/trophy
 };
@@ -72,6 +75,7 @@ const EFFECT_TYPE_NAMES = {
   [EFFECT_TYPES.EARNINGS_PENALTY]: 'Earnings Penalty',
   [EFFECT_TYPES.ROBBERY_VULNERABILITY]: 'Robbery Vulnerability',
   [EFFECT_TYPES.ROLE_GRANT]: 'Role Grant',
+  [EFFECT_TYPES.DUNGEON_KEY]: 'Dungeon Key',
   [EFFECT_TYPES.COSMETIC]: 'Cosmetic',
 };
 
@@ -159,6 +163,30 @@ const DEFAULT_ITEMS = [
     emoji: '⚖️'
   },
   {
+    name: 'Lockpick Kit',
+    description: 'A quality lockpick set that reduces rob fines by 30% for 12 hours.',
+    price: 35000,
+    category: 'utility',
+    effect_type: 'rob_fine_reduction',
+    effect_value: 30, // -30% rob fines
+    duration_hours: 12,
+    max_stack: 1,
+    enabled: true,
+    emoji: '🔓'
+  },
+  {
+    name: 'Proxy Server',
+    description: 'Route through proxies to reduce hack fines by 30% for 12 hours.',
+    price: 45000,
+    category: 'utility',
+    effect_type: 'hack_fine_reduction',
+    effect_value: 30, // -30% hack fines
+    duration_hours: 12,
+    max_stack: 1,
+    enabled: true,
+    emoji: '🛡️'
+  },
+  {
     name: 'XP Booster',
     description: 'Gain 50% more XP from all activities for 12 hours.',
     price: 30000,
@@ -216,6 +244,13 @@ function initItems(database) {
   // Add effect_value_text column for storing large IDs like Discord snowflakes (role IDs)
   try {
     db.run('ALTER TABLE shop_items ADD COLUMN effect_value_text TEXT');
+  } catch (e) {
+    // Column already exists
+  }
+
+  // Add hunt_eligible column (whether item can drop from /hunt)
+  try {
+    db.run('ALTER TABLE shop_items ADD COLUMN hunt_eligible INTEGER DEFAULT 0');
   } catch (e) {
     // Column already exists
   }
@@ -435,6 +470,20 @@ function getShopItems(guildId, category = null, enabledOnly = true) {
   });
 }
 
+// Get all hunt-eligible items for a guild
+function getHuntEligibleItems(guildId) {
+  if (!db) return [];
+  const result = db.exec(
+    'SELECT * FROM shop_items WHERE guild_id = ? AND hunt_eligible = 1 AND enabled = 1',
+    [guildId]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  return result[0].values.map(row => {
+    const cols = result[0].columns;
+    return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
+  });
+}
+
 // Get a specific item by ID
 function getShopItem(guildId, itemId) {
   if (!db) return null;
@@ -545,6 +594,8 @@ function updateShopItem(guildId, itemId, updates) {
   if (updates.enabled !== undefined) { fields.push('enabled = ?'); values.push(updates.enabled ? 1 : 0); }
   if (updates.emoji !== undefined) { fields.push('emoji = ?'); values.push(updates.emoji); }
   if (updates.use_cooldown_hours !== undefined) { fields.push('use_cooldown_hours = ?'); values.push(updates.use_cooldown_hours); }
+  if (updates.usable !== undefined) { fields.push('usable = ?'); values.push(updates.usable); }
+  if (updates.hunt_eligible !== undefined) { fields.push('hunt_eligible = ?'); values.push(updates.hunt_eligible); }
   
   if (fields.length === 0) return false;
   
@@ -626,6 +677,44 @@ function getUserInventory(guildId, userId) {
     const cols = result[0].columns;
     return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
   });
+}
+
+// Get inventory item by effect type (returns first match with quantity > 0)
+function getInventoryItemByEffect(guildId, userId, effectType) {
+  if (!db) return null;
+  
+  const result = db.exec(`
+    SELECT ui.*, si.name, si.description, si.category, si.effect_type, si.effect_value, si.duration_hours, si.emoji
+    FROM user_inventory ui
+    JOIN shop_items si ON ui.item_id = si.id
+    WHERE ui.guild_id = ? AND ui.user_id = ? AND si.effect_type = ? AND ui.quantity > 0
+    ORDER BY si.effect_value ASC
+    LIMIT 1
+  `, [guildId, userId, effectType]);
+  
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  
+  const cols = result[0].columns;
+  const vals = result[0].values[0];
+  return cols.reduce((obj, col, i) => ({ ...obj, [col]: vals[i] }), {});
+}
+
+// Get ALL inventory items matching a given effect type (e.g. all dungeon keys of different tiers)
+function getAllInventoryItemsByEffect(guildId, userId, effectType) {
+  if (!db) return [];
+  
+  const result = db.exec(`
+    SELECT ui.*, si.name, si.description, si.category, si.effect_type, si.effect_value, si.duration_hours, si.emoji
+    FROM user_inventory ui
+    JOIN shop_items si ON ui.item_id = si.id
+    WHERE ui.guild_id = ? AND ui.user_id = ? AND si.effect_type = ? AND ui.quantity > 0
+    ORDER BY si.effect_value ASC
+  `, [guildId, userId, effectType]);
+  
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  
+  const cols = result[0].columns;
+  return result[0].values.map(vals => cols.reduce((obj, col, i) => ({ ...obj, [col]: vals[i] }), {}));
 }
 
 // Get specific inventory item
@@ -1057,6 +1146,8 @@ function getEffectTypeName(effectType) {
     [EFFECT_TYPES.COOLDOWN_REDUCTION]: 'Cooldown Reduction',
     [EFFECT_TYPES.EARNINGS_PENALTY]: 'Earnings Penalty',
     [EFFECT_TYPES.ROBBERY_VULNERABILITY]: 'Robbery Vulnerability',
+    // Access keys
+    [EFFECT_TYPES.DUNGEON_KEY]: '🗝️ Dungeon Key',
     // Role grant
     [EFFECT_TYPES.ROLE_GRANT]: '🏷️ Role Grant',
     // Service/Cosmetic types
@@ -1353,6 +1444,7 @@ module.exports = {
   getShopItems,
   getShopItem,
   getShopItemByName,
+  getHuntEligibleItems,
   addShopItem,
   updateShopItem,
   deleteShopItem,
@@ -1361,6 +1453,8 @@ module.exports = {
   // Inventory
   getUserInventory,
   getInventoryItem,
+  getInventoryItemByEffect,
+  getAllInventoryItemsByEffect,
   getItemOwners,
   addToInventory,
   removeFromInventory,

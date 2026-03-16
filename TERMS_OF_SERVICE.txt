@@ -1,0 +1,69 @@
+Chat-Stock — Terms of Service
+
+Last Updated: March 16, 2026
+
+By adding Chat-Stock to your Discord server or using any of its commands, you agree to the following terms. If you do not agree, please remove the bot from your server and discontinue use.
+
+1. Description of Service
+
+Chat-Stock is a Discord bot that provides a simulated stock market economy, gambling mini-games, PvP features, virtual property ownership, and related entertainment features within Discord servers.
+
+2. Virtual Currency
+
+All currency, assets, stocks, properties, and items within Chat-Stock are entirely virtual and hold no real-world monetary value. Nothing in the bot constitutes real gambling, real financial trading, or real currency exchange. Virtual balances cannot be redeemed, refunded, transferred outside of the bot, or exchanged for real money, goods, or services.
+
+3. Eligibility
+
+You must meet the minimum age requirement set by Discord's own Terms of Service to use Chat-Stock. By using the bot, you confirm that you meet this requirement.
+
+4. User Conduct
+
+You agree not to:
+- Exploit bugs, glitches, or unintended behavior for unfair advantage
+- Use automation, macros, self-bots, or scripts to interact with the bot
+- Harass other users through bot features (e.g., targeted robbing, hacking, or fighting used as a vehicle for real harassment)
+- Attempt to interfere with, disrupt, or overload the bot's operation
+
+Server administrators are responsible for moderating bot usage within their own servers.
+
+5. Data Collection and Storage
+
+Chat-Stock stores the following data to provide its services:
+- Discord user IDs and usernames
+- Discord server (guild) IDs
+- In-game data such as balances, transactions, inventories, stats, and command usage
+
+We do NOT collect or store message content, passwords, payment information, or any data beyond what is necessary for bot functionality.
+
+You may request deletion of all your data at any time by using the /deletedata command within a server. This action is irreversible.
+
+6. Data Retention
+
+Your data is retained as long as you are an active participant in a server using Chat-Stock. Server administrators may reset all player data for their server via the admin panel. If the bot is removed from a server, data may persist in storage and can be purged upon request.
+
+7. Server Administrator Responsibility
+
+Server administrators who add Chat-Stock are responsible for:
+- Informing their members that the bot collects and stores user data
+- Ensuring the bot's features (simulated gambling, PvP theft, etc.) are appropriate for their community
+- Managing bot settings and permissions within their server
+
+8. Availability and Warranties
+
+Chat-Stock is provided "as is" with no guarantees of uptime, availability, or data preservation. We may modify, suspend, or discontinue the bot or any of its features at any time without notice. We are not responsible for any loss of virtual currency, items, or progress due to outages, bugs, resets, or service changes.
+
+9. Limitation of Liability
+
+To the maximum extent permitted by law, Chat-Stock and its developers shall not be liable for any indirect, incidental, or consequential damages arising from your use or inability to use the bot. Since all in-game assets have no real-world value, no financial damages can result from service interruptions or data loss.
+
+10. Changes to These Terms
+
+We reserve the right to update these terms at any time. Continued use of the bot after changes are posted constitutes acceptance of the revised terms. Material changes will be announced via the support server when possible.
+
+11. Termination
+
+We reserve the right to restrict or revoke access to the bot for any user or server that violates these terms, abuses bot features, or engages in conduct we deem harmful to the service or its community.
+
+12. Contact
+
+For questions, data requests, or to report issues, join our support server: https://discord.gg/3PnT5BknaP

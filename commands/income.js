@@ -1,13 +1,14 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getWorkSettings, canWork, calculateWorkReward, getRandomFlavorText, recordWork, getTotalWorked, getWorkCount } = require('../work');
-const { getCrimeSettings, canCrime, attemptCrime, calculateCrimeReward, calculateFine: calculateCrimeFine, getRandomSuccessText: getCrimeSuccessText, getRandomFailText: getCrimeFailText, recordCrime, getCrimeStats } = require('../crime');
+const { getHuntSettings, canHunt, recordHuntCooldown, recordHuntResult, rollHuntOutcome, rollCurrencyAmount, getHuntStats } = require('../hunt');
 const { getDividendSettings, canCollectPassiveIncome, calculatePassiveIncome, recordPassiveIncomeCollection, getTotalPassiveIncomeCollected, getCollectableRoleIncomes, recordRoleIncomeCollection, getTotalRoleIncomeCollected } = require('../dividends');
 const { calculateStockPrice, getUser, getDb } = require('../database');
-const { addMoney, removeMoney, getBalance, applyFine } = require('../economy');
-const { getEffectValue, EFFECT_TYPES } = require('../items');
+const { addMoney } = require('../economy');
+const { getEffectValue, EFFECT_TYPES, getHuntEligibleItems, addToInventory } = require('../items');
 const { getLuckyPennyEffect, LP_EFFECT_TYPES, getLuckyPennySettings, canUseLuckyPenny, recordLuckyPennyUse, rollLuckyPenny, applyBuff: applyLpBuff, getActiveLuckyPennyBuffs, LP_EFFECT_EMOJI, INVERSE_EFFECTS } = require('../luckypenny');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Helper to format time remaining
 function formatTimeRemaining(ms) {
@@ -41,7 +42,7 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
   // Get settings for all income sources
   const workSettings = getWorkSettings(guildId);
   const lpSettings = getLuckyPennySettings(guildId);
-  const crimeSettings = getCrimeSettings(guildId);
+  const huntSettings = getHuntSettings(guildId);
   const collectSettings = getDividendSettings(guildId);
   
   // Check work status (with Lucky Penny cooldown buff)
@@ -56,10 +57,10 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
   const lpReady = lpStatus.canUse;
   const lpTime = lpStatus.timeRemaining ? formatTimeRemaining(lpStatus.timeRemaining) : null;
   
-  // Check crime status
-  const crimeStatus = canCrime(guildId, userId);
-  const crimeReady = crimeStatus.canCrime;
-  const crimeTime = crimeStatus.timeRemaining ? formatTimeRemaining(crimeStatus.timeRemaining) : null;
+  // Check hunt status
+  const huntStatus = canHunt(guildId, userId);
+  const huntReady = huntStatus.canHunt;
+  const huntTime = huntStatus.reason ? huntStatus.reason.match(/\*\*(.+?)\*\*/)?.[1] || 'soon' : null;
   
   // Check collect status
   const user = getUser(userId);
@@ -100,7 +101,7 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
     fields.push({
       name: `💼 Work ${workReady ? '✅' : '⏳'}`,
       value: workReady 
-        ? `**Ready!** Earn ${workSettings.minReward}-${workSettings.maxReward} ${CURRENCY}`
+        ? `**Ready!** Earn ${workSettings.minReward}-${workSettings.maxReward} ${getCurrency(guildId)}`
         : `Ready in **${workTime}**`,
       inline: true
     });
@@ -129,18 +130,18 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
     });
   }
   
-  // Crime section
-  if (crimeSettings.enabled) {
+  // Hunt section
+  if (huntSettings.enabled) {
     fields.push({
-      name: `🔫 Crime ${crimeReady ? '✅' : '⏳'}`,
-      value: crimeReady 
-        ? `**Ready!**`
-        : `Ready in **${crimeTime}**`,
+      name: `🏹 Hunt ${huntReady ? '✅' : '⏳'}`,
+      value: huntReady 
+        ? `**Ready!** Find items, currency, or nothing!`
+        : `Not ready yet — ${huntTime}`,
       inline: true
     });
   } else {
     fields.push({
-      name: '🔫 Crime ❌',
+      name: '🏹 Hunt ❌',
       value: 'Disabled',
       inline: true
     });
@@ -152,7 +153,7 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
       fields.push({
         name: `📈 Stock Bonus ${stockBonusReady ? '✅' : '⏳'}`,
         value: stockBonusReady 
-          ? `**Ready!** Collect **${stockBonusAmount.toLocaleString()}** ${CURRENCY}`
+          ? `**Ready!** Collect **${stockBonusAmount.toLocaleString()}** ${getCurrency(guildId)}`
           : `Ready in **${stockBonusTime}**`,
         inline: true
       });
@@ -175,7 +176,7 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
   if (collectableIncomes.length > 0 || notReadyIncomes.length > 0) {
     let roleText = '';
     if (collectableIncomes.length > 0) {
-      roleText += collectableIncomes.map(r => `✅ **${r.roleName}**: ${r.amount.toLocaleString()} ${CURRENCY}`).join('\n');
+      roleText += collectableIncomes.map(r => `✅ **${r.roleName}**: ${r.amount.toLocaleString()} ${getCurrency(guildId)}`).join('\n');
     }
     if (notReadyIncomes.length > 0) {
       if (roleText) roleText += '\n';
@@ -211,13 +212,13 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
       .setDisabled(!lpReady || !lpSettings.enabled)
   );
   
-  // Crime button
+  // Hunt button
   row1.addComponents(
     new ButtonBuilder()
-      .setCustomId('income_crime')
-      .setLabel('🔫 Crime')
-      .setStyle(crimeReady && crimeSettings.enabled ? ButtonStyle.Success : ButtonStyle.Secondary)
-      .setDisabled(!crimeReady || !crimeSettings.enabled)
+      .setCustomId('income_hunt')
+      .setLabel('🏹 Hunt')
+      .setStyle(huntReady && huntSettings.enabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+      .setDisabled(!huntReady || !huntSettings.enabled)
   );
   
   // Collect button (combines stock bonus and role incomes)
@@ -284,8 +285,8 @@ async function handleIncomeButton(interaction) {
       return await executeLuckyPenny(interaction, guildId, userId);
     }
     
-    if (customId === 'income_crime') {
-      return await executeCrime(interaction, guildId, userId);
+    if (customId === 'income_hunt') {
+      return await executeHunt(interaction, guildId, userId);
     }
     
     if (customId === 'income_collect') {
@@ -348,8 +349,8 @@ async function executeWork(interaction, guildId, userId) {
     .addFields({
       name: '💰 You Earned',
       value: boosted 
-        ? `**+${amount.toLocaleString()}** ${CURRENCY} ⚡ (+${workBoost}% boost!)`
-        : `**+${amount.toLocaleString()}** ${CURRENCY}`,
+        ? `**+${amount.toLocaleString()}** ${getCurrency(guildId)} ⚡ (+${workBoost}% boost!)`
+        : `**+${amount.toLocaleString()}** ${getCurrency(guildId)}`,
       inline: true
     })
     .setFooter({ text: `Total earned: ${totalEarned.toLocaleString()} | Jobs completed: ${workCount} | ${interaction.user.displayName}` })
@@ -420,7 +421,7 @@ async function executeLuckyPenny(interaction, guildId, userId) {
       .setColor(0xf1c40f)
       .setTitle('🪙 Lucky Penny — Payday!')
       .setDescription(result.flavorText)
-      .addFields({ name: '💰 Found', value: `${result.amount.toLocaleString()} ${CURRENCY}`, inline: true });
+      .addFields({ name: '💰 Found', value: `${result.amount.toLocaleString()} ${getCurrency(guildId)}`, inline: true });
     
   } else {
     const nothingCdText = settings.nothingCooldownHours < settings.cooldownHours
@@ -464,97 +465,131 @@ async function executeLuckyPenny(interaction, guildId, userId) {
   setTimeout(() => showIncomePanel(interaction, guildId, userId, 'edit'), 500);
 }
 
-async function executeCrime(interaction, guildId, userId) {
-  const settings = getCrimeSettings(guildId);
+// Flavor text arrays for hunt
+const HUNT_INTROS = [
+  'You venture into the digital wilderness...',
+  'You scan the network for hidden treasures...',
+  'You set out on a data expedition...',
+  'You probe the forgotten sectors of the server...',
+  'You hack through the digital underbrush...',
+  'You follow a faint signal into unknown territory...',
+  'You explore the corrupted outskirts of the network...',
+  'You stalk through the server\'s abandoned sectors...'
+];
+
+const NOTHING_MESSAGES = [
+  'You searched everywhere but found nothing. Better luck next time!',
+  'The hunt was a bust — nothing to show for it.',
+  'Despite your best efforts, you came back empty-handed.',
+  'The digital wilderness offered up nothing today.',
+  'You followed every lead, but they all turned cold.',
+  'Nothing but static and dead ends this time.',
+  'The loot gods were not in your favor today.'
+];
+
+const CURRENCY_MESSAGES = [
+  'You stumbled upon a hidden cache of currency!',
+  'You found some forgotten funds buried in the data!',
+  'A generous payday from the digital frontier!',
+  'You cracked open a data vault and found some loot!',
+  'Score! You discovered a stash of credits!',
+  'You extracted some currency from a corrupted node!'
+];
+
+const ITEM_MESSAGES = [
+  'You discovered something special during your hunt!',
+  'A rare find emerged from the depths of the network!',
+  'Your keen eye spotted something valuable!',
+  'Hidden among the data, you found a prize!',
+  'The hunt paid off — you found an item!',
+  'You unearthed a treasure from the digital wilds!'
+];
+
+function randomFrom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+async function executeHunt(interaction, guildId, userId) {
+  const settings = getHuntSettings(guildId);
   
   if (!settings.enabled) {
-    return interaction.reply({ content: '❌ Crime is disabled on this server.', flags: 64 });
+    return interaction.reply({ content: '❌ Hunt is disabled on this server.', flags: 64 });
   }
   
-  const { canCrime: canDoCrime, reason } = canCrime(guildId, userId);
-  if (!canDoCrime) {
+  const { canHunt: canDoHunt, reason } = canHunt(guildId, userId);
+  if (!canDoHunt) {
     return interaction.reply({ content: `⏳ ${reason}`, flags: 64 });
   }
   
   await interaction.deferUpdate();
   
-  const success = attemptCrime(settings);
+  // Record cooldown FIRST (prevents spam exploit)
+  recordHuntCooldown(guildId, userId);
   
-  if (success) {
-    const baseAmount = calculateCrimeReward(settings);
-    const flavorText = getCrimeSuccessText(settings);
-    
-    // Apply item boost
-    const crimeBoost = getEffectValue(guildId, userId, EFFECT_TYPES.CRIME_BOOST);
-    const amount = crimeBoost > 0 
-      ? Math.floor(baseAmount * (1 + crimeBoost / 100))
-      : baseAmount;
-    const boosted = crimeBoost > 0;
-    
-    // Record FIRST to set cooldown (prevents spam exploit)
-    recordCrime(guildId, userId, true, amount, flavorText);
-    await addMoney(guildId, userId, amount, 'Crime payout');
-    
-    const stats = getCrimeStats(guildId, userId);
-    const netProfit = stats.totalGained - stats.totalLost;
+  const intro = randomFrom(HUNT_INTROS);
+  let outcome = rollHuntOutcome(settings);
+  
+  // If item roll but no eligible items, fall back to currency
+  const eligibleItems = getHuntEligibleItems(guildId);
+  if (outcome === 'item' && eligibleItems.length === 0) {
+    outcome = 'currency';
+  }
+  
+  const stats = getHuntStats(guildId, userId);
+  
+  if (outcome === 'nothing') {
+    recordHuntResult(guildId, userId, 'nothing');
     
     const embed = new EmbedBuilder()
-      .setColor(0x2ecc71)
-      .setTitle('🔫 Crime Successful!')
-      .setDescription(flavorText)
+      .setColor(0x95a5a6)
+      .setTitle('🏹 Hunt — Empty-Handed')
+      .setDescription(`${intro}\n\n${randomFrom(NOTHING_MESSAGES)}`)
+      .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+      .setFooter({ text: `Hunts: ${stats.totalHunts + 1} | Items found: ${stats.itemsFound} | ${interaction.user.displayName}` })
+      .setTimestamp();
+    
+    await interaction.channel.send({ embeds: [embed] });
+  } else if (outcome === 'currency') {
+    const amount = rollCurrencyAmount(settings);
+    recordHuntResult(guildId, userId, 'currency', null, null, amount);
+    await addMoney(guildId, userId, amount, 'Hunt currency find');
+    
+    const embed = new EmbedBuilder()
+      .setColor(0xf1c40f)
+      .setTitle('🏹 Hunt — Currency Found!')
+      .setDescription(`${intro}\n\n${randomFrom(CURRENCY_MESSAGES)}`)
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
       .addFields({
-        name: '💰 You Earned',
-        value: boosted 
-          ? `**+${amount.toLocaleString()}** ${CURRENCY} ⚡ (+${crimeBoost}% boost!)`
-          : `**+${amount.toLocaleString()}** ${CURRENCY}`,
+        name: '💰 You Found',
+        value: `**+${amount.toLocaleString()}** ${getCurrency(guildId)}`,
         inline: true
       })
-      .setFooter({ text: `Success rate: ${Math.round((stats.successes / (stats.successes + stats.failures)) * 100)}% | Net profit: ${netProfit >= 0 ? '+' : ''}${netProfit.toLocaleString()} | ${interaction.user.displayName}` })
+      .setFooter({ text: `Hunts: ${stats.totalHunts + 1} | Total earned: ${(stats.totalCurrencyEarned + amount).toLocaleString()} | ${interaction.user.displayName}` })
       .setTimestamp();
-
+    
     await interaction.channel.send({ embeds: [embed] });
-  } else {
-    let totalBalance = 0;
-    try {
-      const balance = await getBalance(guildId, userId);
-      totalBalance = balance.total;
-    } catch (err) {
-      console.error('Error fetching balance:', err);
+  } else if (outcome === 'item') {
+    const item = eligibleItems[Math.floor(Math.random() * eligibleItems.length)];
+    recordHuntResult(guildId, userId, 'item', item.id, item.name, 0);
+    addToInventory(guildId, userId, item.id);
+    
+    const embed = new EmbedBuilder()
+      .setColor(0x9b59b6)
+      .setTitle('🏹 Hunt — Rare Find!')
+      .setDescription(`${intro}\n\n${randomFrom(ITEM_MESSAGES)}`)
+      .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+      .addFields({
+        name: '🎁 You Found',
+        value: `${item.emoji} **${item.name}**`,
+        inline: true
+      })
+      .setFooter({ text: `Hunts: ${stats.totalHunts + 1} | Items found: ${stats.itemsFound + 1} | ${interaction.user.displayName}` })
+      .setTimestamp();
+    
+    if (item.image_url) {
+      embed.setImage(item.image_url);
     }
     
-    // Apply item fine reduction
-    const itemFineReduction = getEffectValue(guildId, userId, EFFECT_TYPES.CRIME_FINE_REDUCTION);
-    const baseFine = calculateCrimeFine(settings, totalBalance);
-    const fine = itemFineReduction > 0 
-      ? Math.floor(baseFine * (1 - itemFineReduction / 100))
-      : baseFine;
-    const flavorText = getCrimeFailText(settings);
-    
-    // Record FIRST to set cooldown (prevents spam exploit)
-    recordCrime(guildId, userId, false, fine, flavorText);
-    await applyFine(guildId, userId, fine, 'Crime fine');
-    
-    const stats = getCrimeStats(guildId, userId);
-    const netProfit = stats.totalGained - stats.totalLost;
-    
-    const fineText = itemFineReduction > 0 
-      ? `**-${fine.toLocaleString()}** ${CURRENCY} ⚖️ (-${itemFineReduction}% from Lawyer!)`
-      : `**-${fine.toLocaleString()}** ${CURRENCY}`;
-    
-    const embed = new EmbedBuilder()
-      .setColor(0x8b0000)
-      .setTitle('🚓 Busted!')
-      .setDescription(flavorText)
-      .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-      .addFields({
-        name: '💸 Fine',
-        value: fineText,
-        inline: true
-      })
-      .setFooter({ text: `Success rate: ${Math.round((stats.successes / Math.max(1, stats.successes + stats.failures)) * 100)}% | Net profit: ${netProfit >= 0 ? '+' : ''}${netProfit.toLocaleString()} | ${interaction.user.displayName}` })
-      .setTimestamp();
-
     await interaction.channel.send({ embeds: [embed] });
   }
   
@@ -589,7 +624,7 @@ async function executeCollect(interaction, guildId, userId) {
         // Record FIRST to set cooldown (prevents spam exploit)
         recordPassiveIncomeCollection(guildId, userId, stockPrice, amount);
         await addMoney(guildId, userId, amount, 'Stock bonus from stock value');
-        collections.push(`📈 **Stock Bonus:** +${amount.toLocaleString()} ${CURRENCY}`);
+        collections.push(`📈 **Stock Bonus:** +${amount.toLocaleString()} ${getCurrency(guildId)}`);
         totalAmount += amount;
       }
     }
@@ -601,7 +636,7 @@ async function executeCollect(interaction, guildId, userId) {
     // Record FIRST to set cooldown (prevents spam exploit)
     recordRoleIncomeCollection(guildId, userId, roleIncome.roleId, roleIncome.roleName, roleIncome.amount);
     await addMoney(guildId, userId, roleIncome.amount, `Role income: ${roleIncome.roleName}`);
-    collections.push(`🏷️ **${roleIncome.roleName}:** +${roleIncome.amount.toLocaleString()} ${CURRENCY}`);
+    collections.push(`🏷️ **${roleIncome.roleName}:** +${roleIncome.amount.toLocaleString()} ${getCurrency(guildId)}`);
     totalAmount += roleIncome.amount;
   }
   
@@ -615,7 +650,7 @@ async function executeCollect(interaction, guildId, userId) {
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
       .addFields({
         name: '💰 Total',
-        value: `**+${totalAmount.toLocaleString()}** ${CURRENCY}`,
+        value: `**+${totalAmount.toLocaleString()}** ${getCurrency(guildId)}`,
         inline: true
       })
       .setFooter({ text: interaction.user.displayName })

@@ -14,8 +14,9 @@ const {
   TRAINING_COSTS,
   TRAINING_TIMES
 } = require('../skills');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Button custom IDs
 const BUTTON_IDS = ['skills_train_hack', 'skills_train_rob', 'skills_refresh'];
@@ -305,8 +306,8 @@ module.exports = {
     const balance = getBalance(guildId, userId);
     if (balance.cash < trainingInfo.cost) {
       return interaction.reply({
-        content: `${skillEmoji} You need **${trainingInfo.cost.toLocaleString()}** ${CURRENCY} to train ${skillName}.\n` +
-          `Your cash: **${balance.cash.toLocaleString()}** ${CURRENCY} (need **${(trainingInfo.cost - balance.cash).toLocaleString()}** more)`,
+        content: `${skillEmoji} You need **${trainingInfo.cost.toLocaleString()}** ${getCurrency(guildId)} to train ${skillName}.\n` +
+          `Your cash: **${balance.cash.toLocaleString()}** ${getCurrency(guildId)} (need **${(trainingInfo.cost - balance.cash).toLocaleString()}** more)`,
         ephemeral: true
       });
     }
@@ -333,7 +334,7 @@ module.exports = {
     
     // Build success message
     let successMsg = `${skillEmoji} **${skillName} Training Started!**\n\n` +
-      `💰 Cost: **${result.cost.toLocaleString()}** ${CURRENCY}\n` +
+      `💰 Cost: **${result.cost.toLocaleString()}** ${getCurrency(guildId)}\n` +
       `⏰ Duration: **${formatDuration(result.duration)}**\n` +
       `📈 XP Reward: **+${result.xpReward}** XP\n` +
       `🎯 Training for: **Level ${result.nextLevel}**\n\n` +

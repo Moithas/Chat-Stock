@@ -1,6 +1,6 @@
 // Admin System Panel - Fees, Anti-Spam, Market, Ticker, Events settings (Fully Modular)
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelSelectMenuBuilder, ChannelType, StringSelectMenuBuilder } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 const { getGuildSettings, setFeesEnabled, updateBuyFee, updateSellFee } = require('../fees');
 const { getSpamSettings, setAntiSpamEnabled, updateCooldown, updateMinLength, updateButtonCooldown, updateBaseValueGrowth } = require('../antispam');
 const { getMarketSettings, updateSellCooldown, updatePriceImpactDelay, updateCapitalGainsTax } = require('../market');
@@ -8,8 +8,9 @@ const { getTickerChannel, setTickerChannel, getDashboardSettings, updateDashboar
 const { getEventSettings, updateEventSettings, triggerEvent } = require('../events');
 const { getTrackerSettings, saveTrackerSettings, updateTrackerSettings, setTrackerChannel, setTrackerEnabled, startCooldownTracker, stopCooldownTracker, updateCooldownTracker } = require('../cooldown-tracker');
 const { getActivityTierSettings, updateActivityTierSettings, calculateDailyContribution } = require('../database');
+const { getBumpSettings, updateBumpSettings, getBumpStats } = require('../bumpreward');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [
@@ -30,6 +31,8 @@ const BUTTON_IDS = [
   'events_force_spawn',
   // Cooldown Tracker
   'tracker_toggle', 'tracker_edit_settings', 'tracker_set_channel', 'tracker_refresh',
+  // Bump Rewards
+  'bump_toggle', 'bump_edit_settings', 'bump_toggle_announce', 'bump_set_channel',
   // Back buttons
   'back_ticker'
 ];
@@ -42,11 +45,12 @@ const MODAL_IDS = [
   'modal_ticker_threshold',
   'modal_dashboard_settings',
   'modal_events_settings', 'modal_events_weights',
-  'modal_tracker_settings'
+  'modal_tracker_settings',
+  'modal_bump_settings'
 ];
 
 const SELECT_IDS = [
-  'ticker_channel_select', 'events_channel_select', 'dashboard_channel_select', 'tracker_channel_select'
+  'ticker_channel_select', 'events_channel_select', 'dashboard_channel_select', 'tracker_channel_select', 'bump_channel_select'
 ];
 
 // ==================== MAIN INTERACTION HANDLER ====================
@@ -159,6 +163,20 @@ async function handleInteraction(interaction, guildId) {
       case 'tracker_refresh':
         await handleTrackerRefresh(interaction, guildId);
         return true;
+        
+      // Bump Reward buttons
+      case 'bump_toggle':
+        await handleBumpToggle(interaction, guildId);
+        return true;
+      case 'bump_edit_settings':
+        await handleBumpEditSettings(interaction, guildId);
+        return true;
+      case 'bump_toggle_announce':
+        await handleBumpToggleAnnounce(interaction, guildId);
+        return true;
+      case 'bump_set_channel':
+        await showBumpChannelSelect(interaction, guildId);
+        return true;
     }
   }
   
@@ -200,6 +218,9 @@ async function handleInteraction(interaction, guildId) {
       case 'modal_tracker_settings':
         await handleTrackerSettingsModal(interaction, guildId);
         return true;
+      case 'modal_bump_settings':
+        await handleBumpSettingsModal(interaction, guildId);
+        return true;
     }
   }
   
@@ -217,6 +238,10 @@ async function handleInteraction(interaction, guildId) {
     }
     if (customId === 'events_channel_select') {
       await handleEventsChannelSelect(interaction, guildId);
+      return true;
+    }
+    if (customId === 'bump_channel_select') {
+      await handleBumpChannelSelect(interaction, guildId);
       return true;
     }
   }
@@ -1558,6 +1583,158 @@ async function handleTrackerChannelSelect(interaction, guildId) {
   await interaction.update({ content: `✅ Cooldown tracker channel set to <#${channelId}>. Refreshing panel...`, components: [] });
 }
 
+// ==================== BUMP REWARD PANEL ====================
+async function showBumpPanel(interaction, guildId) {
+  const settings = getBumpSettings(guildId);
+  
+  const embed = new EmbedBuilder()
+    .setColor(settings.enabled ? 0x2ecc71 : 0x95a5a6)
+    .setTitle('📣 Bump Reward Settings')
+    .setDescription('Reward users who bump the server on Disboard with currency.')
+    .addFields(
+      { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+      { name: '📢 Announce', value: settings.announce ? '✅ Yes' : '❌ No', inline: true },
+      { name: '📍 Channel', value: settings.channelId ? `<#${settings.channelId}>` : 'Same as bump', inline: true },
+      { name: '💰 Min Reward', value: `${settings.minReward.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Max Reward', value: `${settings.maxReward.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true }
+    )
+    .setFooter({ text: 'Detects Disboard /bump confirmations and rewards the bumper' });
+  
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('bump_toggle')
+      .setLabel(settings.enabled ? 'Disable' : 'Enable')
+      .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success)
+      .setEmoji(settings.enabled ? '❌' : '✅'),
+    new ButtonBuilder()
+      .setCustomId('bump_edit_settings')
+      .setLabel('Edit Rewards')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('💰'),
+    new ButtonBuilder()
+      .setCustomId('bump_toggle_announce')
+      .setLabel(settings.announce ? 'Mute Announce' : 'Enable Announce')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('📢'),
+    new ButtonBuilder()
+      .setCustomId('bump_set_channel')
+      .setLabel('Set Channel')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('📍')
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('back_dashboard')
+      .setLabel('Back to Dashboard')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+}
+
+async function handleBumpToggle(interaction, guildId) {
+  const settings = getBumpSettings(guildId);
+  updateBumpSettings(guildId, { enabled: !settings.enabled });
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `${!settings.enabled ? 'Enabled' : 'Disabled'} bump rewards`);
+  
+  await interaction.deferUpdate();
+  await showBumpPanel(interaction, guildId);
+}
+
+async function handleBumpToggleAnnounce(interaction, guildId) {
+  const settings = getBumpSettings(guildId);
+  updateBumpSettings(guildId, { announce: !settings.announce });
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `${!settings.announce ? 'Enabled' : 'Disabled'} bump reward announcements`);
+  
+  await interaction.deferUpdate();
+  await showBumpPanel(interaction, guildId);
+}
+
+async function handleBumpEditSettings(interaction, guildId) {
+  const settings = getBumpSettings(guildId);
+  
+  const modal = new ModalBuilder()
+    .setCustomId('modal_bump_settings')
+    .setTitle('📣 Bump Reward Settings');
+  
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('bump_min_reward')
+        .setLabel('Minimum Reward')
+        .setStyle(TextInputStyle.Short)
+        .setValue(settings.minReward.toString())
+        .setPlaceholder('e.g. 2000')
+        .setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('bump_max_reward')
+        .setLabel('Maximum Reward')
+        .setStyle(TextInputStyle.Short)
+        .setValue(settings.maxReward.toString())
+        .setPlaceholder('e.g. 8000')
+        .setRequired(true)
+    )
+  );
+  
+  await interaction.showModal(modal);
+}
+
+async function handleBumpSettingsModal(interaction, guildId) {
+  const minReward = parseInt(interaction.fields.getTextInputValue('bump_min_reward'));
+  const maxReward = parseInt(interaction.fields.getTextInputValue('bump_max_reward'));
+  
+  if (isNaN(minReward) || isNaN(maxReward) || minReward < 0 || maxReward < 0) {
+    return interaction.reply({ content: '❌ Rewards must be valid positive numbers.', flags: 64 });
+  }
+  
+  if (minReward > maxReward) {
+    return interaction.reply({ content: '❌ Minimum reward cannot be greater than maximum reward.', flags: 64 });
+  }
+  
+  updateBumpSettings(guildId, { minReward, maxReward });
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `Updated bump rewards: ${minReward.toLocaleString()} - ${maxReward.toLocaleString()}`);
+  
+  await interaction.deferUpdate();
+  await showBumpPanel(interaction, guildId);
+}
+
+async function showBumpChannelSelect(interaction, guildId) {
+  const channelSelect = new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId('bump_channel_select')
+      .setPlaceholder('Select announcement channel...')
+      .addChannelTypes(ChannelType.GuildText)
+  );
+  
+  await interaction.deferUpdate();
+  await interaction.editReply({ 
+    content: '📍 Select the channel for bump reward announcements (or leave unset to announce in the same channel as the bump):', 
+    embeds: [], 
+    components: [channelSelect] 
+  });
+}
+
+async function handleBumpChannelSelect(interaction, guildId) {
+  const channelId = interaction.values[0];
+  updateBumpSettings(guildId, { channelId });
+  
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `Set bump reward channel to <#${channelId}>`);
+  
+  await interaction.deferUpdate();
+  await showBumpPanel(interaction, guildId);
+}
+
 // ==================== EXPORTS ====================
 module.exports = {
   handleInteraction,
@@ -1566,6 +1743,7 @@ module.exports = {
   showTickerPanel,
   showEventsPanel,
   showTrackerPanel,
+  showBumpPanel,
   showActivityTiersPanel,
   createBuyFeeModal,
   createSellFeeModal,

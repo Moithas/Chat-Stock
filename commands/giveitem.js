@@ -1,7 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getUserInventory, getInventoryItem, getShopItem, addToInventory, removeFromInventory } = require('../items');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()

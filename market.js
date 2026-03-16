@@ -45,6 +45,7 @@ function initMarketProtection(database) {
   db.run(`
     CREATE TABLE IF NOT EXISTS stock_purchases (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL DEFAULT '',
       owner_id TEXT NOT NULL,
       stock_user_id TEXT NOT NULL,
       shares INTEGER NOT NULL,
@@ -53,16 +54,37 @@ function initMarketProtection(database) {
     );
   `);
   
+  // Migration: add guild_id to stock_purchases if missing
+  try {
+    const spCols = db.exec("PRAGMA table_info(stock_purchases)");
+    const spHasGuild = spCols.length > 0 && spCols[0].values.some(r => r[1] === 'guild_id');
+    if (!spHasGuild) {
+      db.run(`ALTER TABLE stock_purchases ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''`);
+      console.log('📊 Added guild_id column to stock_purchases');
+    }
+  } catch (e) {}
+
   // Create pending price impacts table
   db.run(`
     CREATE TABLE IF NOT EXISTS pending_impacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL DEFAULT '',
       stock_user_id TEXT NOT NULL,
       shares_delta INTEGER NOT NULL,
       timestamp INTEGER NOT NULL,
       fully_applied INTEGER DEFAULT 0
     );
   `);
+
+  // Migration: add guild_id to pending_impacts if missing
+  try {
+    const piCols = db.exec("PRAGMA table_info(pending_impacts)");
+    const piHasGuild = piCols.length > 0 && piCols[0].values.some(r => r[1] === 'guild_id');
+    if (!piHasGuild) {
+      db.run(`ALTER TABLE pending_impacts ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''`);
+      console.log('📊 Added guild_id column to pending_impacts');
+    }
+  } catch (e) {}
   
   console.log('🛡️ Market protection system initialized');
 }
@@ -127,23 +149,23 @@ function saveMarketSettings(guildId, settings) {
 
 // ============ Purchase Tracking ============
 
-function recordPurchase(ownerId, stockUserId, shares, price) {
+function recordPurchase(guildId, ownerId, stockUserId, shares, price) {
   if (!db) return;
   
   db.run(`
-    INSERT INTO stock_purchases (owner_id, stock_user_id, shares, price, timestamp)
-    VALUES (?, ?, ?, ?, ?)
-  `, [ownerId, stockUserId, shares, price, Date.now()]);
+    INSERT INTO stock_purchases (guild_id, owner_id, stock_user_id, shares, price, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `, [guildId, ownerId, stockUserId, shares, price, Date.now()]);
 }
 
-function getPurchaseHistory(ownerId, stockUserId) {
+function getPurchaseHistory(guildId, ownerId, stockUserId) {
   if (!db) return [];
   
   const result = db.exec(`
     SELECT * FROM stock_purchases 
-    WHERE owner_id = ? AND stock_user_id = ? AND shares > 0
+    WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ? AND shares > 0
     ORDER BY timestamp ASC
-  `, [ownerId, stockUserId]);
+  `, [guildId, ownerId, stockUserId]);
   
   if (result.length === 0) return [];
   
@@ -154,10 +176,10 @@ function getPurchaseHistory(ownerId, stockUserId) {
 }
 
 // Reduce shares from purchase history (FIFO - first in, first out)
-function consumePurchaseShares(ownerId, stockUserId, sharesToSell) {
+function consumePurchaseShares(guildId, ownerId, stockUserId, sharesToSell) {
   if (!db) return [];
   
-  const purchases = getPurchaseHistory(ownerId, stockUserId);
+  const purchases = getPurchaseHistory(guildId, ownerId, stockUserId);
   const consumed = [];
   let remaining = sharesToSell;
   
@@ -195,7 +217,7 @@ function checkSellCooldown(guildId, ownerId, stockUserId, sharesToSell, totalOwn
     return { canSell: true, reason: null, waitMinutes: 0 };
   }
   
-  const purchases = getPurchaseHistory(ownerId, stockUserId);
+  const purchases = getPurchaseHistory(guildId, ownerId, stockUserId);
   const cooldownMs = settings.sellCooldownMinutes * 60 * 1000;
   const now = Date.now();
   
@@ -239,13 +261,13 @@ function checkSellCooldown(guildId, ownerId, stockUserId, sharesToSell, totalOwn
 
 // ============ Price Impact Delay ============
 
-function recordPriceImpact(stockUserId, sharesDelta) {
+function recordPriceImpact(guildId, stockUserId, sharesDelta) {
   if (!db) return;
   
   db.run(`
-    INSERT INTO pending_impacts (stock_user_id, shares_delta, timestamp, fully_applied)
-    VALUES (?, ?, ?, 0)
-  `, [stockUserId, sharesDelta, Date.now()]);
+    INSERT INTO pending_impacts (guild_id, stock_user_id, shares_delta, timestamp, fully_applied)
+    VALUES (?, ?, ?, ?, 0)
+  `, [guildId, stockUserId, sharesDelta, Date.now()]);
 }
 
 function getEffectiveShareCount(guildId, stockUserId, actualShares) {
@@ -258,11 +280,11 @@ function getEffectiveShareCount(guildId, stockUserId, actualShares) {
   const delayMs = settings.priceImpactDelayMinutes * 60 * 1000;
   const now = Date.now();
   
-  // Get all pending impacts for this stock
+  // Get all pending impacts for this stock in this guild
   const result = db.exec(`
     SELECT * FROM pending_impacts 
-    WHERE stock_user_id = ? AND fully_applied = 0
-  `, [stockUserId]);
+    WHERE guild_id = ? AND stock_user_id = ? AND fully_applied = 0
+  `, [guildId, stockUserId]);
   
   if (result.length === 0 || result[0].values.length === 0) {
     return actualShares;
@@ -348,7 +370,7 @@ function calculateCapitalGainsTax(guildId, consumedPurchases, currentPrice) {
 
 // Adjust all purchase records when a stock splits
 // Shares get multiplied, price gets divided (to keep total cost basis the same)
-function adjustPurchaseHistoryForSplit(stockUserId, multiplier) {
+function adjustPurchaseHistoryForSplit(guildId, stockUserId, multiplier) {
   if (!db) return;
   
   // For a 2:1 split: shares * 2, price / 2
@@ -357,8 +379,8 @@ function adjustPurchaseHistoryForSplit(stockUserId, multiplier) {
     UPDATE stock_purchases 
     SET shares = MAX(1, CAST(shares * ? AS INTEGER)), 
         price = price / ?
-    WHERE stock_user_id = ? AND shares > 0
-  `, [multiplier, multiplier, stockUserId]);
+    WHERE guild_id = ? AND stock_user_id = ? AND shares > 0
+  `, [multiplier, multiplier, guildId, stockUserId]);
 }
 
 // ============ Setting Update Functions ============
@@ -388,7 +410,7 @@ function updateCapitalGainsTax(guildId, shortTermHours, shortTermPercent, longTe
 
 // Preview capital gains tax without modifying database (for confirmation screen)
 function previewCapitalGainsTax(guildId, ownerId, stockUserId, sharesToSell, currentPrice) {
-  const purchases = getPurchaseHistory(ownerId, stockUserId);
+  const purchases = getPurchaseHistory(guildId, ownerId, stockUserId);
   const settings = getMarketSettings(guildId);
   
   if (!settings.capitalGainsTaxEnabled) {

@@ -1,4 +1,4 @@
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 let db = null;
 let client = null;
@@ -636,6 +636,14 @@ function applyEventToStocks(guildId, percentChange, durationMinutes = 30, eventN
   // Persist to database so it survives restarts
   saveActiveEvent(guildId, multiplier, percentChange, expiresAt, eventName);
   
+  // Take insider trading snapshots for all stock holdings
+  try {
+    const { snapshotPortfolio } = require('./infamy');
+    snapshotPortfolio(guildId, eventName);
+  } catch (e) {
+    // Infamy system not loaded yet, that's fine
+  }
+  
   // Refresh last known prices to prevent false stock alerts
   try {
     const { refreshLastKnownPrices } = require('./ticker');
@@ -933,6 +941,7 @@ async function spawnVault(guildId) {
     
     const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
     const { addMoney } = require('./economy');
+    const { getCurrency } = require('./admin');
     
     const embed = new EmbedBuilder()
       .setColor(0xFFD700)
@@ -1024,10 +1033,46 @@ async function spawnVault(guildId) {
         }
         
         await interaction.reply({ 
-          content: `💥 **BOOBY TRAP!** ${interaction.user.username} triggered a security system and lost **${penalty.toLocaleString()}** ${CURRENCY}! 🚨 ⏱️ **${reactionDisplay}**`
+          content: `💥 **BOOBY TRAP!** ${interaction.user.username} triggered a security system and lost **${penalty.toLocaleString()}** ${getCurrency(guildId)}! 🚨 ⏱️ **${reactionDisplay}**`
         });
       } else {
         // Normal reward
+        
+        // Check infamy tier vault restrictions
+        let vaultBlocked = false;
+        let vaultDelayed = false;
+        try {
+          const { getTierEffects, addInfamy, getInfamySettings } = require('./infamy');
+          const tierEffects = getTierEffects(guildId, interaction.user.id);
+          const infSettings = getInfamySettings(guildId);
+          
+          if (infSettings.enabled) {
+            // T5 = vault locked entirely (vaultPenalty === -1)
+            if (tierEffects.vaultPenalty === -1) {
+              vaultBlocked = true;
+              vaultData.collectors.delete(interaction.user.id);
+              return interaction.reply({ 
+                content: `☠️ **${interaction.user.username}** is **Blacklisted** and cannot claim vaults!`, 
+                ephemeral: false 
+              });
+            }
+            
+            // T4 = 2 second delay before claiming
+            if (tierEffects.vaultPenalty > 0) {
+              vaultDelayed = true;
+              await interaction.deferReply();
+              await new Promise(resolve => setTimeout(resolve, tierEffects.vaultPenalty * 1000));
+              
+              // Re-check if vault is still available (someone else may have taken it)
+              if (vaultData.collectors.size > 3) {
+                return interaction.editReply({ content: `⏳ Your infamy delayed you and someone else claimed it first!` });
+              }
+            }
+          }
+        } catch (e) {
+          // Infamy not loaded, proceed normally
+        }
+        
         const reward = Math.floor(Math.random() * (vaultData.maxReward - vaultData.minReward + 1)) + vaultData.minReward;
         vaultData.rewards.push({ userId: interaction.user.id, username: interaction.user.username, reward, reactionMs, reactionDisplay });
         
@@ -1037,9 +1082,29 @@ async function spawnVault(guildId) {
           console.error('Failed to add vault reward:', e);
         }
         
-        await interaction.reply({ 
-          content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${CURRENCY} from the vault! ⏱️ **${reactionDisplay}**`
-        });
+        // Add infamy for vault collection
+        try {
+          const { addInfamy, getInfamySettings } = require('./infamy');
+          const infSettings = getInfamySettings(guildId);
+          if (infSettings.enabled) {
+            const infamyGained = Math.round(reward * infSettings.vault_rate);
+            if (infamyGained > 0) {
+              addInfamy(guildId, interaction.user.id, infamyGained, 'vault');
+            }
+          }
+        } catch (e) {
+          // Infamy not loaded
+        }
+        
+        if (vaultDelayed) {
+          await interaction.editReply({ 
+            content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${getCurrency(guildId)} from the vault! ⏱️ **${reactionDisplay}** *(delayed by infamy)*`
+          });
+        } else {
+          await interaction.reply({ 
+            content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${getCurrency(guildId)} from the vault! ⏱️ **${reactionDisplay}**`
+          });
+        }
       }
       
       // Check if all 3 spots filled
@@ -1072,9 +1137,9 @@ async function spawnVault(guildId) {
         resultsText = vaultData.rewards.map((r, i) => {
           const timeStr = r.reactionDisplay ? ` ⏱️ ${r.reactionDisplay}` : '';
           if (r.isTrap) {
-            return `${i + 1}. 💥 **${r.username}** — ${r.reward.toLocaleString()} ${CURRENCY} (BOOBY TRAP!)${timeStr}`;
+            return `${i + 1}. 💥 **${r.username}** — ${r.reward.toLocaleString()} ${getCurrency(guildId)} (BOOBY TRAP!)${timeStr}`;
           }
-          return `${i + 1}. 💰 **${r.username}** — +${r.reward.toLocaleString()} ${CURRENCY}${timeStr}`;
+          return `${i + 1}. 💰 **${r.username}** — +${r.reward.toLocaleString()} ${getCurrency(guildId)}${timeStr}`;
         }).join('\n');
       } else {
         resultsText = 'Nobody claimed the vault!';

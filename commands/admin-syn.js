@@ -1,9 +1,9 @@
 // Admin SYN Panel - Screw Your Neighbor settings (Fully Modular)
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 const { getSYNSettings, updateSYNSettings } = require('../screwyourneighbor');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [
@@ -68,7 +68,7 @@ async function handleInteraction(interaction, guildId) {
 async function showSYNPanel(interaction, guildId) {
   const settings = getSYNSettings(guildId);
 
-  const maxBetDisplay = settings.maxBet > 0 ? `${settings.maxBet.toLocaleString()} ${CURRENCY}` : 'No limit';
+  const maxBetDisplay = settings.maxBet > 0 ? `${settings.maxBet.toLocaleString()} ${getCurrency(guildId)}` : 'No limit';
 
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71)
@@ -81,7 +81,7 @@ async function showSYNPanel(interaction, guildId) {
       { name: '👥 Min Players', value: String(settings.minPlayers), inline: true },
       { name: '👥 Max Players', value: String(settings.maxPlayers), inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
-      { name: '💰 Min Bet', value: `${settings.minBet.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💰 Min Bet', value: `${settings.minBet.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '💰 Max Bet', value: maxBetDisplay, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
       { name: '⏱️ Turn Timer', value: `${settings.turnTimeSeconds}s`, inline: true },

@@ -1,9 +1,9 @@
 // Admin Fight Panel - Fight settings (Fully Modular)
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 const { getFightSettings, updateFightSettings, getTopFighters, getFightHistory, resetAllFighterStats } = require('../fight');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [
@@ -328,7 +328,7 @@ async function showFightLeaderboard(interaction, guildId) {
       description += `**${i + 1}.** <@${fighter.user_id}>\n`;
       description += `   Record: **${record}** (${winRate}% win rate)\n`;
       description += `   KOs: **${fighter.knockouts}** | TKOs: **${fighter.tkos}**\n`;
-      description += `   Earnings: **${fighter.total_earnings.toLocaleString()}** ${CURRENCY}\n\n`;
+      description += `   Earnings: **${fighter.total_earnings.toLocaleString()}** ${getCurrency(guildId)}\n\n`;
     }
   }
 
@@ -366,9 +366,9 @@ async function showFightHistory(interaction, guildId) {
         description += `${resultEmoji} <@${fight.winner_id}> defeated <@${fight.loser_id}>\n`;
       }
       description += `   ${fight.result_type.toUpperCase()} | Round ${fight.rounds} | ${date}\n`;
-      description += `   Wager: **${fight.bet_amount.toLocaleString()}** ${CURRENCY}`;
+      description += `   Wager: **${fight.bet_amount.toLocaleString()}** ${getCurrency(guildId)}`;
       if (fight.spectator_pool > 0) {
-        description += ` | Spectator Pool: **${fight.spectator_pool.toLocaleString()}** ${CURRENCY}`;
+        description += ` | Spectator Pool: **${fight.spectator_pool.toLocaleString()}** ${getCurrency(guildId)}`;
       }
       description += '\n\n';
     }

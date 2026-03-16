@@ -1,6 +1,6 @@
 // Admin Maintenance Panel - Database cleanup, error logs, rate limiting
 const { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 const { 
   cleanupOldHistory, 
   getDatabaseStats, 
@@ -12,7 +12,7 @@ const {
   DEFAULT_COMMAND_COOLDOWNS
 } = require('../maintenance');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [

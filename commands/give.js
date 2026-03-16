@@ -1,8 +1,9 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getBalance, addMoney, removeMoney, removeFromBank } = require('../economy');
 const { recordGiftProtection } = require('../rob');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -71,7 +72,7 @@ module.exports = {
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ No Cash to Give')
-          .setDescription(`You don't have any cash to give.\n\n💵 Cash: **${senderBalance.cash.toLocaleString()}** ${CURRENCY}`)],
+          .setDescription(`You don't have any cash to give.\n\n💵 Cash: **${senderBalance.cash.toLocaleString()}** ${getCurrency(guildId)}`)],
         ephemeral: true
       });
     }
@@ -82,7 +83,7 @@ module.exports = {
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Insufficient Funds')
-          .setDescription(`You don't have enough cash to give.\n\n💵 Cash: **${senderBalance.cash.toLocaleString()}** ${CURRENCY}`)],
+          .setDescription(`You don't have enough cash to give.\n\n💵 Cash: **${senderBalance.cash.toLocaleString()}** ${getCurrency(guildId)}`)],
         ephemeral: true
       });
     }
@@ -106,22 +107,42 @@ module.exports = {
     // Record gift for rob protection (prevents exploitation)
     recordGiftProtection(guildId, fromUser.id, toUser.id);
 
+    // Infamy charity reduction: if recipient had negative balance (debt), reduce giver's infamy
+    try {
+      const recipientBalanceBefore = getBalance(guildId, toUser.id);
+      // Calculate how much debt was cleared by this gift (recipient was in debt before)
+      const recipientOldBalance = recipientBalanceBefore.cash - amount; // reconstruct pre-gift cash
+      if (recipientOldBalance < 0) {
+        const debtCleared = Math.min(amount, Math.abs(recipientOldBalance));
+        const { reduceInfamy, getInfamySettings } = require('../infamy');
+        const infSettings = getInfamySettings(guildId);
+        if (infSettings.enabled && debtCleared > 0) {
+          const reduction = Math.round(debtCleared * infSettings.charity_rate);
+          if (reduction > 0) {
+            reduceInfamy(guildId, fromUser.id, reduction, 'charity');
+          }
+        }
+      }
+    } catch (e) {
+      // Infamy module not loaded, skip
+    }
+
     const newSenderBalance = getBalance(guildId, fromUser.id);
     const newRecipientBalance = getBalance(guildId, toUser.id);
 
     const embed = new EmbedBuilder()
       .setColor(0x2ecc71)
       .setTitle('✅ Gift Sent!')
-      .setDescription(`${fromUser.username} gave **${amount.toLocaleString()}** ${CURRENCY} to <@${toUser.id}>`)
+      .setDescription(`${fromUser.username} gave **${amount.toLocaleString()}** ${getCurrency(guildId)} to <@${toUser.id}>`)
       .addFields(
         { 
           name: `${fromUser.username}'s Balance`, 
-          value: `💵 Cash: ${newSenderBalance.cash.toLocaleString()} ${CURRENCY}\n🏦 Bank: ${newSenderBalance.bank.toLocaleString()} ${CURRENCY}`, 
+          value: `💵 Cash: ${newSenderBalance.cash.toLocaleString()} ${getCurrency(guildId)}\n🏦 Bank: ${newSenderBalance.bank.toLocaleString()} ${getCurrency(guildId)}`, 
           inline: true 
         },
         { 
           name: `${toUser.username}'s Balance`, 
-          value: `💵 Cash: ${newRecipientBalance.cash.toLocaleString()} ${CURRENCY}\n🏦 Bank: ${newRecipientBalance.bank.toLocaleString()} ${CURRENCY}`, 
+          value: `💵 Cash: ${newRecipientBalance.cash.toLocaleString()} ${getCurrency(guildId)}\n🏦 Bank: ${newRecipientBalance.bank.toLocaleString()} ${getCurrency(guildId)}`, 
           inline: true 
         }
       )

@@ -15,9 +15,18 @@ function initAdmin(database, client) {
     CREATE TABLE IF NOT EXISTS admin_settings (
       guild_id TEXT PRIMARY KEY,
       admin_role_id TEXT,
-      log_channel_id TEXT
+      log_channel_id TEXT,
+      currency_symbol TEXT
     );
   `);
+
+  // Migration: add currency_symbol column if missing
+  try { db.run(`ALTER TABLE admin_settings ADD COLUMN currency_symbol TEXT`); } catch (e) { /* already exists */ }
+  
+  // Migration: add starting_balance and new_player_immunity_days columns
+  try { db.run(`ALTER TABLE admin_settings ADD COLUMN starting_balance INTEGER DEFAULT 0`); } catch (e) { /* already exists */ }
+  try { db.run(`ALTER TABLE admin_settings ADD COLUMN new_player_immunity_days INTEGER DEFAULT 7`); } catch (e) { /* already exists */ }
+  try { db.run(`ALTER TABLE admin_settings ADD COLUMN support_server_url TEXT`); } catch (e) { /* already exists */ }
   
   // Create admin log table
   db.run(`
@@ -52,7 +61,11 @@ function getAdminSettings(guildId) {
       
       const parsed = {
         adminRoleId: settings.admin_role_id,
-        logChannelId: settings.log_channel_id
+        logChannelId: settings.log_channel_id,
+        currencySymbol: settings.currency_symbol || null,
+        startingBalance: settings.starting_balance ?? 0,
+        newPlayerImmunityDays: settings.new_player_immunity_days ?? 7,
+        supportServerUrl: settings.support_server_url || null
       };
       
       guildAdminSettings.set(guildId, parsed);
@@ -61,7 +74,7 @@ function getAdminSettings(guildId) {
   }
   
   // Return defaults if no settings found
-  return { adminRoleId: null, logChannelId: null };
+  return { adminRoleId: null, logChannelId: null, currencySymbol: null, startingBalance: 0, newPlayerImmunityDays: 7, supportServerUrl: null };
 }
 
 function saveAdminSettings(guildId, settings) {
@@ -69,12 +82,16 @@ function saveAdminSettings(guildId, settings) {
   
   db.run(`
     INSERT OR REPLACE INTO admin_settings 
-    (guild_id, admin_role_id, log_channel_id)
-    VALUES (?, ?, ?)
+    (guild_id, admin_role_id, log_channel_id, currency_symbol, starting_balance, new_player_immunity_days, support_server_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `, [
     guildId,
     settings.adminRoleId,
-    settings.logChannelId
+    settings.logChannelId,
+    settings.currencySymbol,
+    settings.startingBalance ?? 0,
+    settings.newPlayerImmunityDays ?? 7,
+    settings.supportServerUrl || null
   ]);
   
   // Update cache
@@ -90,6 +107,32 @@ function setAdminRole(guildId, roleId) {
 function setLogChannel(guildId, channelId) {
   const settings = getAdminSettings(guildId);
   settings.logChannelId = channelId;
+  saveAdminSettings(guildId, settings);
+}
+
+const DEFAULT_CURRENCY = '🪙';
+
+function getCurrency(guildId) {
+  const settings = getAdminSettings(guildId);
+  return settings.currencySymbol || DEFAULT_CURRENCY;
+}
+
+function setCurrency(guildId, symbol) {
+  const settings = getAdminSettings(guildId);
+  settings.currencySymbol = symbol || null;
+  saveAdminSettings(guildId, settings);
+}
+
+const DEFAULT_SUPPORT_URL = 'https://discord.gg/3PnT5BknaP';
+
+function getSupportServerUrl(guildId) {
+  const settings = getAdminSettings(guildId);
+  return settings.supportServerUrl || DEFAULT_SUPPORT_URL;
+}
+
+function setSupportServerUrl(guildId, url) {
+  const settings = getAdminSettings(guildId);
+  settings.supportServerUrl = url || null;
   saveAdminSettings(guildId, settings);
 }
 
@@ -169,8 +212,13 @@ module.exports = {
   getAdminSettings,
   getAdminRole,
   setAdminRole,
+  setLogChannel,
   hasAdminPermission,
   isAdmin,
   logAdminAction,
-  getAdminLogs
+  getAdminLogs,
+  getCurrency,
+  setCurrency,
+  getSupportServerUrl,
+  setSupportServerUrl
 };

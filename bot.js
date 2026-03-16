@@ -1,14 +1,14 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, REST, Routes, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, Collection, REST, Routes, ActivityType } = require('discord.js');
 const { initDatabase, createUser, updateMessageCount, calculateStockPrice, logPrice, getUser, getDb, getStreakInfo } = require('./database');
 const { initTicker, sendStreakAnnouncement, sendStreakExpiredAnnouncement } = require('./ticker');
 const { initFees } = require('./fees');
 const { initAntiSpam, shouldCountMessage, shouldCountButtonInteraction, getSpamSettings } = require('./antispam');
-const { initAdmin } = require('./admin');
+const { initAdmin, getCurrency } = require('./admin');
 const { initMarketProtection } = require('./market');
 const { initProperty, scheduleCardDistribution } = require('./property');
 const { initEvents, handleMessage: handleEventMessage } = require('./events');
-const { initGambling, getGamblingSettings, getAllTickets, drawLottery, getLotteryInfo } = require('./gambling');
+const { initGambling, getGamblingSettings, getAllTickets, drawLottery, getLotteryInfo, cleanupStaleBlackjackGames } = require('./gambling');
 const { initDividends, startDividendScheduler } = require('./dividends');
 const { initWork } = require('./work');
 const { initCrime } = require('./crime');
@@ -27,8 +27,12 @@ const { initialize: initLetItRide } = require('./letitride');
 const { initialize: initThreeCardPoker } = require('./threecardpoker');
 const { initMaintenance, startCleanupScheduler, logError, checkCommandCooldown, updateCommandCooldown } = require('./maintenance');
 const { initDungeon } = require('./dungeon');
+const { initHunt } = require('./hunt');
+const log = require('./logger');
 const { initSYN } = require('./screwyourneighbor');
 const { initLuckyPenny } = require('./luckypenny');
+const { initBumpReward, getBumpSettings, getBumpStats, isDisboardBump, extractBumperUserId, rollBumpReward, recordBump } = require('./bumpreward');
+const { initInfamy, decayAllInfamy } = require('./infamy');
 const fs = require('fs');
 const path = require('path');
 
@@ -38,6 +42,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers
+  ],
+  partials: [
+    Partials.Message,
+    Partials.Channel
   ]
 });
 
@@ -57,7 +65,6 @@ for (const file of commandFiles) {
 }
 
 // Lottery auto-draw scheduler
-const CURRENCY = '<:babybel:1418824333664452608>';
 let lastDrawCheck = null;
 
 function startLotteryScheduler(client) {
@@ -111,13 +118,13 @@ function startLotteryScheduler(client) {
                   .setDescription(`🎱 **Winning Numbers: ${result.winningNumbers.join(' - ')}**`)
                   .addFields(
                     { name: '🎟️ Total Tickets', value: `**${result.totalTickets}**`, inline: true },
-                    { name: '💸 Total Prizes', value: `**${result.totalPrizesPaid.toLocaleString()}** ${CURRENCY}`, inline: true }
+                    { name: '💸 Total Prizes', value: `**${result.totalPrizesPaid.toLocaleString()}** ${getCurrency(guild.id)}`, inline: true }
                   );
 
                 if (result.jackpotWon) {
                   embed.addFields({
                     name: '🎊 JACKPOT WINNER!',
-                    value: `Someone won the **${result.jackpotAmount.toLocaleString()}** ${CURRENCY} jackpot!`
+                    value: `Someone won the **${result.jackpotAmount.toLocaleString()}** ${getCurrency(guild.id)} jackpot!`
                   });
                 }
 
@@ -128,13 +135,13 @@ function startLotteryScheduler(client) {
 
                   let winnerText = '';
                   if (by4.length > 0) {
-                    winnerText += `**🏆 4 Matches (JACKPOT):**\n${by4.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${CURRENCY}`).join('\n')}\n\n`;
+                    winnerText += `**🏆 4 Matches (JACKPOT):**\n${by4.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${getCurrency(guild.id)}`).join('\n')}\n\n`;
                   }
                   if (by3.length > 0) {
-                    winnerText += `**🥈 3 Matches:**\n${by3.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${CURRENCY}`).join('\n')}\n\n`;
+                    winnerText += `**🥈 3 Matches:**\n${by3.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${getCurrency(guild.id)}`).join('\n')}\n\n`;
                   }
                   if (by2.length > 0) {
-                    winnerText += `**🥉 2 Matches:**\n${by2.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${CURRENCY}`).join('\n')}`;
+                    winnerText += `**🥉 2 Matches:**\n${by2.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${getCurrency(guild.id)}`).join('\n')}`;
                   }
                   embed.addFields({ name: '🏅 Winners', value: winnerText || 'None' });
                 } else {
@@ -142,7 +149,7 @@ function startLotteryScheduler(client) {
                 }
 
                 const newInfo = getLotteryInfo(guild.id);
-                embed.addFields({ name: '💰 New Jackpot', value: `**${newInfo.jackpot.toLocaleString()}** ${CURRENCY}` });
+                embed.addFields({ name: '💰 New Jackpot', value: `**${newInfo.jackpot.toLocaleString()}** ${getCurrency(guild.id)}` });
                 embed.setFooter({ text: 'Thanks for playing! Next draw coming soon.' }).setTimestamp();
 
                 await channel.send({ embeds: [embed] });
@@ -209,10 +216,10 @@ function startWealthTaxScheduler(client) {
                   .setDescription('The wealth tax has been collected and added to the lottery jackpot!')
                   .addFields(
                     { name: '📊 Users Taxed', value: `**${result.usersAffected}**`, inline: true },
-                    { name: '💸 Total Collected', value: `**${result.totalCollected.toLocaleString()}** ${CURRENCY}`, inline: true },
+                    { name: '💸 Total Collected', value: `**${result.totalCollected.toLocaleString()}** ${getCurrency(guild.id)}`, inline: true },
                     { name: '\u200b', value: '\u200b', inline: true },
-                    { name: '🎰 Previous Jackpot', value: `${result.previousJackpot.toLocaleString()} ${CURRENCY}`, inline: true },
-                    { name: '🎰 New Jackpot', value: `**${result.newJackpot.toLocaleString()}** ${CURRENCY}`, inline: true }
+                    { name: '🎰 Previous Jackpot', value: `${result.previousJackpot.toLocaleString()} ${getCurrency(guild.id)}`, inline: true },
+                    { name: '🎰 New Jackpot', value: `**${result.newJackpot.toLocaleString()}** ${getCurrency(guild.id)}`, inline: true }
                   )
                   .setFooter({ text: 'Buy lottery tickets to win the boosted jackpot!' })
                   .setTimestamp();
@@ -313,13 +320,13 @@ function startRoleExpirationScheduler(client) {
 
 // When bot is ready
 client.once('clientReady', async () => {
-  console.log(`✅ Logged in as ${client.user.username}`);
+  log.info(`Logged in as ${client.user.username}`);
   
   // Initialize database first
   await initDatabase();
   
   // Internal economy is always enabled (no initialization needed)
-  console.log('✅ Internal economy system enabled');
+  log.info('Internal economy system enabled');
   
   // Initialize trading fees system
   initFees(getDb());
@@ -390,11 +397,20 @@ client.once('clientReady', async () => {
   // Initialize dungeon system
   initDungeon(getDb());
 
+  // Initialize hunt system
+  initHunt(getDb());
+
   // Initialize Screw Your Neighbor
   initSYN(getDb());
 
   // Initialize Lucky Penny system
   initLuckyPenny(getDb());
+
+  // Initialize bump reward system
+  initBumpReward(getDb());
+
+  // Initialize infamy & bounty system
+  initInfamy(getDb(), client);
 
   // Initialize maintenance system (cleanup, error logging, rate limiting)
   initMaintenance(getDb(), client);
@@ -426,6 +442,12 @@ client.once('clientReady', async () => {
   
   // Start role expiration scheduler (for temporary shop roles)
   startRoleExpirationScheduler(client);
+
+  // Start infamy decay scheduler (hourly)
+  setInterval(() => decayAllInfamy(), 3600000);
+
+  // Start stale game cleanup (every 5 minutes)
+  setInterval(() => cleanupStaleBlackjackGames(), 5 * 60 * 1000);
   
   // Register slash commands
   const commands = [];
@@ -440,14 +462,14 @@ client.once('clientReady', async () => {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   
   try {
-    console.log('🔄 Registering slash commands...');
+    log.info('Registering slash commands...');
     await rest.put(
-      Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
+      Routes.applicationCommands(client.user.id),
       { body: commands }
     );
-    console.log('✅ Slash commands registered!');
+    log.info('Slash commands registered globally');
   } catch (error) {
-    console.error('❌ Error registering commands:', error);
+    console.error('Error registering commands:', error);
   }
 
   // Rotating status messages
@@ -479,11 +501,98 @@ client.once('clientReady', async () => {
   // Set initial status and rotate every 3 minutes
   updateStatus();
   setInterval(updateStatus, 3 * 60 * 1000);
-  console.log('🎭 Status rotation started');
+  log.info('Status rotation started');
+});
+
+// Handle bot joining a new guild
+client.on('guildCreate', async (guild) => {
+  log.info(`Joined new guild: ${guild.name} (${guild.id}) — ${guild.memberCount} members`);
+});
+
+// Handle bot being removed from a guild
+client.on('guildDelete', async (guild) => {
+  log.info(`Removed from guild: ${guild.name} (${guild.id})`);
+  // Note: guild data remains in the database.
+  // A manual admin purge or scheduled cleanup can remove it later.
+});
+
+// Bump reward processing — track by message ID to prevent race conditions and duplicate payouts
+const processedBumpMessages = new Set();
+const processingBumpMessages = new Set();
+
+async function processBumpReward(message) {
+  if (!message.author || !message.guildId) return;
+  if (message.author.id !== '302050872383242240') return; // Not Disboard
+  
+  try {
+    if (!isDisboardBump(message)) return;
+    
+    const msgId = message.id;
+    
+    // Already rewarded or currently processing this exact message
+    if (processedBumpMessages.has(msgId) || processingBumpMessages.has(msgId)) return;
+    processingBumpMessages.add(msgId);
+    
+    try {
+    const guildId = message.guildId;
+    const settings = getBumpSettings(guildId);
+    if (!settings.enabled) return;
+    
+    const bumperId = extractBumperUserId(message);
+    if (!bumperId) {
+      console.log('[BumpReward] Could not extract bumper user ID from Disboard message');
+      return;
+    }
+    
+    // Prevent double-rewarding (Disboard cooldown is 2 hours)
+    const stats = getBumpStats(guildId, bumperId);
+    if (stats.lastBump && (Date.now() - stats.lastBump) < 2 * 60 * 60 * 1000) return;
+    
+    const reward = rollBumpReward(settings.minReward, settings.maxReward);
+    addMoney(guildId, bumperId, reward);
+    recordBump(guildId, bumperId, reward);
+    processedBumpMessages.add(msgId);
+    console.log(`[BumpReward] User ${bumperId} rewarded ${reward} for bumping`);
+    
+    if (settings.announce) {
+      const channelId = settings.channelId || message.channelId;
+      const channel = message.guild?.channels?.cache?.get(channelId) || message.channel;
+      try {
+        await channel.send({
+          content: `📣 <@${bumperId}> bumped the server and earned **${reward.toLocaleString()}** ${getCurrency(guildId)}! Thanks for the bump!`
+        });
+      } catch (e) {
+        console.error('[BumpReward] Failed to send announcement:', e.message);
+      }
+    }
+    } finally {
+      processingBumpMessages.delete(msgId);
+    }
+  } catch (e) {
+    console.error('[BumpReward] Error processing bump:', e);
+  }
+}
+
+// Listen for Disboard bump message edits (Disboard edits the embed onto its deferred response)
+client.on('messageUpdate', async (oldMessage, newMessage) => {
+  // Fetch partial if needed
+  if (newMessage.partial) {
+    try {
+      newMessage = await newMessage.fetch();
+    } catch (e) {
+      return;
+    }
+  }
+  await processBumpReward(newMessage);
 });
 
 // Track messages for stock value
 client.on('messageCreate', async (message) => {
+  // Check for Disboard bump rewards (before bot filter)
+  if (message.author.bot && message.guildId) {
+    await processBumpReward(message);
+  }
+
   // Ignore bots
   if (message.author.bot) return;
   
@@ -680,6 +789,18 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
         }
       } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle GDPR data deletion buttons
+  if (interaction.isButton() && interaction.customId.startsWith('deletedata_')) {
+    try {
+      const { handleButton } = require('./commands/deletedata');
+      await handleButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling deletedata button:', error);
     }
     return;
   }
@@ -922,12 +1043,64 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Handle infamy panel buttons (leaderboard, dismiss)
+  const infamyUserIds = ['infamy_leaderboard', 'infamy_dismiss'];
+  if (interaction.isButton() && infamyUserIds.includes(interaction.customId)) {
+    try {
+      const { handleButton } = require('./commands/infamy');
+      await handleButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling infamy button:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) {}
+    }
+    return;
+  }
+
+  // Handle profile buttons
+  if (interaction.isButton() && interaction.customId.startsWith('profile_')) {
+    try {
+      const { handleButton } = require('./commands/profile');
+      await handleButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling profile button:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) {}
+    }
+    return;
+  }
+
+  // Handle profile user select menu
+  if (interaction.isUserSelectMenu() && interaction.customId === 'profile_user_select') {
+    try {
+      const { handleUserSelect } = require('./commands/profile');
+      await handleUserSelect(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling profile user select:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) {}
+    }
+    return;
+  }
+
   // Handle bank interactions (all user-facing bank buttons and modals)
   const bankUserIds = [
     'bank_apply_loan', 'bank_pay_loan', 'bank_buy_bond', 'bank_history', 'bank_refresh', 
     'bank_panel_back', 'bank_loan_modal', 'bank_loan_cancel', 'bank_pay_scheduled',
     'bank_pay_full', 'bank_pay_custom', 'bank_pay_custom_modal', 'bank_bond_select',
-    'bank_security', 'bank_immunity_select'
+    'bank_security', 'bank_immunity_select', 'bounty_board'
   ];
   if ((interaction.isButton() && (bankUserIds.includes(interaction.customId) || interaction.customId.startsWith('bank_loan_confirm_'))) ||
       (interaction.isStringSelectMenu() && (interaction.customId === 'bank_bond_select' || interaction.customId === 'bank_immunity_select')) ||
@@ -1180,6 +1353,9 @@ client.on('interactionCreate', async (interaction) => {
       // Cooldown Tracker
       'tracker_toggle', 'tracker_edit_settings', 'tracker_set_channel', 'tracker_refresh',
       'tracker_channel_select', 'modal_tracker_settings',
+      // Bump Rewards
+      'bump_toggle', 'bump_edit_settings', 'bump_toggle_announce', 'bump_set_channel',
+      'bump_channel_select', 'modal_bump_settings',
       'vault_panel', 'vault_toggle', 'vault_spawn', 'vault_interval', 
       'vault_reward', 'vault_channel',
       'modal_vault_interval', 'modal_vault_reward',
@@ -1217,11 +1393,13 @@ client.on('interactionCreate', async (interaction) => {
       'select_announcement_channel', 'clear_announcement_channel',
       'modal_dividend_config', 'modal_split_config', 'modal_bonus_config',
       'role_income_manage', 'role_income_add', 'role_income_select_role',
-      'admin_income_work', 'admin_income_crime', 'admin_income_slut', 'back_income',
+      'admin_income_work', 'admin_income_hunt', 'admin_income_lp', 'back_income',
       'work_toggle', 'work_edit_settings',
       'modal_work_settings',
-      'crime_toggle', 'crime_edit_settings', 'modal_crime_settings',
-      'slut_toggle', 'slut_edit_settings', 'modal_slut_settings',
+      'hunt_toggle', 'hunt_edit_settings', 'modal_hunt_settings',
+      'hunt_manage_items', 'hunt_items_prev', 'hunt_items_next', 'back_hunt',
+      'admin_lp_toggle', 'admin_lp_edit_general', 'admin_lp_edit_buffs', 'admin_lp_edit_currency',
+      'modal_admin_lp_general', 'modal_admin_lp_buffs', 'modal_admin_lp_currency',
       'rob_toggle', 'rob_edit_settings', 'rob_immunity_settings', 'modal_rob_settings',
       'rob_add_immune_role', 'rob_clear_immune_roles', 'rob_immunity_role_select',
       'rob_defense_settings', 'rob_defense_toggle', 'rob_defense_edit', 'back_rob_defense', 'modal_rob_defense_settings',
@@ -1264,16 +1442,24 @@ client.on('interactionCreate', async (interaction) => {
       'modal_items_add', 'modal_items_edit', 'modal_items_create', 'modal_items_give_qty', 'modal_items_take_qty',
       // Reset Game
       'reset_game_confirm', 'reset_game_cancel', 'modal_reset_game_confirm',
+      // Settings
+      'settings_set_role', 'settings_clear_role', 'settings_edit_currency', 'settings_reset_currency',
+      'settings_edit_starting_bal', 'settings_edit_immunity',
+      'settings_view_logs', 'settings_back_main', 'settings_reset_game',
+      'settings_role_select', 'modal_settings_currency', 'modal_settings_starting_bal', 'modal_settings_immunity',
       // Dungeon
-      'admin_dungeon', 'dungeon_toggle', 'dungeon_edit_settings', 'back_dungeon',
-      'modal_dungeon_settings',
+      'admin_dungeon', 'dungeon_toggle', 'dungeon_edit_global', 'back_dungeon',
+      'dungeon_tier_1', 'dungeon_tier_2', 'dungeon_tier_3',
+      'dungeon_edit_tier_1', 'dungeon_edit_tier_2', 'dungeon_edit_tier_3',
+      'modal_dungeon_global', 'modal_dungeon_tier_1', 'modal_dungeon_tier_2', 'modal_dungeon_tier_3',
       // SYN
       'admin_syn', 'syn_toggle', 'syn_edit_settings', 'syn_edit_timing', 'back_syn',
       'modal_syn_settings', 'modal_syn_timing',
-      // Lucky Penny
-      'admin_luckypenny', 'admin_lp_toggle', 'admin_lp_edit_general', 'admin_lp_edit_buffs',
-      'admin_lp_edit_currency', 'back_admin_lp',
-      'modal_admin_lp_general', 'modal_admin_lp_buffs', 'modal_admin_lp_currency'
+      // Infamy
+      'admin_infamy', 'infamy_toggle', 'infamy_edit_tiers', 'infamy_edit_rates',
+      'infamy_edit_bounty', 'infamy_edit_misc', 'infamy_set_channel', 'back_infamy',
+      'modal_infamy_tiers', 'modal_infamy_rates', 'modal_infamy_bounty', 'modal_infamy_misc',
+      'infamy_channel_select',
     ];
     
     // Check for exact match OR dynamic card/property edit IDs
@@ -1326,17 +1512,19 @@ client.on('interactionCreate', async (interaction) => {
                                interaction.customId.startsWith('wealth_tax_tier_modal_');
     const isDynamicScratch = interaction.customId.startsWith('modal_scratch_') ||
                              interaction.customId.startsWith('scratch_edit_');
+    const isDynamicHunt = interaction.customId.startsWith('hunt_item_toggle_');
     const isDynamicItems = interaction.customId.startsWith('items_edit_') ||
                            interaction.customId.startsWith('items_delete_') ||
                            interaction.customId.startsWith('items_toggle_') ||
                            interaction.customId.startsWith('items_usable_') ||
                            interaction.customId.startsWith('items_owners_') ||
+                           interaction.customId.startsWith('items_huntable_') ||
                            interaction.customId.startsWith('modal_items_edit_') ||
                            interaction.customId.startsWith('items_complete_') ||
                            interaction.customId.startsWith('items_cancel_') ||
                            interaction.customId.startsWith('items_refund_');
     
-    if (adminCustomIds.includes(interaction.customId) || isDynamicCardId || isDynamicPropId || isDynamicGiveCard || isDynamicMsgPage || isDynamicRoleIncome || isDynamicBank || isDynamicRob || isDynamicWealthTax || isDynamicScratch || isDynamicItems) {
+    if (adminCustomIds.includes(interaction.customId) || isDynamicCardId || isDynamicPropId || isDynamicGiveCard || isDynamicMsgPage || isDynamicRoleIncome || isDynamicBank || isDynamicRob || isDynamicWealthTax || isDynamicScratch || isDynamicItems || isDynamicHunt) {
       try {
         const { handleAdminInteraction } = require('./commands/admin');
         await handleAdminInteraction(interaction);

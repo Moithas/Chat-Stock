@@ -10,9 +10,9 @@ const {
   TextInputStyle,
   RoleSelectMenuBuilder
 } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // ==================== INTERACTION IDS ====================
 const BUTTON_IDS = [

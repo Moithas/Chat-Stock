@@ -1,5 +1,7 @@
 // Internal economy system - replacement for UBB
 const { getDb } = require('./database');
+const { getAdminSettings } = require('./admin');
+const log = require('./logger');
 
 // Validate amount is a positive finite number — blocks NaN, Infinity, negatives, non-numbers
 function isValidAmount(amount) {
@@ -42,9 +44,16 @@ function ensureBalance(guildId, userId, startingCash = 0, startingBank = 0) {
   );
   
   if (existing.length === 0 || existing[0].values.length === 0) {
+    // New player — check for configured starting balance
+    if (startingCash === 0 && startingBank === 0) {
+      const settings = getAdminSettings(guildId);
+      if (settings.startingBalance > 0) {
+        startingBank = settings.startingBalance;
+      }
+    }
     db.run(
-      'INSERT INTO balances (guild_id, user_id, cash, bank) VALUES (?, ?, ?, ?)',
-      [guildId, userId, startingCash, startingBank]
+      'INSERT INTO balances (guild_id, user_id, cash, bank, created_at) VALUES (?, ?, ?, ?, ?)',
+      [guildId, userId, startingCash, startingBank, Date.now()]
     );
   }
 }
@@ -62,9 +71,10 @@ function logTransaction(guildId, userId, amount, balanceType, reason = '') {
 // Add money to user's cash
 async function addMoney(guildId, userId, amount, reason = 'Transaction') {
   if (!isValidAmount(amount)) {
-    console.error(`[ECONOMY GUARD] addMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    log.error(`[ECONOMY GUARD] addMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
     return false;
   }
+  amount = Math.round(amount);
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -77,7 +87,7 @@ async function addMoney(guildId, userId, amount, reason = 'Transaction') {
     logTransaction(guildId, userId, amount, 'cash', reason);
     return true;
   } catch (error) {
-    console.error('Error adding money:', error);
+    log.error('Error adding money', { error: error.message });
     return false;
   }
 }
@@ -85,9 +95,10 @@ async function addMoney(guildId, userId, amount, reason = 'Transaction') {
 // Add money directly to user's bank
 async function addToBank(guildId, userId, amount, reason = 'Deposit') {
   if (!isValidAmount(amount)) {
-    console.error(`[ECONOMY GUARD] addToBank rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    log.error(`[ECONOMY GUARD] addToBank rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
     return false;
   }
+  amount = Math.round(amount);
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -100,7 +111,7 @@ async function addToBank(guildId, userId, amount, reason = 'Deposit') {
     logTransaction(guildId, userId, amount, 'bank', reason);
     return true;
   } catch (error) {
-    console.error('Error adding to bank:', error);
+    log.error('Error adding to bank', { error: error.message });
     return false;
   }
 }
@@ -108,16 +119,17 @@ async function addToBank(guildId, userId, amount, reason = 'Deposit') {
 // Remove money from user's cash
 async function removeMoney(guildId, userId, amount, reason = 'Transaction') {
   if (!isValidAmount(amount)) {
-    console.error(`[ECONOMY GUARD] removeMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    log.error(`[ECONOMY GUARD] removeMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
     return false;
   }
+  amount = Math.round(amount);
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
     
     const balance = getBalance(guildId, userId);
     if (balance.cash < amount) {
-      console.error(`Insufficient cash: ${balance.cash} < ${amount}`);
+      log.warn(`Insufficient cash: ${balance.cash} < ${amount}`);
       return false;
     }
     
@@ -129,7 +141,7 @@ async function removeMoney(guildId, userId, amount, reason = 'Transaction') {
     logTransaction(guildId, userId, -amount, 'cash', reason);
     return true;
   } catch (error) {
-    console.error('Error removing money:', error);
+    log.error('Error removing money', { error: error.message });
     return false;
   }
 }
@@ -138,9 +150,10 @@ async function removeMoney(guildId, userId, amount, reason = 'Transaction') {
 // Used for robbery to prevent deposit exploit during fight-back period
 async function forceRemoveMoney(guildId, userId, amount, reason = 'Transaction') {
   if (!isValidAmount(amount)) {
-    console.error(`[ECONOMY GUARD] forceRemoveMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    log.error(`[ECONOMY GUARD] forceRemoveMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
     return false;
   }
+  amount = Math.round(amount);
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -153,7 +166,7 @@ async function forceRemoveMoney(guildId, userId, amount, reason = 'Transaction')
     logTransaction(guildId, userId, -amount, 'cash', reason);
     return true;
   } catch (error) {
-    console.error('Error force removing money:', error);
+    log.error('Error force removing money', { error: error.message });
     return false;
   }
 }
@@ -161,16 +174,17 @@ async function forceRemoveMoney(guildId, userId, amount, reason = 'Transaction')
 // Remove money from user's bank
 async function removeFromBank(guildId, userId, amount, reason = 'Withdrawal') {
   if (!isValidAmount(amount)) {
-    console.error(`[ECONOMY GUARD] removeFromBank rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    log.error(`[ECONOMY GUARD] removeFromBank rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
     return false;
   }
+  amount = Math.round(amount);
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
     
     const balance = getBalance(guildId, userId);
     if (balance.bank < amount) {
-      console.error(`Insufficient bank balance: ${balance.bank} < ${amount}`);
+      log.warn(`Insufficient bank balance: ${balance.bank} < ${amount}`);
       return false;
     }
     
@@ -182,7 +196,7 @@ async function removeFromBank(guildId, userId, amount, reason = 'Withdrawal') {
     logTransaction(guildId, userId, -amount, 'bank', reason);
     return true;
   } catch (error) {
-    console.error('Error removing from bank:', error);
+    log.error('Error removing from bank', { error: error.message });
     return false;
   }
 }
@@ -193,7 +207,7 @@ async function hasEnoughMoney(guildId, userId, amount) {
     const balance = getBalance(guildId, userId);
     return balance.cash >= amount;
   } catch (error) {
-    console.error('Error checking balance:', error);
+    log.error('Error checking balance', { error: error.message });
     return false;
   }
 }
@@ -202,10 +216,10 @@ async function hasEnoughMoney(guildId, userId, amount) {
 async function hasEnoughInBank(guildId, userId, amount) {
   try {
     const balance = getBalance(guildId, userId);
-    console.log(`[Bank Check] User: ${userId}, Need: ${amount}, Has: Cash: ${balance.cash}, Bank: ${balance.bank}, Total: ${balance.total}`);
+    log.debug(`[Bank Check] User: ${userId}, Need: ${amount}, Has: Cash: ${balance.cash}, Bank: ${balance.bank}, Total: ${balance.total}`);
     return balance.bank >= amount;
   } catch (error) {
-    console.error('Error checking bank balance:', error);
+    log.error('Error checking bank balance', { error: error.message });
     return false;
   }
 }
@@ -213,9 +227,10 @@ async function hasEnoughInBank(guildId, userId, amount) {
 // Remove money from total balance (cash first, then bank)
 async function removeFromTotal(guildId, userId, amount, reason = 'Purchase') {
   if (!isValidAmount(amount)) {
-    console.error(`[ECONOMY GUARD] removeFromTotal rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    log.error(`[ECONOMY GUARD] removeFromTotal rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
     return { success: false, error: 'Invalid amount' };
   }
+  amount = Math.round(amount);
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -251,7 +266,7 @@ async function removeFromTotal(guildId, userId, amount, reason = 'Purchase') {
     
     return { success: true, fromCash, fromBank };
   } catch (error) {
-    console.error('Error removing from total:', error);
+    log.error('Error removing from total', { error: error.message });
     return { success: false, error: error.message };
   }
 }
@@ -261,6 +276,9 @@ function setBalance(guildId, userId, cash, bank) {
   const db = getDb();
   
   ensureBalance(guildId, userId);
+  
+  cash = Math.round(cash);
+  bank = Math.round(bank);
   
   db.run(
     'UPDATE balances SET cash = ?, bank = ? WHERE guild_id = ? AND user_id = ?',
@@ -320,9 +338,10 @@ function getAllBalances(guildId) {
 // Apply a fine - can put user into negative cash balance
 async function applyFine(guildId, userId, amount, reason = 'Fine') {
   if (!isValidAmount(amount)) {
-    console.error(`[ECONOMY GUARD] applyFine rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
+    log.error(`[ECONOMY GUARD] applyFine rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
     return false;
   }
+  amount = Math.round(amount);
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -336,9 +355,20 @@ async function applyFine(guildId, userId, amount, reason = 'Fine') {
     logTransaction(guildId, userId, -amount, 'cash', reason);
     return true;
   } catch (error) {
-    console.error('Error applying fine:', error);
+    log.error('Error applying fine', { error: error.message });
     return false;
   }
+}
+
+// Get when a player's balance record was first created (for new player immunity)
+function getPlayerCreatedAt(guildId, userId) {
+  const db = getDb();
+  const result = db.exec(
+    'SELECT created_at FROM balances WHERE guild_id = ? AND user_id = ?',
+    [guildId, userId]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return 0;
+  return result[0].values[0][0] || 0;
 }
 
 module.exports = {
@@ -356,5 +386,6 @@ module.exports = {
   setBalance,
   getTransactionHistory,
   getAllBalances,
-  applyFine
+  applyFine,
+  getPlayerCreatedAt
 };

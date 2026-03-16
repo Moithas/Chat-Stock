@@ -11,9 +11,9 @@ const {
   getGamblingSettings,
   getLotteryTicketPrice
 } = require('../gambling');
-const { hasAdminPermission, logAdminAction } = require('../admin');
+const { hasAdminPermission, logAdminAction, getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -82,7 +82,7 @@ async function handleBuy(interaction, guildId, userId) {
   const balanceData = await getBalance(guildId, userId);
   if (balanceData.total < ticketPrice) {
     return interaction.reply({
-      content: `❌ You need **${ticketPrice.toLocaleString()}** ${CURRENCY} to buy a ticket! You have **${balanceData.total.toLocaleString()}** ${CURRENCY}`,
+      content: `❌ You need **${ticketPrice.toLocaleString()}** ${getCurrency(guildId)} to buy a ticket! You have **${balanceData.total.toLocaleString()}** ${getCurrency(guildId)}`,
       flags: 64
     });
   }
@@ -110,14 +110,14 @@ async function handleBuy(interaction, guildId, userId) {
     .setTitle('🎟️ Lottery Ticket Purchased!')
     .setDescription(`Your numbers: **${result.numbers.join(' - ')}**`)
     .addFields(
-      { name: '💰 Cost', value: `**${ticketPrice.toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: '💰 Cost', value: `**${ticketPrice.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+      { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
     )
     .addFields({
       name: '📋 Prize Tiers',
       value: [
-        `**2 matches:** ${settings.lottery_prize_2match.toLocaleString()} ${CURRENCY}`,
-        `**3 matches:** ${settings.lottery_prize_3match.toLocaleString()} ${CURRENCY}`,
+        `**2 matches:** ${settings.lottery_prize_2match.toLocaleString()} ${getCurrency(guildId)}`,
+        `**3 matches:** ${settings.lottery_prize_3match.toLocaleString()} ${getCurrency(guildId)}`,
         `**4 matches:** JACKPOT!`
       ].join('\n')
     })
@@ -139,16 +139,16 @@ async function handleInfo(interaction, guildId) {
     .setTitle('🎰 Pick 4 Lottery')
     .setDescription('Pick 4 numbers from 0-29. Match numbers in any order to win!')
     .addFields(
-      { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '🎟️ Tickets Sold', value: `**${tickets.length}**`, inline: true },
-      { name: '💵 Ticket Price', value: `**${ticketPrice.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: '💵 Ticket Price', value: `**${ticketPrice.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
     )
     .addFields({
       name: '📋 Prize Tiers',
       value: [
-        `**2 matches:** ${settings.lottery_prize_2match.toLocaleString()} ${CURRENCY}`,
-        `**3 matches:** ${settings.lottery_prize_3match.toLocaleString()} ${CURRENCY}`,
-        `**4 matches:** JACKPOT (${lotteryInfo.jackpot.toLocaleString()} ${CURRENCY})`
+        `**2 matches:** ${settings.lottery_prize_2match.toLocaleString()} ${getCurrency(guildId)}`,
+        `**3 matches:** ${settings.lottery_prize_3match.toLocaleString()} ${getCurrency(guildId)}`,
+        `**4 matches:** JACKPOT (${lotteryInfo.jackpot.toLocaleString()} ${getCurrency(guildId)})`
       ].join('\n')
     });
 
@@ -162,7 +162,7 @@ async function handleInfo(interaction, guildId) {
 
   if (recentWinners.length > 0) {
     const winnerText = recentWinners.slice(0, 5).map(w => 
-      `<@${w.user_id}>: ${w.matches} matches - **${w.prize.toLocaleString()}** ${CURRENCY}`
+      `<@${w.user_id}>: ${w.matches} matches - **${w.prize.toLocaleString()}** ${getCurrency(guildId)}`
     ).join('\n');
     embed.addFields({
       name: '🏅 Recent Winners',
@@ -207,7 +207,7 @@ async function handleTickets(interaction, guildId, userId) {
     .setTitle('🎟️ Your Lottery Tickets')
     .setDescription(description)
     .addFields(
-      { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '🎫 Total Tickets', value: `**${tickets.length}**`, inline: true }
     )
     .setFooter({ text: 'Good luck on the next draw!' })
@@ -251,13 +251,13 @@ async function handleDraw(interaction, guildId, userId) {
     .setDescription(`🎱 **Winning Numbers: ${result.winningNumbers.join(' - ')}**`)
     .addFields(
       { name: '🎟️ Total Tickets', value: `**${result.totalTickets}**`, inline: true },
-      { name: '💸 Total Prizes', value: `**${result.totalPrizesPaid.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: '💸 Total Prizes', value: `**${result.totalPrizesPaid.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
     );
 
   if (result.jackpotWon) {
     embed.addFields({
       name: '🎊 JACKPOT WINNER!',
-      value: `Someone won the **${result.jackpotAmount.toLocaleString()}** ${CURRENCY} jackpot!`
+      value: `Someone won the **${result.jackpotAmount.toLocaleString()}** ${getCurrency(guildId)} jackpot!`
     });
   }
 
@@ -270,13 +270,13 @@ async function handleDraw(interaction, guildId, userId) {
     let winnerText = '';
     
     if (by4.length > 0) {
-      winnerText += `**🏆 4 Matches (JACKPOT):**\n${by4.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${CURRENCY}`).join('\n')}\n\n`;
+      winnerText += `**🏆 4 Matches (JACKPOT):**\n${by4.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${getCurrency(guildId)}`).join('\n')}\n\n`;
     }
     if (by3.length > 0) {
-      winnerText += `**🥈 3 Matches:**\n${by3.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${CURRENCY}`).join('\n')}\n\n`;
+      winnerText += `**🥈 3 Matches:**\n${by3.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${getCurrency(guildId)}`).join('\n')}\n\n`;
     }
     if (by2.length > 0) {
-      winnerText += `**🥉 2 Matches:**\n${by2.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${CURRENCY}`).join('\n')}`;
+      winnerText += `**🥉 2 Matches:**\n${by2.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${getCurrency(guildId)}`).join('\n')}`;
     }
 
     embed.addFields({ name: '🏅 Winners', value: winnerText || 'None' });
@@ -288,7 +288,7 @@ async function handleDraw(interaction, guildId, userId) {
   const newInfo = getLotteryInfo(guildId);
   embed.addFields({
     name: '💰 New Jackpot',
-    value: `**${newInfo.jackpot.toLocaleString()}** ${CURRENCY}`
+    value: `**${newInfo.jackpot.toLocaleString()}** ${getCurrency(guildId)}`
   });
 
   embed.setFooter({ text: 'Thanks for playing!' })
@@ -311,10 +311,10 @@ async function handleSetJackpot(interaction, guildId, userId) {
   const amount = interaction.options.getInteger('amount');
   setJackpot(guildId, amount);
 
-  logAdminAction(guildId, userId, interaction.user.username, 'Set lottery jackpot', `${amount.toLocaleString()} ${CURRENCY}`);
+  logAdminAction(guildId, userId, interaction.user.username, 'Set lottery jackpot', `${amount.toLocaleString()} ${getCurrency(guildId)}`);
 
   await interaction.reply({
-    content: `✅ Lottery jackpot set to **${amount.toLocaleString()}** ${CURRENCY}`,
+    content: `✅ Lottery jackpot set to **${amount.toLocaleString()}** ${getCurrency(guildId)}`,
     flags: 64
   });
 }

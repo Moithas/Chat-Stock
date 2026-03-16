@@ -920,7 +920,7 @@ function executeSplit(guildId, stockUserId, ratio, currentPrice, getAllStockHold
   // shares * multiplier, price / multiplier (keeps total cost basis the same)
   try {
     const { adjustPurchaseHistoryForSplit } = require('./market');
-    adjustPurchaseHistoryForSplit(stockUserId, multiplier);
+    adjustPurchaseHistoryForSplit(guildId, stockUserId, multiplier);
   } catch (e) {
     console.error('Failed to adjust purchase history for split:', e);
   }
@@ -972,7 +972,7 @@ function executeReverseSplit(guildId, stockUserId, ratio, currentPrice, getAllSt
   // shares * multiplier, price / multiplier (keeps total cost basis the same)
   try {
     const { adjustPurchaseHistoryForSplit } = require('./market');
-    adjustPurchaseHistoryForSplit(stockUserId, multiplier);
+    adjustPurchaseHistoryForSplit(guildId, stockUserId, multiplier);
   } catch (e) {
     console.error('Failed to adjust purchase history for reverse split:', e);
   }
@@ -1064,9 +1064,6 @@ function startDividendScheduler(client) {
         const { getAllUsers, getAllStockHolders, calculateStockPrice } = require('./database');
         const { addToBank } = require('./economy');
         
-        // Helper function to delay between API calls
-        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-        
         // Get all unique stock users
         const allUsers = getAllUsers();
         if (!allUsers || allUsers.length === 0) {
@@ -1111,41 +1108,23 @@ function startDividendScheduler(client) {
                 const payout = calculateDividendPayout(stockPrice, holder.shares, settings.dividendRate);
                 if (payout <= 0) continue;
                 
-                // Add delay between API calls to avoid rate limiting (500ms)
-                await delay(500);
-                
-                // Try to pay with retry on rate limit
-                let retries = 3;
-                let success = false;
-                while (retries > 0 && !success) {
-                  try {
+                try {
                     await addToBank(guildId, holder.ownerId, payout, `Dividend from ${stockUser.username || 'Unknown'}'s stock`);
-                    success = true;
-                  } catch (apiError) {
-                    if (apiError.status === 429 && retries > 1) {
-                      // Rate limited - wait and retry
-                      const retryAfter = apiError.response?.data?.retry_after || 2000;
-                      console.log(`Rate limited, waiting ${retryAfter}ms before retry...`);
-                      await delay(retryAfter);
-                      retries--;
-                    } else {
-                      throw apiError;
-                    }
-                  }
-                }
                 
-                if (success) {
-                  recordDividendPayout(guildId, stockUser.user_id, holder.ownerId, holder.shares, stockPrice, payout);
-                  totalPaid += payout;
-                  payoutsCount++;
+                    recordDividendPayout(guildId, stockUser.user_id, holder.ownerId, holder.shares, stockPrice, payout);
+                    totalPaid += payout;
+                    payoutsCount++;
                   
-                  // Track for self-dividend bonus
-                  if (!stockDividendTotals.has(stockUser.user_id)) {
-                    stockDividendTotals.set(stockUser.user_id, { totalPaid: 0, totalShares: 0 });
-                  }
-                  const stockData = stockDividendTotals.get(stockUser.user_id);
-                  stockData.totalPaid += payout;
-                  stockData.totalShares += holder.shares;
+                    // Track for self-dividend bonus
+                    if (!stockDividendTotals.has(stockUser.user_id)) {
+                      stockDividendTotals.set(stockUser.user_id, { totalPaid: 0, totalShares: 0 });
+                    }
+                    const stockData = stockDividendTotals.get(stockUser.user_id);
+                    stockData.totalPaid += payout;
+                    stockData.totalShares += holder.shares;
+                } catch (payError) {
+                    failedPayouts++;
+                    console.error(`Failed to pay dividend to ${holder.ownerId}:`, payError.message);
                 }
               } catch (holderError) {
                 failedPayouts++;
@@ -1173,29 +1152,13 @@ function startDividendScheduler(client) {
               const bonus = calculateSelfDividendBonus(data.totalPaid, data.totalShares, settings.selfDividendRate);
               if (bonus <= 0) continue;
               
-              await delay(500);
-              
-              let retries = 3;
-              let success = false;
-              while (retries > 0 && !success) {
-                try {
-                  await addToBank(guildId, stockUserId, bonus, `CEO Bonus: ${settings.selfDividendRate}% of dividends paid on your stock`);
-                  success = true;
-                } catch (apiError) {
-                  if (apiError.status === 429 && retries > 1) {
-                    const retryAfter = apiError.response?.data?.retry_after || 2000;
-                    await delay(retryAfter);
-                    retries--;
-                  } else {
-                    throw apiError;
-                  }
-                }
-              }
-              
-              if (success) {
+              try {
+                await addToBank(guildId, stockUserId, bonus, `CEO Bonus: ${settings.selfDividendRate}% of dividends paid on your stock`);
                 recordSelfDividendBonus(guildId, stockUserId, data.totalPaid, bonus);
                 selfDividendsPaid += bonus;
                 selfDividendsCount++;
+              } catch (payError) {
+                console.error(`Failed to pay self-dividend to ${stockUserId}:`, payError.message);
               }
             } catch (err) {
               console.error(`Failed to pay self-dividend to ${stockUserId}:`, err.message);

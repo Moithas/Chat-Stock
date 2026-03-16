@@ -23,8 +23,9 @@ const {
   formatCard
 } = require('../inbetween');
 const { generateInBetweenImage } = require('../cardImages');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Track pending ante prompts (guildId -> { userId, messageId, timeout })
 const pendingAntePrompts = new Map();
@@ -69,7 +70,7 @@ module.exports = {
     const balance = await getBalance(guildId, userId);
     if (balance.total < settings.anteAmount) {
       return interaction.editReply({ 
-        content: `❌ You need **${settings.anteAmount.toLocaleString()}** ${CURRENCY} to ante up!\nYour balance: **${balance.total.toLocaleString()}** ${CURRENCY}` 
+        content: `❌ You need **${settings.anteAmount.toLocaleString()}** ${getCurrency(guildId)} to ante up!\nYour balance: **${balance.total.toLocaleString()}** ${getCurrency(guildId)}` 
       });
     }
     
@@ -81,9 +82,9 @@ module.exports = {
       .setTitle('🃏 In Between (Acey Deucey)')
       .setDescription(`Pay the ante to receive your two pole cards.\n\nIf the third card lands **between** your poles, you win your bet!\nIf it **hits a pole**, you pay the entire pot!`)
       .addFields(
-        { name: '🎫 Ante', value: `**${settings.anteAmount.toLocaleString()}** ${CURRENCY}`, inline: true },
-        { name: '💰 Current Pot', value: `**${pot.toLocaleString()}** ${CURRENCY}`, inline: true },
-        { name: '📊 Max Bet', value: `**${Math.floor(pot / 2).toLocaleString()}** ${CURRENCY} (50%)`, inline: true }
+        { name: '🎫 Ante', value: `**${settings.anteAmount.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+        { name: '💰 Current Pot', value: `**${pot.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+        { name: '📊 Max Bet', value: `**${Math.floor(pot / 2).toLocaleString()}** ${getCurrency(guildId)} (50%)`, inline: true }
       )
       .setFooter({ text: `${interaction.user.displayName} • Click within 15 seconds to deal!` })
       .setTimestamp();
@@ -182,8 +183,8 @@ function buildAceChoiceEmbed(game, user, attachment) {
     .setDescription(`Your first card is an **Ace**!\nChoose whether it should be **High (14)** or **Low (1)**.\n\nYour other card is **${formatCard(game.pole2)}** (${otherVal}).`)
     .addFields(
       { name: '🎯 Your Cards', value: `**${formatCard(game.pole1)}** and **${formatCard(game.pole2)}**`, inline: true },
-      { name: '💰 Current Pot', value: `**${pot.toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '🎫 Your Ante', value: `**${game.ante.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: '💰 Current Pot', value: `**${pot.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true },
+      { name: '🎫 Your Ante', value: `**${game.ante.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true }
     )
     .setFooter({ text: `${user.displayName} • Choose wisely!` })
     .setTimestamp();
@@ -210,9 +211,9 @@ function buildBettingEmbed(game, user, attachment) {
     .setTitle('🃏 In Between - Place Your Bet')
     .setDescription(`Your poles: **${formatCard(game.pole1)}** (${p1Val}) and **${formatCard(game.pole2)}** (${p2Val})\n\nYou need the third card to land **between ${lowVal} and ${highVal}**.`)
     .addFields(
-      { name: '💰 Pot', value: `**${pot.toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '📊 Max Bet (50%)', value: `**${maxBet.toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '🎫 Your Ante', value: `**${game.ante.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '💰 Pot', value: `**${pot.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true },
+      { name: '📊 Max Bet (50%)', value: `**${maxBet.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true },
+      { name: '🎫 Your Ante', value: `**${game.ante.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true },
       { name: '📈 Spread', value: `**${odds.spread}** cards can win`, inline: true },
       { name: '✅ Win Chance', value: `~**${odds.winChance}%**`, inline: true },
       { name: '⚠️ Pole Risk', value: `~**${odds.poleChance}%**`, inline: true }
@@ -237,8 +238,8 @@ function buildHighLowEmbed(game, user, attachment) {
     .setTitle('🃏 In Between - High or Low?')
     .setDescription(`Both poles are **${formatCard(game.pole1)}** and **${formatCard(game.pole2)}** (equal value: ${poleVal})!\n\nGuess if the third card will be **Higher** or **Lower** to win your ante back 1:1.\n\n⚠️ If you hit the same value again, you pay the **entire pot**!`)
     .addFields(
-      { name: '💰 Pot at Risk', value: `**${pot.toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '🎫 Your Ante', value: `**${game.ante.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: '💰 Pot at Risk', value: `**${pot.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true },
+      { name: '🎫 Your Ante', value: `**${game.ante.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true }
     )
     .setFooter({ text: `${user.displayName} • Good luck!` })
     .setTimestamp();
@@ -258,8 +259,8 @@ function buildAutoLossEmbed(game, user, attachment) {
     .setTitle('🃏 In Between - Adjacent Cards!')
     .setDescription(`Bad luck! Your poles **${formatCard(game.pole1)}** (${p1Val}) and **${formatCard(game.pole2)}** (${p2Val}) are adjacent.\n\nNo card can land between them - you lose your ante.`)
     .addFields(
-      { name: '💸 Lost', value: `**-${game.ante.toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '💰 Pot', value: `**${game.currentPot.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: '💸 Lost', value: `**-${game.ante.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true },
+      { name: '💰 Pot', value: `**${game.currentPot.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true }
     )
     .setFooter({ text: `${user.displayName} • Better luck next time!` })
     .setTimestamp();
@@ -280,56 +281,56 @@ function buildResultEmbed(game, user, attachment) {
       color = 0x57F287;
       title = '🎉 Winner!';
       const totalWin = game.payout + game.ante;
-      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) landed between your poles!\n\n**You won ${totalWin.toLocaleString()}** ${CURRENCY} *(${game.payout.toLocaleString()} + ${game.ante.toLocaleString()} ante)*!`;
+      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) landed between your poles!\n\n**You won ${totalWin.toLocaleString()}** ${getCurrency(game.guildId)} *(${game.payout.toLocaleString()} + ${game.ante.toLocaleString()} ante)*!`;
       break;
     
     case 'lose':
       color = 0xED4245;
       title = '😔 Outside the Poles';
-      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) was outside your poles.\n\n**You lost ${Math.abs(game.payout).toLocaleString()}** ${CURRENCY}.`;
+      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) was outside your poles.\n\n**You lost ${Math.abs(game.payout).toLocaleString()}** ${getCurrency(game.guildId)}.`;
       break;
     
     case 'pole_hit':
       color = 0x000000;
       title = '💀 YOU HIT THE POLE!';
-      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) matched one of your poles!\n\n**You lose double your bet: ${Math.abs(game.payout).toLocaleString()}** ${CURRENCY}!`;
+      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) matched one of your poles!\n\n**You lose double your bet: ${Math.abs(game.payout).toLocaleString()}** ${getCurrency(game.guildId)}!`;
       break;
     
     case 'win_highlow':
       color = 0x57F287;
       title = '🎉 Correct Guess!';
       const totalWinHL = game.payout + game.ante;
-      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) - you guessed right!\n\n**You won ${totalWinHL.toLocaleString()}** ${CURRENCY} *(${game.payout.toLocaleString()} + ${game.ante.toLocaleString()} ante)*!`;
+      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) - you guessed right!\n\n**You won ${totalWinHL.toLocaleString()}** ${getCurrency(game.guildId)} *(${game.payout.toLocaleString()} + ${game.ante.toLocaleString()} ante)*!`;
       break;
     
     case 'lose_highlow':
       color = 0xED4245;
       title = '😔 Wrong Guess';
-      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) - wrong guess!\n\n**You lost your ante: ${game.ante.toLocaleString()}** ${CURRENCY}.`;
+      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) - wrong guess!\n\n**You lost your ante: ${game.ante.toLocaleString()}** ${getCurrency(game.guildId)}.`;
       break;
     
     case 'pole_hit_highlow':
       color = 0x000000;
       title = '💀 HIT THE POLE ON HIGH/LOW!';
-      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) matched the pole value!\n\n**You lose double your ante: ${Math.abs(game.payout).toLocaleString()}** ${CURRENCY}!`;
+      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) matched the pole value!\n\n**You lose double your ante: ${Math.abs(game.payout).toLocaleString()}** ${getCurrency(game.guildId)}!`;
       break;
     
     case 'pass':
       color = 0x99AAB5;
       title = '🏳️ Passed';
-      description = `You passed on this hand.\n\n**Ante lost: ${game.ante.toLocaleString()}** ${CURRENCY}`;
+      description = `You passed on this hand.\n\n**Ante lost: ${game.ante.toLocaleString()}** ${getCurrency(game.guildId)}`;
       break;
     
     case 'timeout':
       color = 0x99AAB5;
       title = '⏰ Time\'s Up!';
-      description = `You ran out of time and forfeited your ante.\n\n**Ante lost: ${game.ante.toLocaleString()}** ${CURRENCY}`;
+      description = `You ran out of time and forfeited your ante.\n\n**Ante lost: ${game.ante.toLocaleString()}** ${getCurrency(game.guildId)}`;
       break;
     
     case 'adjacent':
       color = 0xED4245;
       title = '📏 Adjacent Cards';
-      description = `Your poles were adjacent - no card can fit between.\n\n**Ante lost: ${game.ante.toLocaleString()}** ${CURRENCY}`;
+      description = `Your poles were adjacent - no card can fit between.\n\n**Ante lost: ${game.ante.toLocaleString()}** ${getCurrency(game.guildId)}`;
       break;
     
     default:
@@ -343,7 +344,7 @@ function buildResultEmbed(game, user, attachment) {
     .setTitle(`🃏 In Between - ${title}`)
     .setDescription(description)
     .addFields(
-      { name: '💰 Pot After', value: `**${game.currentPot.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: '💰 Pot After', value: `**${game.currentPot.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true }
     )
     .setFooter({ text: `${user.displayName}` })
     .setTimestamp();
@@ -474,7 +475,7 @@ async function handleButton(interaction) {
     const balance = await getBalance(guildId, userId);
     if (balance.total < settings.anteAmount) {
       return interaction.reply({ 
-        content: `❌ You need **${settings.anteAmount.toLocaleString()}** ${CURRENCY} to ante up!\nYour balance: **${balance.total.toLocaleString()}** ${CURRENCY}`,
+        content: `❌ You need **${settings.anteAmount.toLocaleString()}** ${getCurrency(guildId)} to ante up!\nYour balance: **${balance.total.toLocaleString()}** ${getCurrency(guildId)}`,
         flags: 64
       });
     }
@@ -675,7 +676,7 @@ async function processBet(interaction, guildId, betAmount) {
   // Deduct bet from player
   const deducted = await removeFromTotal(guildId, userId, betAmount, 'In Between bet');
   if (!deducted) {
-    return interaction.reply({ content: `❌ You don't have enough to bet **${betAmount.toLocaleString()}** ${CURRENCY}!`, flags: 64 });
+    return interaction.reply({ content: `❌ You don't have enough to bet **${betAmount.toLocaleString()}** ${getCurrency(guildId)}!`, flags: 64 });
   }
   
   // Place the bet

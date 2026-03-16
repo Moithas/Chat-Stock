@@ -21,9 +21,9 @@ const {
   cancelFulfillment,
   getItemSettings
 } = require('../items');
-const { getAdminRole, isAdmin } = require('../admin');
+const { getAdminRole, isAdmin, getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 const ITEMS_PER_PAGE = 8;
 
 // Helper function to safely parse emoji for select menu options
@@ -162,6 +162,13 @@ async function showInventoryPanel(interaction, guildId, targetId, targetName, is
 async function handleInventoryInteraction(i, state, stateKey, response) {
   const { guildId, targetId, targetName, isOwnInventory } = state;
   
+  // Dismiss
+  if (i.customId === 'inv_dismiss') {
+    inventoryState.delete(stateKey);
+    try { await i.message.delete(); } catch (e) {}
+    return;
+  }
+
   // Tab switching
   if (i.customId === 'inv_tab_items') {
     state.tab = 'items';
@@ -454,7 +461,11 @@ function createInventoryPanelComponents(inventory, effects, page, tab, isOwnInve
       .setCustomId('inv_tab_effects')
       .setLabel(`✨ Effects (${effects.length})`)
       .setStyle(tab === 'effects' ? ButtonStyle.Primary : ButtonStyle.Secondary)
-      .setDisabled(!isOwnInventory)
+      .setDisabled(!isOwnInventory),
+    new ButtonBuilder()
+      .setCustomId('inv_dismiss')
+      .setLabel('Dismiss')
+      .setStyle(ButtonStyle.Danger)
   );
   components.push(tabRow);
   
@@ -938,7 +949,7 @@ async function handleLotteryTicketModal(interaction) {
       .setDescription(`You redeemed your **${shopItem.emoji} ${shopItem.name}**!`)
       .addFields(
         { name: '🔢 Your Numbers', value: `**${ticketResult.numbers.join(' - ')}**`, inline: false },
-        { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${CURRENCY}`, inline: true }
+        { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
       )
       .setFooter({ text: 'Use /lottery tickets to see all your tickets • Good luck!' })
       .setTimestamp();

@@ -1,11 +1,14 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getBalance, removeMoney, forceRemoveMoney, addMoney, applyFine } = require('../economy');
+const { getBalance, removeMoney, forceRemoveMoney, addMoney, applyFine, getPlayerCreatedAt } = require('../economy');
 const { getRobSettings, canRob, canBeRobbed, canRobTarget, recordTargetRobbed, recordGiftProtection, checkGiftProtection, calculateSuccessRate, attemptRob, calculateStolenAmount, calculateFine, recordRob, isUserImmune, hasActiveImmunity } = require('../rob');
 const { getRobBonuses, addXp, checkTrainingComplete } = require('../skills');
 const { hasActiveEffect, getEffectValue, EFFECT_TYPES } = require('../items');
 const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
+const { getInfamySettings, getTierEffects, addInfamy, rollBountyCheck, createBounty, getActiveBounty, claimBounty, startProbation, announceBountyPosted, announceBountyClaimed } = require('../infamy');
+const { addMoney: addMoneyForBounty } = require('../economy');
+const { getCurrency, getAdminSettings } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Flavor texts for various scenarios
 const FLAVOR_TEXTS = {
@@ -128,6 +131,71 @@ function createDefenseButtons(robberId) {
     );
 }
 
+// Helper: apply infamy earnings cut to stolen amount
+function applyInfamyEarningsCut(stolenAmount, tierEffects) {
+  const earningsCut = tierEffects.earningsCut || 0;
+  if (earningsCut > 0) {
+    return Math.floor(stolenAmount * (1 - earningsCut / 100));
+  }
+  return stolenAmount;
+}
+
+// Helper: process infamy gain, bounty claim/roll after a successful rob
+async function processRobInfamy(guildId, robberId, targetId, stolenAmount, interaction) {
+  const settings = getInfamySettings(guildId);
+  if (!settings.enabled) return { infamyGained: 0, bountyClaimed: null, bountyPosted: null };
+  
+  // Gain infamy
+  const infamyGained = Math.round(stolenAmount * settings.rob_rate);
+  if (infamyGained > 0) {
+    addInfamy(guildId, robberId, infamyGained, 'rob');
+  }
+  
+  let bountyClaimed = null;
+  let bountyPosted = null;
+  
+  // Check if target has a bounty the robber can claim
+  const targetBounty = getActiveBounty(guildId, targetId);
+  if (targetBounty) {
+    bountyClaimed = claimBounty(guildId, targetId, robberId, 'rob');
+    if (bountyClaimed) {
+      await addMoneyForBounty(guildId, robberId, bountyClaimed.bounty_amount, 'Bounty claimed (rob)');
+      startProbation(guildId, targetId);
+      announceBountyClaimed(guildId, targetId, robberId, bountyClaimed.bounty_amount, 'rob');
+      
+      // Public notification in channel
+      try {
+        const { EmbedBuilder } = require('discord.js');
+        await interaction.followUp({ embeds: [new EmbedBuilder()
+          .setColor(0xffd700)
+          .setTitle('🏆 Bounty Claimed!')
+          .setDescription(`<@${robberId}> claimed the bounty on <@${targetId}>!\n\n💰 **Reward:** ${bountyClaimed.bounty_amount.toLocaleString()} ${getCurrency(guildId)}\n⚔️ **Method:** 💰 Rob\n\n⚖️ <@${targetId}> is now on **probation** — infamy reset to 0 but tier penalties remain.`)
+          .setTimestamp()] });
+      } catch (e) {}
+    }
+  }
+  
+  // Roll for bounty on robber
+  if (!bountyClaimed && rollBountyCheck(guildId, robberId)) {
+    const newBounty = createBounty(guildId, robberId);
+    if (newBounty) {
+      bountyPosted = newBounty;
+      announceBountyPosted(guildId, robberId, newBounty.bountyAmount);
+    }
+  }
+  
+  return { infamyGained, bountyClaimed, bountyPosted };
+}
+
+// Helper: apply infamy fine modifier  
+function applyInfamyFineModifier(fine, tierEffects) {
+  const fineModifier = tierEffects.fineModifier || 0;
+  if (fineModifier > 0) {
+    return Math.floor(fine * (1 + fineModifier / 100));
+  }
+  return fine;
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('rob')
@@ -177,6 +245,21 @@ module.exports = {
       }
     }
     
+    // Check new player immunity
+    const adminSettings = getAdminSettings(guildId);
+    if (adminSettings.newPlayerImmunityDays > 0) {
+      const targetCreatedAt = getPlayerCreatedAt(guildId, targetId);
+      if (targetCreatedAt > 0) {
+        const immunityMs = adminSettings.newPlayerImmunityDays * 24 * 60 * 60 * 1000;
+        const immunityEnds = targetCreatedAt + immunityMs;
+        if (Date.now() < immunityEnds) {
+          return interaction.reply({
+            content: `❌ **${targetUser.username}** is a new player and has rob immunity until <t:${Math.floor(immunityEnds / 1000)}:R>.`
+          });
+        }
+      }
+    }
+
     // Check if target has purchased immunity
     if (hasActiveImmunity(guildId, targetId)) {
       return interaction.reply({
@@ -258,6 +341,11 @@ module.exports = {
     const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost + lpRobSuccess - targetRobDefense;
     const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, totalSuccessBonus);
 
+    // Get infamy tier effects for success buff
+    const robberTierEffects = getTierEffects(guildId, robberId);
+    const infamySuccessBuff = robberTierEffects.successBuff || 0;
+    const adjustedSuccessRate = Math.min(95, successRate + infamySuccessBuff);
+
     // Build training notification if applicable
     let trainingNotification = '';
     if (trainingResult) {
@@ -327,7 +415,7 @@ module.exports = {
           await interaction.channel.send({ content: `⏱️ <@${targetId}> didn't defend in time!` });
           
           // Process the rob after timeout (no defense)
-          const timeoutSuccess = attemptRob(successRate);
+          const timeoutSuccess = attemptRob(adjustedSuccessRate);
           const timeoutEmbed = new EmbedBuilder().setTimestamp();
 
           if (timeoutSuccess) {
@@ -339,9 +427,15 @@ module.exports = {
               actualStolen = Math.floor(actualStolen * (1 - robProtectionValue / 100));
             }
 
+            // Apply infamy earnings cut
+            actualStolen = applyInfamyEarningsCut(actualStolen, robberTierEffects);
+
             await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
             await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
             recordRob(guildId, robberId, targetId, true, actualStolen);
+            
+            // Process infamy gain, bounty claim/roll
+            const infamyResult = await processRobInfamy(guildId, robberId, targetId, actualStolen, interaction);
             
             // Award success XP (only if unique target)
             const xpResult = awardsXp 
@@ -359,21 +453,24 @@ module.exports = {
               ? ` (🛡️ ${robProtectionValue}% protected)`
               : '';
 
+            const tierIndicator = robberTierEffects.tier >= 1 ? ` ${robberTierEffects.emoji}` : '';
+
             timeoutEmbed
               .setColor(0x2ecc71)
-              .setTitle('💰 Rob Successful!')
+              .setTitle(`💰 Rob Successful!${tierIndicator}`)
               .setDescription(flavorText)
               .addFields(
-                { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY} (${stealPercent}% of their cash)${protectionNote}`, inline: true },
-                { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
-                { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${CURRENCY}`, inline: false }
+                { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)} (${stealPercent}% of their cash)${protectionNote}${robberTierEffects.earningsCut > 0 ? `\n🏴‍☠️ Earnings cut: -${robberTierEffects.earningsCut}%` : ''}`, inline: true },
+                { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}`, inline: true },
+                { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${getCurrency(guildId)}${infamyResult.bountyClaimed ? `\n🏆 +${infamyResult.bountyClaimed.bounty_amount.toLocaleString()} bounty` : ''}`, inline: false }
               )
               .setFooter({ text: xpFooter });
           } else {
             const itemFineReduction = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_FINE_REDUCTION);
             const lpRobFine = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_FINES);
             const totalFineReduction = robBonuses.fineReduction + itemFineReduction + (-lpRobFine);
-            const fine = calculateFine(robberBalance.total, settings, totalFineReduction);
+            let fine = calculateFine(robberBalance.total, settings, totalFineReduction);
+            fine = applyInfamyFineModifier(fine, robberTierEffects);
             await applyFine(guildId, robberId, fine, `Failed rob attempt on ${targetUser.username}`);
             recordRob(guildId, robberId, targetId, false, fine);
             
@@ -394,9 +491,9 @@ module.exports = {
               .setTitle('🚨 Rob Failed!')
               .setDescription(flavorText)
               .addFields(
-                { name: '💸 Fine', value: `${fine.toLocaleString()} ${CURRENCY} (${finePercent}% of your balance)`, inline: true },
-                { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
-                { name: '💼 Your New Balance', value: `${(robberBalance.total - fine).toLocaleString()} ${CURRENCY}`, inline: false }
+                { name: '💸 Fine', value: `${fine.toLocaleString()} ${getCurrency(guildId)} (${finePercent}% of your balance)${robberTierEffects.fineModifier > 0 ? `\n🏴‍☠️ Fine modifier: +${robberTierEffects.fineModifier}%` : ''}`, inline: true },
+                { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}`, inline: true },
+                { name: '💼 Your New Balance', value: `${(robberBalance.total - fine).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
               )
               .setFooter({ text: xpFooter });
           }
@@ -411,7 +508,7 @@ module.exports = {
     }
 
     // Defenses disabled OR no defense response received - proceed with normal rob
-    const success = attemptRob(successRate);
+    const success = attemptRob(adjustedSuccessRate);
 
     const embed = new EmbedBuilder()
       .setTimestamp();
@@ -426,12 +523,18 @@ module.exports = {
         actualStolen = Math.floor(actualStolen * (1 - robProtectionValue / 100));
       }
 
+      // Apply infamy earnings cut
+      actualStolen = applyInfamyEarningsCut(actualStolen, robberTierEffects);
+
       // Transfer money
       await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
       await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
 
       // Record the rob
       recordRob(guildId, robberId, targetId, true, actualStolen);
+      
+      // Process infamy gain, bounty claim/roll
+      const infamyResult = await processRobInfamy(guildId, robberId, targetId, actualStolen, interaction);
       
       // Award success XP (only if unique target)
       const xpResult = awardsXp 
@@ -449,14 +552,16 @@ module.exports = {
         ? ` (🛡️ ${robProtectionValue}% protected)`
         : '';
 
+      const tierIndicator = robberTierEffects.tier >= 1 ? ` ${robberTierEffects.emoji}` : '';
+
       embed
         .setColor(0x2ecc71)
-        .setTitle('💰 Rob Successful!')
+        .setTitle(`💰 Rob Successful!${tierIndicator}`)
         .setDescription(flavorText)
         .addFields(
-          { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY} (${stealPercent}% of their cash)${protectionNote}`, inline: true },
-          { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
-          { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${CURRENCY}`, inline: false }
+          { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)} (${stealPercent}% of their cash)${protectionNote}${robberTierEffects.earningsCut > 0 ? `\n🏴‍☠️ Earnings cut: -${robberTierEffects.earningsCut}%` : ''}`, inline: true },
+          { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}`, inline: true },
+          { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${getCurrency(guildId)}${infamyResult.bountyClaimed ? `\n🏆 +${infamyResult.bountyClaimed.bounty_amount.toLocaleString()} bounty` : ''}`, inline: false }
         )
         .setFooter({ text: xpFooter });
 
@@ -466,7 +571,8 @@ module.exports = {
       const itemFineReduction2 = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_FINE_REDUCTION);
       const lpRobFine2 = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_FINES);
       const totalFineReduction2 = robBonuses.fineReduction + itemFineReduction2 + (-lpRobFine2);
-      const fine = calculateFine(robberBalance.total, settings, totalFineReduction2);
+      let fine = calculateFine(robberBalance.total, settings, totalFineReduction2);
+      fine = applyInfamyFineModifier(fine, robberTierEffects);
 
       // Apply fine (can put user into negative balance)
       await applyFine(guildId, robberId, fine, `Failed rob attempt on ${targetUser.username}`);
@@ -491,9 +597,9 @@ module.exports = {
         .setTitle('🚨 Rob Failed!')
         .setDescription(flavorText)
         .addFields(
-          { name: '💸 Fine', value: `${fine.toLocaleString()} ${CURRENCY} (${finePercent}% of your balance)`, inline: true },
-          { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
-          { name: '💼 Your New Balance', value: `${(robberBalance.total - fine).toLocaleString()} ${CURRENCY}`, inline: false }
+          { name: '💸 Fine', value: `${fine.toLocaleString()} ${getCurrency(guildId)} (${finePercent}% of your balance)${robberTierEffects.fineModifier > 0 ? `\n🏴‍☠️ Fine modifier: +${robberTierEffects.fineModifier}%` : ''}`, inline: true },
+          { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}`, inline: true },
+          { name: '💼 Your New Balance', value: `${(robberBalance.total - fine).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
         )
         .setFooter({ text: xpFooter });
 
@@ -503,11 +609,16 @@ module.exports = {
 };
 
 async function processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseType, elapsedSeconds, settings, robBonuses, awardsXp, robProtectionValue = 0) {
-  const CURRENCY = '<:babybel:1418824333664452608>';
   const itemSuccessBoost = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_SUCCESS_BOOST);
   const lpRobSuccessDef = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_SUCCESS);
   const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost + lpRobSuccessDef;
   const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, totalSuccessBonus);
+  
+  // Get infamy tier effects
+  const robberTierEffects = getTierEffects(guildId, robberId);
+  const infamySuccessBuff = robberTierEffects.successBuff || 0;
+  const adjustedSuccessRate = Math.min(95, successRate + infamySuccessBuff);
+  
   const stolenAmount = calculateStolenAmount(targetBalance.cash, settings, robBonuses.minStealBonus, robBonuses.maxStealBonus);
   let actualStolen = Math.min(stolenAmount, targetBalance.cash);
   
@@ -516,10 +627,14 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
     actualStolen = Math.floor(actualStolen * (1 - robProtectionValue / 100));
   }
   
+  // Apply infamy earnings cut
+  actualStolen = applyInfamyEarningsCut(actualStolen, robberTierEffects);
+  
   const itemFineReduction = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_FINE_REDUCTION);
   const lpRobFineDef = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_FINES);
   const totalFineReduction = robBonuses.fineReduction + itemFineReduction + (-lpRobFineDef);
-  const fine = calculateFine(robberBalance.total, settings, totalFineReduction);
+  let fine = calculateFine(robberBalance.total, settings, totalFineReduction);
+  fine = applyInfamyFineModifier(fine, robberTierEffects);
   
   // Variable to track XP result for footer
   let xpResult = null;
@@ -555,10 +670,10 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
         .setTitle('🙈 Hide Cash - Success!')
         .setDescription(flavorText)
         .addFields(
-          { name: '💵 Money Saved', value: `${actualStolen.toLocaleString()} ${CURRENCY}`, inline: true },
+          { name: '💵 Money Saved', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
           { name: '📊 Defense Success Rate', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
           { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
-          { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${CURRENCY}`, inline: false }
+          { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
         );
 
       // Record the successful defense
@@ -566,7 +681,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
       robSucceeded = false;
     } else {
       // Defense failed - apply normal rob calculation
-      const robSuccess = attemptRob(successRate);
+      const robSuccess = attemptRob(adjustedSuccessRate);
       
       if (robSuccess) {
         // Normal rob succeeds
@@ -583,11 +698,11 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           .setTitle('🙈 Hide Cash - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY}${protectionNote}`, inline: true },
+            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNote}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
-            { name: '📊 Rob Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
+            { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
-            { name: '💼 Your Balance', value: `${(targetBalance.cash - actualStolen).toLocaleString()} ${CURRENCY}`, inline: false }
+            { name: '💼 Your Balance', value: `${(targetBalance.cash - actualStolen).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
           );
 
         recordRob(guildId, robberId, targetId, true, actualStolen);
@@ -603,11 +718,11 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           .setTitle('🙈 Hide Cash - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💸 Fine Applied', value: `${fine.toLocaleString()} ${CURRENCY}`, inline: true },
+            { name: '💸 Fine Applied', value: `${fine.toLocaleString()} ${getCurrency(guildId)}${robberTierEffects.fineModifier > 0 ? ` (+${robberTierEffects.fineModifier}% infamy)` : ''}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
-            { name: '📊 Rob Failed', value: `${successRate.toFixed(1)}%`, inline: true },
+            { name: '📊 Rob Failed', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
-            { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${CURRENCY}`, inline: false }
+            { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
           );
 
         recordRob(guildId, robberId, targetId, false, fine);
@@ -628,12 +743,12 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
         .setTitle('💨 Dodge - Success!')
         .setDescription(flavorText)
         .addFields(
-          { name: '💵 Money Saved', value: `${actualStolen.toLocaleString()} ${CURRENCY}`, inline: true },
-          { name: '💸 Robber Lost', value: `${gainAmount.toLocaleString()} ${CURRENCY}`, inline: true },
-          { name: '💰 Defender Gained', value: `${gainAmount.toLocaleString()} ${CURRENCY}`, inline: true },
+          { name: '💵 Money Saved', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+          { name: '💸 Robber Lost', value: `${gainAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+          { name: '💰 Defender Gained', value: `${gainAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
           { name: '📊 Defense Success Rate', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
           { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
-          { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${CURRENCY}`, inline: false }
+          { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
         );
 
       // Record as successful defense
@@ -641,7 +756,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
       robSucceeded = false;
     } else {
       // Defense failed - apply normal rob calculation
-      const robSuccess = attemptRob(successRate);
+      const robSuccess = attemptRob(adjustedSuccessRate);
       
       if (robSuccess) {
         // Normal rob succeeds
@@ -658,11 +773,11 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           .setTitle('💨 Dodge - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY}${protectionNoteDodge}`, inline: true },
+            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNoteDodge}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
-            { name: '📊 Rob Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
+            { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
-            { name: '💼 Your Balance', value: `${(targetBalance.cash - actualStolen).toLocaleString()} ${CURRENCY}`, inline: false }
+            { name: '💼 Your Balance', value: `${(targetBalance.cash - actualStolen).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
           );
 
         recordRob(guildId, robberId, targetId, true, actualStolen);
@@ -678,11 +793,11 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           .setTitle('💨 Dodge - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💸 Fine Applied', value: `${fine.toLocaleString()} ${CURRENCY}`, inline: true },
+            { name: '💸 Fine Applied', value: `${fine.toLocaleString()} ${getCurrency(guildId)}${robberTierEffects.fineModifier > 0 ? ` (+${robberTierEffects.fineModifier}% infamy)` : ''}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
-            { name: '📊 Rob Failed', value: `${successRate.toFixed(1)}%`, inline: true },
+            { name: '📊 Rob Failed', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
-            { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${CURRENCY}`, inline: false }
+            { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
           );
 
         recordRob(guildId, robberId, targetId, false, fine);
@@ -704,12 +819,12 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
         .setTitle('🥊 Fight Back - Success!')
         .setDescription(flavorText)
         .addFields(
-          { name: '💵 Money Saved', value: `${actualStolen.toLocaleString()} ${CURRENCY}`, inline: true },
-          { name: '💸 Robber Lost', value: `${gainAmount.toLocaleString()} ${CURRENCY}`, inline: true },
-          { name: '💰 Defender Gained', value: `${gainAmount.toLocaleString()} ${CURRENCY}`, inline: true },
+          { name: '💵 Money Saved', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+          { name: '💸 Robber Lost', value: `${gainAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+          { name: '💰 Defender Gained', value: `${gainAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
           { name: '📊 Defense Success Rate', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
           { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
-          { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${CURRENCY}`, inline: false }
+          { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
         );
 
       // Record the successful defense
@@ -717,7 +832,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
       robSucceeded = false;
     } else {
       // Defense failed - apply normal rob calculation
-      const robSuccess = attemptRob(successRate);
+      const robSuccess = attemptRob(adjustedSuccessRate);
       
       if (robSuccess) {
         // Normal rob succeeds
@@ -734,11 +849,11 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           .setTitle('🥊 Fight Back - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${CURRENCY}${protectionNoteFight}`, inline: true },
+            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNoteFight}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
-            { name: '📊 Rob Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
+            { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
-            { name: '💼 Your Balance', value: `${(targetBalance.cash - actualStolen).toLocaleString()} ${CURRENCY}`, inline: false }
+            { name: '💼 Your Balance', value: `${(targetBalance.cash - actualStolen).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
           );
 
         recordRob(guildId, robberId, targetId, true, actualStolen);
@@ -754,11 +869,11 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           .setTitle('🥊 Fight Back - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💸 Fine Applied', value: `${fine.toLocaleString()} ${CURRENCY}`, inline: true },
+            { name: '💸 Fine Applied', value: `${fine.toLocaleString()} ${getCurrency(guildId)}${robberTierEffects.fineModifier > 0 ? ` (+${robberTierEffects.fineModifier}% infamy)` : ''}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
-            { name: '📊 Rob Failed', value: `${successRate.toFixed(1)}%`, inline: true },
+            { name: '📊 Rob Failed', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
-            { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${CURRENCY}`, inline: false }
+            { name: '💼 Your Balance', value: `${targetBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
           );
 
         recordRob(guildId, robberId, targetId, false, fine);
@@ -771,6 +886,12 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
   xpResult = awardsXp 
     ? addXp(guildId, robberId, 'rob', robSucceeded, amountForXp)
     : { xpGained: 0, levelUp: false };
+  
+  // Process infamy for successful robs
+  let infamyResult = { infamyGained: 0, bountyClaimed: null, bountyPosted: null };
+  if (robSucceeded && amountForXp > 0) {
+    infamyResult = await processRobInfamy(guildId, robberId, targetId, amountForXp, interaction);
+  }
   
   // Add XP info to footer
   let footerText;

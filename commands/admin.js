@@ -17,50 +17,71 @@ const adminSkills = require('./admin-skills');
 const adminItems = require('./admin-items');
 const adminDungeon = require('./admin-dungeon');
 const adminSYN = require('./admin-syn');
-const adminLuckyPenny = require('./admin-luckypenny');
+const adminInfamy = require('./admin-infamy');
+const adminSettings = require('./admin-settings');
 
 // ==================== MAIN DASHBOARD ====================
 async function showDashboard(interaction) {
   const embed = new EmbedBuilder()
-    .setColor(0x3498db)
-    .setTitle('📊 Admin Dashboard')
-    .setDescription('Select a feature to manage')
+    .setColor(0x2b2d31)
+    .setTitle('⚙️ Chat-Stock Admin Dashboard')
+    .setDescription('Manage all bot systems from one place. Select a module below.')
     .addFields(
-      { name: '💰 Economy', value: 'Wealth tax, bank, dividends', inline: true },
-      { name: '🏠 Properties', value: 'Cards, tiers, requirements', inline: true },
-      { name: '🎰 Gambling', value: 'Lottery, scratch cards, vault', inline: true },
-      { name: '⚙️ System', value: 'Anti-spam, market & fees', inline: true },
-      { name: '📊 Events', value: 'Market events & triggers', inline: true },
-      { name: '💵 Income', value: 'Work, crime, slut commands', inline: true }
-    );
+      { name: '💰 Economy',    value: 'Wealth tax, bank & dividends',    inline: true },
+      { name: '💵 Income',     value: 'Work, Hunt & Lucky Penny',        inline: true },
+      { name: '🎰 Gambling',   value: 'Lottery, scratch, SYN & vault',   inline: true },
+      { name: '⚔️ Combat',     value: 'Fight, dungeon, rob & hack',      inline: true },
+      { name: '🏴‍☠️ Infamy',     value: 'Criminal reputation & bounties',  inline: true },
+      { name: '🎓 Skills',     value: 'XP, training & level bonuses',    inline: true },
+      { name: '🛒 Items',      value: 'Shop items, prices & effects',    inline: true },
+      { name: '🏠 Properties', value: 'Wealth cards, tiers & upgrades',  inline: true },
+      { name: '⚙️ System',     value: 'Market, ticker, events & spam',   inline: true },
+      { name: '🔧 Tools',      value: 'Tracker & bump rewards',         inline: true },
+      { name: '⚙️ Settings',    value: 'Admin role, currency & logs',     inline: true }
+    )
+    .setFooter({ text: 'Chat-Stock Admin • 23 configurable modules' });
 
   const select = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('admin_select')
-      .setPlaceholder('Choose a feature...')
+      .setPlaceholder('Select a module to configure...')
       .setMaxValues(1)
       .addOptions(
-        { label: 'Wealth Tax', value: 'wealth_tax', emoji: '💰', description: 'Progressive taxation system' },
-        { label: 'Bank Settings', value: 'bank', emoji: '🏦', description: 'Loans and bonds' },
-        { label: 'Dividends', value: 'dividends', emoji: '📈', description: 'Passive income settings' },
-        { label: 'Properties', value: 'property', emoji: '🏠', description: 'Property & card management' },
-        { label: 'Gambling', value: 'gambling', emoji: '🎰', description: 'Lottery, scratch cards & games' },
-        { label: 'Vault', value: 'vault', emoji: '💎', description: 'Vault spawning' },
-        { label: 'Anti-Spam', value: 'antispam', emoji: '🛡️', description: 'Cooldown settings' },
-        { label: 'Market', value: 'market', emoji: '📊', description: 'Fees, taxes & cooldowns' },
-        { label: 'Ticker', value: 'ticker', emoji: '📰', description: 'Stock ticker channel' },
-        { label: 'Events', value: 'events', emoji: '📅', description: 'Market event config' },
-        { label: 'Cooldown Tracker', value: 'tracker', emoji: '⏱️', description: 'Live cooldown display' },
-        { label: 'Income', value: 'income', emoji: '💵', description: 'Work, crime, slut settings' },
-        { label: 'Rob', value: 'rob', emoji: '🔓', description: 'Rob & immunity settings' },
-        { label: 'Hack', value: 'hack', emoji: '💻', description: 'Bank hacking settings' },
-        { label: 'Fight', value: 'fight', emoji: '🥊', description: 'PvP cage fighting' },
-        { label: 'Skills', value: 'skills', emoji: '🎓', description: 'XP, training & level bonuses' },
-        { label: 'Item Shop', value: 'items', emoji: '🛒', description: 'Shop items & effects' },
-        { label: 'Dungeon', value: 'dungeon', emoji: '🏰', description: 'Solo dungeon crawl' },
-        { label: 'SYN', value: 'syn', emoji: '🃏', description: 'Screw Your Neighbor card game' },
-        { label: 'Lucky Penny', value: 'luckypenny', emoji: '🪙', description: 'Buff/debuff roller' },
-        { label: '⚠️ Reset Game', value: 'reset_game', emoji: '🔄', description: 'DANGER: Reset all player data' }
+        // — Economy —
+        { label: 'Wealth Tax',      value: 'wealth_tax', emoji: '💰', description: 'Progressive tax brackets & rates' },
+        { label: 'Bank',            value: 'bank',       emoji: '🏦', description: 'Loans, bonds & credit scores' },
+        { label: 'Dividends',       value: 'dividends',  emoji: '📈', description: 'Shareholder payout schedule & rates' },
+
+        // — Income —
+        { label: 'Income',          value: 'income',     emoji: '💵', description: 'Work, Hunt & Lucky Penny settings' },
+
+        // — Gambling —
+        { label: 'Gambling',        value: 'gambling',   emoji: '🎰', description: 'Lottery, scratch cards & table games' },
+        { label: 'Vault',           value: 'vault',      emoji: '💎', description: 'Random vault spawning & rewards' },
+        { label: 'SYN',             value: 'syn',        emoji: '🃏', description: 'Screw Your Neighbor card game' },
+
+        // — Combat —
+        { label: 'Fight',           value: 'fight',      emoji: '🥊', description: 'PvP cage fighting & wagers' },
+        { label: 'Dungeon',         value: 'dungeon',    emoji: '🏰', description: 'Solo PvE dungeon crawl' },
+        { label: 'Rob',             value: 'rob',        emoji: '🔓', description: 'Rob system & immunity tiers' },
+        { label: 'Hack',            value: 'hack',       emoji: '💻', description: 'Bank hacking & defenses' },
+        { label: 'Skills',          value: 'skills',     emoji: '🎓', description: 'XP, training & level bonuses' },
+        { label: 'Infamy',          value: 'infamy',     emoji: '🏴‍☠️', description: 'Criminal reputation & bounty system' },
+
+        // — Assets —
+        { label: 'Properties',      value: 'property',   emoji: '🏠', description: 'Wealth cards, tiers & upgrades' },
+        { label: 'Item Shop',       value: 'items',      emoji: '🛒', description: 'Shop items, prices & effects' },
+
+        // — System —
+        { label: 'Anti-Spam',       value: 'antispam',   emoji: '🛡️', description: 'Message rate limiting' },
+        { label: 'Market',          value: 'market',     emoji: '📊', description: 'Fees, taxes & trade settings' },
+        { label: 'Ticker',          value: 'ticker',     emoji: '📰', description: 'Stock ticker channel setup' },
+        { label: 'Events',          value: 'events',     emoji: '📅', description: 'Market events & triggers' },
+        { label: 'Cooldown Tracker',value: 'tracker',    emoji: '⏱️', description: 'Live cooldown display panel' },
+        { label: 'Bump Rewards',    value: 'bump',       emoji: '📣', description: 'Disboard bump reward settings' },
+
+        // — Settings —
+        { label: 'Settings',         value: 'settings',   emoji: '🔧', description: 'Admin role, currency, logs & reset' }
       )
   );
 
@@ -114,6 +135,7 @@ module.exports.handleAdminInteraction = async function(interaction) {
         case 'ticker': await adminSystem.showTickerPanel(interaction, guildId); break;
         case 'events': await adminSystem.showEventsPanel(interaction, guildId); break;
         case 'tracker': await adminSystem.showTrackerPanel(interaction, guildId); break;
+        case 'bump': await adminSystem.showBumpPanel(interaction, guildId); break;
         case 'income': await adminWork.showIncomePanel(interaction, guildId); break;
         case 'rob': await adminWork.showRobPanel(interaction, guildId); break;
         case 'hack': await adminHack.showHackPanel(interaction, guildId); break;
@@ -122,8 +144,9 @@ module.exports.handleAdminInteraction = async function(interaction) {
         case 'items': await adminItems.showItemsPanel(interaction, guildId); break;
         case 'dungeon': await adminDungeon.showDungeonPanel(interaction, guildId); break;
         case 'syn': await adminSYN.showSYNPanel(interaction, guildId); break;
-        case 'luckypenny': await adminLuckyPenny.showLuckyPennyPanel(interaction, guildId); break;
-        case 'reset_game': await showResetGamePanel(interaction, guildId); break;
+        case 'infamy': await adminInfamy.showInfamyPanel(interaction, guildId); break;
+        case 'settings': await adminSettings.showSettingsPanel(interaction, guildId); break;
+        case 'reset_game': await adminSettings.showSettingsPanel(interaction, guildId); break;
       }
       return;
     }
@@ -143,30 +166,14 @@ module.exports.handleAdminInteraction = async function(interaction) {
     if (await adminItems.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Items'); return; }
     if (await adminDungeon.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Dungeon'); return; }
     if (await adminSYN.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by SYN'); return; }
-    if (await adminLuckyPenny.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by LuckyPenny'); return; }
+    if (await adminInfamy.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Infamy'); return; }
+    if (await adminSettings.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Settings'); return; }
     console.log('[Admin] No handler matched for:', interaction.customId);
 
     // Back to dashboard button
     if (interaction.isButton() && interaction.customId === 'back_dashboard') {
       await interaction.deferUpdate();
       await showDashboard(interaction);
-      return;
-    }
-    
-    // Reset game handlers
-    if (interaction.isButton() && interaction.customId === 'reset_game_confirm') {
-      await showResetConfirmModal(interaction);
-      return;
-    }
-    
-    if (interaction.isButton() && interaction.customId === 'reset_game_cancel') {
-      await interaction.deferUpdate();
-      await showDashboard(interaction);
-      return;
-    }
-    
-    if (interaction.isModalSubmit() && interaction.customId === 'modal_reset_game_confirm') {
-      await handleResetGameConfirm(interaction, guildId);
       return;
     }
 
@@ -179,229 +186,3 @@ module.exports.handleAdminInteraction = async function(interaction) {
     } catch {}
   }
 };
-// ==================== RESET GAME PANEL ====================
-async function showResetGamePanel(interaction, guildId) {
-  const embed = new EmbedBuilder()
-    .setColor(0xff0000)
-    .setTitle('⚠️ DANGER ZONE - Reset Game')
-    .setDescription(
-      '**This action will permanently delete ALL player data!**\n\n' +
-      'The following will be reset:\n' +
-      '• 💰 All cash and bank balances\n' +
-      '• 📈 All stock holdings and transactions\n' +
-      '• 🏠 All owned properties and cards\n' +
-      '• 🎓 All skill levels and XP\n' +
-      '• 🥊 All fight records and stats\n' +
-      '• 💬 All chat history affecting stock prices\n' +
-      '• 🎰 All gambling stats and lottery tickets\n' +
-      '• 🔓 All rob/hack history and cooldowns\n' +
-      '• 🎒 All user inventories and active effects\n' +
-      '• 🏦 All loans, bonds, and bond roles\n\n' +
-      '**Settings will NOT be reset** (fees, cooldowns, etc.)\n\n' +
-      '⚠️ **THIS CANNOT BE UNDONE!**'
-    )
-    .setFooter({ text: 'Think carefully before proceeding!' });
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('reset_game_confirm')
-      .setLabel('🔴 Reset Everything')
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId('reset_game_cancel')
-      .setLabel('Cancel')
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  await interaction.editReply({ embeds: [embed], components: [row] });
-}
-
-async function showResetConfirmModal(interaction) {
-  const modal = new ModalBuilder()
-    .setCustomId('modal_reset_game_confirm')
-    .setTitle('⚠️ Final Confirmation');
-
-  const confirmInput = new TextInputBuilder()
-    .setCustomId('reset_confirm_text')
-    .setLabel('Type RESET to confirm')
-    .setStyle(TextInputStyle.Short)
-    .setPlaceholder('RESET')
-    .setRequired(true)
-    .setMinLength(5)
-    .setMaxLength(5);
-
-  modal.addComponents(new ActionRowBuilder().addComponents(confirmInput));
-  await interaction.showModal(modal);
-}
-
-async function handleResetGameConfirm(interaction, guildId) {
-  const confirmText = interaction.fields.getTextInputValue('reset_confirm_text').trim();
-  
-  if (confirmText !== 'RESET') {
-    return interaction.reply({ 
-      content: '❌ Reset cancelled. You must type "RESET" exactly to confirm.', 
-      ephemeral: true 
-    });
-  }
-
-  await interaction.deferReply({ ephemeral: true });
-
-  try {
-    const db = getDb();
-    if (!db) {
-      return interaction.editReply({ content: '❌ Database not available.' });
-    }
-
-    // Remove bond roles from all users before clearing data
-    try {
-      const activeBondsResult = db.exec(`SELECT DISTINCT user_id, role_id, guild_id FROM active_bonds WHERE status = 'active'`);
-      if (activeBondsResult.length > 0 && activeBondsResult[0].values.length > 0) {
-        const guild = interaction.guild;
-        for (const [userId, roleId, bondGuildId] of activeBondsResult[0].values) {
-          if (bondGuildId === guildId && roleId) {
-            try {
-              const member = await guild.members.fetch(userId).catch(() => null);
-              if (member) {
-                await member.roles.remove(roleId).catch(() => {});
-              }
-            } catch (e) {
-              // Continue if we can't remove a role
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // Table might not exist, continue with reset
-    }
-
-    // Tables to DELETE all data from (player data)
-    const playerDataTables = [
-      // Core economy
-      'balances',
-      'economy_transactions',
-      
-      // Stocks
-      'users',
-      'stocks',
-      'transactions',
-      'price_history',
-      'stock_purchases',
-      'pending_impacts',
-      
-      // Properties
-      'owned_properties',
-      'user_cards',
-      'card_cooldowns',
-      
-      // Skills
-      'user_skills',
-      
-      // Fight
-      'fighter_stats',
-      'fight_history',
-      'fight_opponent_history',
-      'fight_spectator_bets',
-      
-      // Rob
-      'rob_tracker',
-      'rob_target_tracker',
-      'rob_history',
-      'rob_user_immunity',
-      'rob_immunity_history',
-      
-      // Hack
-      'hack_tracker',
-      'hack_target_tracker',
-      'hack_history',
-      
-      // Work/Slut
-      'work_tracker',
-      'work_history',
-      'slut_tracker',
-      'slut_history',
-      
-      // Gambling
-      'gambling_stats',
-      'lottery_tickets',
-      'lottery_history',
-      'scratch_tickets',
-      'scratch_stats',
-      
-      // Items
-      'user_inventory',
-      'active_effects',
-      'item_purchase_history',
-      'item_fulfillment_requests',
-      'effect_use_cooldowns',
-      'temporary_role_grants',
-      
-      // Dividends/Income tracking
-      'dividend_history',
-      'split_history',
-      'dividend_tracker',
-      'passive_income_tracker',
-      'self_dividend_history',
-      'passive_income_history',
-      'role_income_tracker',
-      'role_income_history',
-      
-      // Wealth tax
-      'wealth_tax_history',
-      
-      // Events
-      'message_counters',
-      'event_history',
-      'cheese_truck_history',
-      'active_market_events',
-      
-      // Bank - Loans and Bonds
-      'loans',
-      'loan_payments',
-      'active_bonds',
-      'bond_history'
-    ];
-
-    let deletedCount = 0;
-    let errors = [];
-
-    for (const table of playerDataTables) {
-      try {
-        db.run(`DELETE FROM ${table} WHERE 1=1`);
-        deletedCount++;
-      } catch (e) {
-        // Table might not exist, that's okay
-        if (!e.message.includes('no such table')) {
-          errors.push(`${table}: ${e.message}`);
-        }
-      }
-    }
-
-    // Reset lottery pool
-    try {
-      db.run(`UPDATE lottery SET pool = 0, last_winner_id = NULL, last_winner_amount = 0 WHERE 1=1`);
-    } catch (e) {
-      // Ignore if table doesn't exist
-    }
-
-    // Save the database
-    saveDatabase();
-
-    logAdminAction(guildId, interaction.user.id, interaction.user.username, 'GAME_RESET', 
-      `Reset all player data. ${deletedCount} tables cleared.`);
-
-    let resultMsg = `✅ **Game Reset Complete!**\n\n` +
-      `Cleared ${deletedCount} data tables.\n` +
-      `All player data has been wiped.\n\n` +
-      `Settings remain intact - only player progress was reset.`;
-
-    if (errors.length > 0) {
-      resultMsg += `\n\n⚠️ Some errors occurred:\n${errors.slice(0, 5).join('\n')}`;
-    }
-
-    await interaction.editReply({ content: resultMsg });
-
-  } catch (error) {
-    console.error('Error resetting game:', error);
-    await interaction.editReply({ content: `❌ Error resetting game: ${error.message}` });
-  }
-}

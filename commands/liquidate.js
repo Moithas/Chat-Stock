@@ -2,16 +2,17 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getUser, getPortfolio, getAllStockHolders, calculateStockPrice, getDb, saveDatabase } = require('../database');
 const { addToBank } = require('../economy');
 const { calculateSellFee, getGuildSettings } = require('../fees');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('liquidate')
     .setDescription('[ADMIN] Force liquidate a user\'s stock holdings and compensate shareholders')
-    .addUserOption(option =>
+    .addStringOption(option =>
       option.setName('user')
-        .setDescription('The user to liquidate')
+        .setDescription('The user ID or @mention to liquidate')
         .setRequired(true)
     )
     .setDefaultMemberPermissions(0),
@@ -26,14 +27,34 @@ module.exports = {
     }
 
     const guildId = interaction.guildId;
-    const targetUser = interaction.options.getUser('user');
-    const targetUserId = targetUser.id;
+    const userInput = interaction.options.getString('user');
+    
+    // Extract user ID from mention (<@123>) or raw ID
+    const targetUserId = userInput.replace(/[<@!>]/g, '').trim();
+    
+    if (!/^\d{17,20}$/.test(targetUserId)) {
+      return interaction.reply({
+        content: '❌ Invalid user. Provide a user ID or @mention.',
+        flags: 64
+      });
+    }
+    
+    // Try to fetch user info (works even if they left the server)
+    let targetUsername = targetUserId;
+    try {
+      const fetchedUser = await interaction.client.users.fetch(targetUserId);
+      targetUsername = fetchedUser.username;
+    } catch {
+      // User may be deleted entirely — use ID as fallback
+      targetUsername = `Unknown (${targetUserId})`;
+    }
+    
     const db = getDb();
 
     const user = getUser(targetUserId);
     if (!user) {
       return interaction.reply({
-        content: `❌ User ${targetUser.username} not found in database.`,
+        content: `❌ User ${targetUsername} not found in database.`,
         flags: 64
       });
     }
@@ -46,7 +67,7 @@ module.exports = {
 
     if (shareholders.length === 0 && portfolio.length === 0) {
       return interaction.reply({
-        content: `ℹ️ ${targetUser.username} has no stock holdings and no shareholders.`,
+        content: `ℹ️ ${targetUsername} has no stock holdings and no shareholders.`,
         flags: 64
       });
     }
@@ -75,7 +96,7 @@ module.exports = {
         
         if (netCompensation > 0) {
           // Add to holder's bank
-          await addToBank(guildId, holder.ownerId, netCompensation, `Liquidation compensation for ${targetUser.username}'s stock`);
+          await addToBank(guildId, holder.ownerId, netCompensation, `Liquidation compensation for ${targetUsername}'s stock`);
           
           results.shareholdersCompensated++;
           results.totalCompensation += netCompensation;
@@ -114,12 +135,12 @@ module.exports = {
     // Build response embed
     const embed = new EmbedBuilder()
       .setColor(0xe74c3c)
-      .setTitle(`💸 Liquidation Complete: ${targetUser.username}`)
-      .setDescription(`All stock holdings for **${targetUser.username}** have been liquidated.`)
+      .setTitle(`💸 Liquidation Complete: ${targetUsername}`)
+      .setDescription(`All stock holdings for **${targetUsername}** have been liquidated.`)
       .addFields(
         { name: '👥 Shareholders Compensated', value: `${results.shareholdersCompensated}`, inline: true },
-        { name: '💰 Total Compensation', value: `${results.totalCompensation.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: '💸 Fees Collected', value: `${results.totalFees.toLocaleString()} ${CURRENCY}`, inline: true },
+        { name: '💰 Total Compensation', value: `${results.totalCompensation.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+        { name: '💸 Fees Collected', value: `${results.totalFees.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
         { name: '📉 Target\'s Holdings Deleted', value: `${results.stocksDeleted} stock(s)`, inline: true }
       )
       .setTimestamp()
@@ -128,7 +149,7 @@ module.exports = {
     // Add shareholder breakdown if not too many
     if (results.shareholderDetails.length > 0 && results.shareholderDetails.length <= 10) {
       const breakdown = results.shareholderDetails.map(s => 
-        `<@${s.ownerId}>: ${s.shares} shares → ${s.net.toLocaleString()} ${CURRENCY} (fee: ${s.fee.toLocaleString()})`
+        `<@${s.ownerId}>: ${s.shares} shares → ${s.net.toLocaleString()} ${getCurrency(guildId)} (fee: ${s.fee.toLocaleString()})`
       ).join('\n');
       embed.addFields({ name: '📋 Compensation Breakdown', value: breakdown, inline: false });
     } else if (results.shareholderDetails.length > 10) {

@@ -9,8 +9,9 @@ const {
   getSYNSettings
 } = require('../screwyourneighbor');
 const { generateSYNRevealImage, generateHandImage } = require('../cardImages');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -35,10 +36,10 @@ module.exports = {
 
     // Check bet limits
     if (wager < settings.minBet) {
-      return interaction.reply({ content: `❌ Minimum bet is **${settings.minBet.toLocaleString()}** ${CURRENCY}`, ephemeral: true });
+      return interaction.reply({ content: `❌ Minimum bet is **${settings.minBet.toLocaleString()}** ${getCurrency(guildId)}`, ephemeral: true });
     }
     if (settings.maxBet > 0 && wager > settings.maxBet) {
-      return interaction.reply({ content: `❌ Maximum bet is **${settings.maxBet.toLocaleString()}** ${CURRENCY}`, ephemeral: true });
+      return interaction.reply({ content: `❌ Maximum bet is **${settings.maxBet.toLocaleString()}** ${getCurrency(guildId)}`, ephemeral: true });
     }
 
     // Check for existing game
@@ -53,7 +54,7 @@ module.exports = {
     // Check balance
     const balance = getBalance(guildId, userId);
     if (balance.total < wager) {
-      return interaction.reply({ content: `❌ You don't have enough! Balance: **${balance.total.toLocaleString()}** ${CURRENCY}`, ephemeral: true });
+      return interaction.reply({ content: `❌ You don't have enough! Balance: **${balance.total.toLocaleString()}** ${getCurrency(guildId)}`, ephemeral: true });
     }
 
     // Charge host
@@ -96,7 +97,7 @@ function createLobbyEmbed(game) {
     .setTitle('🃏 Screw Your Neighbor')
     .setDescription(
       `**${game.players.get(game.hostId)?.name}** is hosting!\n` +
-      `Wager: **${game.wager.toLocaleString()}** ${CURRENCY} per player\n` +
+      `Wager: **${game.wager.toLocaleString()}** ${getCurrency(game.guildId)} per player\n` +
       `Everyone starts with **${s.startingLives} lives**. Lowest card loses a life!\n` +
       `Last one standing wins the pot!\n\n` +
       `**Players (${game.players.size}/${s.maxPlayers}):**\n${playerList}\n` +
@@ -192,7 +193,7 @@ async function handleJoin(interaction) {
   // Check balance
   const balance = getBalance(guildId, userId);
   if (balance.total < game.wager) {
-    return interaction.reply({ content: `❌ You need **${game.wager.toLocaleString()}** ${CURRENCY} to join! Balance: **${balance.total.toLocaleString()}**`, ephemeral: true });
+    return interaction.reply({ content: `❌ You need **${game.wager.toLocaleString()}** ${getCurrency(guildId)} to join! Balance: **${balance.total.toLocaleString()}**`, ephemeral: true });
   }
 
   // Charge
@@ -274,7 +275,7 @@ async function handleStart(interaction) {
   const startEmbed = new EmbedBuilder()
     .setColor(0xe67e22)
     .setTitle('🃏 Screw Your Neighbor — Starting!')
-    .setDescription(`Game is starting with **${game.players.size}** players!\nPot: **${(game.wager * game.players.size).toLocaleString()}** ${CURRENCY}\n\nMoving to thread...`)
+    .setDescription(`Game is starting with **${game.players.size}** players!\nPot: **${(game.wager * game.players.size).toLocaleString()}** ${getCurrency(guildId)}\n\nMoving to thread...`)
     .setTimestamp();
   await interaction.editReply({ embeds: [startEmbed], components: [] });
 
@@ -386,7 +387,7 @@ function createRoundEmbed(game, phase) {
     .setColor(phase === 'playing' ? 0x3498db : 0xe67e22)
     .setTitle(`🃏 Round ${game.round} — ${phase === 'dealing' ? 'Cards Dealt!' : 'In Progress'}`)
     .setDescription(
-      `Pot: **${pot.toLocaleString()}** ${CURRENCY}\n\n${playerLines}`
+      `Pot: **${pot.toLocaleString()}** ${getCurrency(game.guildId)}\n\n${playerLines}`
     )
     .setFooter({ text: `🎲 = Dealer | ${s.turnTimeSeconds}s per turn` })
     .setTimestamp();
@@ -394,7 +395,7 @@ function createRoundEmbed(game, phase) {
   if (currentId && phase === 'playing') {
     const currentPlayer = game.players.get(currentId);
     embed.setDescription(
-      `Pot: **${pot.toLocaleString()}** ${CURRENCY}\n\n${playerLines}\n` +
+      `Pot: **${pot.toLocaleString()}** ${getCurrency(game.guildId)}\n\n${playerLines}\n` +
       `Turn: **${currentPlayer?.name}** (<t:${Math.floor((Date.now() + turnTimeMs) / 1000)}:R>)`
     );
   }
@@ -846,7 +847,7 @@ async function handleVictory(game, winnerId, channel) {
     .setTitle('🏆 Screw Your Neighbor — WINNER!')
     .setDescription(
       `🎉 **${winnerPlayer?.name || 'Unknown'}** is the last one standing!\n\n` +
-      `💰 Pot: **${pot.toLocaleString()}** ${CURRENCY} → **${winnerPlayer?.name || 'Unknown'}**\n\n` +
+      `💰 Pot: **${pot.toLocaleString()}** ${getCurrency(game.guildId)} → **${winnerPlayer?.name || 'Unknown'}**\n\n` +
       `**Game Stats:**\n${statsLines}\n` +
       `Rounds played: **${game.round}** | Players: **${game.players.size}**`
     )

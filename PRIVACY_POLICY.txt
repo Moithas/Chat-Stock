@@ -1,0 +1,104 @@
+Chat-Stock — Privacy Policy
+
+Last Updated: March 16, 2026
+
+This Privacy Policy explains what data Chat-Stock collects, how it is used, and your rights regarding that data. By using Chat-Stock, you agree to the practices described below.
+
+1. Data We Collect
+
+Chat-Stock collects and stores the following data when you interact with the bot:
+
+a) Automatically Collected:
+- Your Discord user ID
+- Your Discord username
+- The server (guild) ID where you use the bot
+
+b) Generated Through Usage:
+- In-game balances (cash, bank)
+- Stock holdings and transaction history
+- Property ownership and card collections
+- Skill levels and experience points
+- Fight records and combat statistics
+- Rob, hack, and crime history
+- Gambling statistics and lottery tickets
+- Inventory items and active effects
+- Work, income, and dividend history
+- Loan and bond records
+- Chat streak data and message counters
+- Infamy and bounty records
+- Dungeon progress and loot history
+
+2. Data We Do NOT Collect
+
+- Message content (we only count messages for stock price calculations; the text itself is never stored)
+- Email addresses
+- IP addresses
+- Passwords or authentication tokens
+- Payment or financial information
+- Data from other bots or services
+- Direct messages
+
+3. How We Use Your Data
+
+All collected data is used exclusively to:
+- Provide and operate the bot's economy and game features
+- Calculate stock prices based on activity
+- Track balances, inventories, and game progress
+- Display leaderboards and player profiles
+- Enforce cooldowns and anti-spam protections
+- Generate admin logs for server administrators
+
+We do NOT sell, share, or provide your data to any third parties.
+
+4. Data Storage
+
+All data is stored in a local SQLite database on the server hosting the bot. Data is not transmitted to external services, cloud providers, or third-party APIs beyond what is required by the Discord API for bot operation.
+
+Automated backups of the database are created periodically for data integrity purposes.
+
+5. Data Retention
+
+- Your data is retained as long as you are a member of a server using Chat-Stock.
+- Server administrators may reset all player data for their server at any time via the admin panel.
+- If the bot is removed from a server, stored data for that server may persist until manually purged.
+
+6. Your Rights
+
+a) Right to Access:
+You can view your own data at any time using bot commands such as /balance, /profile, /inventory, /skills, and /infamy.
+
+b) Right to Deletion:
+You may delete all of your data from a server at any time by using the /deletedata command. This permanently removes all of your records from that server's data, including balances, stats, inventories, and history. This action is irreversible.
+
+c) Right to Inquire:
+You may contact us via the support server to ask questions about what data is stored.
+
+7. Server Administrator Access
+
+Server administrators using the /admin panel can:
+- View admin action logs
+- Reset all player data for their server
+- Configure bot settings
+
+Administrators cannot view individual player data beyond what is visible through standard bot commands.
+
+8. Children's Privacy
+
+Chat-Stock does not knowingly collect data from users under the minimum age required by Discord's Terms of Service. If you believe a minor is using the bot in violation of Discord's age requirements, please report it to Discord directly.
+
+9. Data Security
+
+We take reasonable measures to protect stored data, including:
+- Local-only database storage (no cloud transmission)
+- Periodic automated backups
+- No storage of sensitive personal information
+
+However, no system is completely secure. We cannot guarantee absolute protection against unauthorized access.
+
+10. Changes to This Policy
+
+We may update this Privacy Policy at any time. Continued use of Chat-Stock after changes are posted constitutes acceptance of the revised policy. Material changes will be announced via the support server when possible.
+
+11. Contact
+
+For privacy questions, data requests, or concerns, join our support server: https://discord.gg/3PnT5BknaP

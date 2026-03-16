@@ -2,8 +2,10 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { getLeaderboard, getAllUsers, getPortfolio, calculateStockPrice } = require('../database');
 const { getAllBalances } = require('../economy');
 const { getTopFighters } = require('../fight');
+const { getDungeonLeaderboard } = require('../dungeon');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 const ITEMS_PER_PAGE = 10;
 
 module.exports = {
@@ -43,6 +45,11 @@ async function showLeaderboardPanel(interaction, type = 'stocks', page = 0, isUp
       embed = fightResult.embed;
       totalPages = fightResult.totalPages;
       break;
+    case 'dungeon':
+      const dungeonResult = await buildDungeonLeaderboard(guildId, page, interaction.guild);
+      embed = dungeonResult.embed;
+      totalPages = dungeonResult.totalPages;
+      break;
     default:
       const defaultResult = await buildStockLeaderboard(guildId, page);
       embed = defaultResult.embed;
@@ -76,7 +83,12 @@ async function showLeaderboardPanel(interaction, type = 'stocks', page = 0, isUp
         .setCustomId(`leaderboard_fight_${page}_${userId}`)
         .setLabel('Fighters')
         .setEmoji('🥊')
-        .setStyle(type === 'fight' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+        .setStyle(type === 'fight' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`leaderboard_dungeon_${page}_${userId}`)
+        .setLabel('Dungeon')
+        .setEmoji('🏰')
+        .setStyle(type === 'dungeon' ? ButtonStyle.Primary : ButtonStyle.Secondary)
     );
 
   const navButtons = new ActionRowBuilder()
@@ -130,7 +142,7 @@ async function buildStockLeaderboard(guildId, page = 0) {
     embed.addFields({
       name: `${medal} ${stock.username}`,
       value: 
-        `💰 **Price:** ${stock.currentPrice} ${CURRENCY}/share\n` +
+        `💰 **Price:** ${stock.currentPrice} ${getCurrency(guildId)}/share\n` +
         `📊 **Shares Owned:** ${stock.totalShares || 0} shares\n`,
       inline: false
     });
@@ -205,8 +217,8 @@ async function buildPortfolioLeaderboard(guildId, page = 0) {
     embed.addFields({
       name: `${medal} ${investor.username}`,
       value: 
-        `💰 **Portfolio Value:** ${Math.round(investor.totalValue)} ${CURRENCY}\n` +
-        `${profitEmoji} **Profit/Loss:** ${profitSign}${Math.round(investor.profit)} ${CURRENCY} (${investor.profitPercent.toFixed(1)}%)\n` +
+        `💰 **Portfolio Value:** ${Math.round(investor.totalValue)} ${getCurrency(guildId)}\n` +
+        `${profitEmoji} **Profit/Loss:** ${profitSign}${Math.round(investor.profit)} ${getCurrency(guildId)} (${investor.profitPercent.toFixed(1)}%)\n` +
         `📊 **Holdings:** ${investor.holdingsCount} stocks`,
       inline: false
     });
@@ -260,9 +272,9 @@ async function buildCashLeaderboard(guildId, page = 0, guild = null) {
     embed.addFields({
       name: `${medal} ${user.username}`,
       value: 
-        `💵 **Cash:** ${user.cash.toLocaleString()} ${CURRENCY}\n` +
-        `🏦 **Bank:** ${user.bank.toLocaleString()} ${CURRENCY}\n` +
-        `💰 **Total:** ${user.total.toLocaleString()} ${CURRENCY}`,
+        `💵 **Cash:** ${user.cash.toLocaleString()} ${getCurrency(guildId)}\n` +
+        `🏦 **Bank:** ${user.bank.toLocaleString()} ${getCurrency(guildId)}\n` +
+        `💰 **Total:** ${user.total.toLocaleString()} ${getCurrency(guildId)}`,
       inline: false
     });
   }
@@ -319,7 +331,70 @@ async function buildFightLeaderboard(guildId, page = 0, guild = null) {
       value: 
         `📊 **Record:** ${record} (${winRate}% win rate)\n` +
         `💥 **KOs:** ${fighter.knockouts || 0} | **TKOs:** ${fighter.tkos || 0}\n` +
-        `💰 **Net Earnings:** ${earningsSign}${Math.round(netEarnings).toLocaleString()} ${CURRENCY}`,
+        `💰 **Net Earnings:** ${earningsSign}${Math.round(netEarnings).toLocaleString()} ${getCurrency(guildId)}`,
+      inline: false
+    });
+  }
+
+  return { embed, totalPages };
+}
+
+async function buildDungeonLeaderboard(guildId, page = 0, guild = null) {
+  const allEntries = getDungeonLeaderboard(guildId);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x9b59b6)
+    .setTitle('🏰 Dungeon Leaderboard')
+    .setDescription('Adventurers ranked by total clears')
+    .setTimestamp();
+
+  if (allEntries.length === 0) {
+    embed.setDescription('❌ No dungeon runs recorded yet! Use `/dungeon` to start your adventure!');
+    return { embed, totalPages: 1 };
+  }
+
+  const totalPages = Math.max(1, Math.ceil(allEntries.length / ITEMS_PER_PAGE));
+  const startIdx = page * ITEMS_PER_PAGE;
+  const endIdx = startIdx + ITEMS_PER_PAGE;
+  const pageEntries = allEntries.slice(startIdx, endIdx);
+
+  // Fetch Discord usernames
+  if (guild) {
+    for (const entry of pageEntries) {
+      try {
+        const member = await guild.members.fetch(entry.user_id);
+        if (member) entry.username = member.user.username;
+      } catch {
+        entry.username = 'Unknown User';
+      }
+    }
+  }
+
+  for (let i = 0; i < pageEntries.length; i++) {
+    const entry = pageEntries[i];
+    const rank = startIdx + i;
+    const medal = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `**${rank + 1}.**`;
+
+    // Build per-tier breakdown lines (only show tiers with activity)
+    const tierLines = [];
+    if (entry.t1_runs > 0) {
+      tierLines.push(`🏰 T1: ${entry.t1_runs} runs | ${entry.t1_clears} clears | ${entry.t1_escapes} escapes`);
+    }
+    if (entry.t2_runs > 0) {
+      tierLines.push(`⚔️ T2: ${entry.t2_runs} runs | ${entry.t2_clears} clears | ${entry.t2_escapes} escapes`);
+    }
+    if (entry.t3_runs > 0) {
+      tierLines.push(`💀 T3: ${entry.t3_runs} runs | ${entry.t3_clears} clears | ${entry.t3_escapes} escapes`);
+    }
+
+    const tierBreakdown = tierLines.length > 0 ? tierLines.join('\n') : 'No tier data';
+
+    embed.addFields({
+      name: `${medal} ${entry.username || 'Unknown User'}`,
+      value:
+        `📊 **${entry.total_runs} runs** — ✅ ${entry.total_clears} clears | 🏃 ${entry.total_escapes} escapes | 💀 ${entry.total_deaths} deaths\n` +
+        `${tierBreakdown}\n` +
+        `💰 **Total Earned:** ${Number(entry.total_gold).toLocaleString()} ${getCurrency(guildId)}`,
       inline: false
     });
   }

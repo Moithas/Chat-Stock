@@ -11,8 +11,9 @@ const {
   formatDuration,
   isServiceItem
 } = require('../items');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 const ITEMS_PER_PAGE = 5;
 
 // Helper function to safely parse emoji for select menu options
@@ -98,7 +99,7 @@ module.exports = {
     const balance = getBalance(guildId, userId);
     
     // Create the shop embed
-    const embed = createShopEmbed(items, 0, balance.cash, categoryFilter);
+    const embed = createShopEmbed(guildId, items, 0, balance.cash, categoryFilter);
     const components = createShopComponents(items, 0, guildId, userId);
     
     const response = await interaction.editReply({ 
@@ -123,14 +124,16 @@ module.exports = {
         // Handle page navigation
         if (i.customId === 'shop_prev') {
           currentPage = Math.max(0, currentPage - 1);
-          const newEmbed = createShopEmbed(items, currentPage, balance.cash, categoryFilter);
+          const freshBalance = getBalance(guildId, userId);
+          const newEmbed = createShopEmbed(guildId, items, currentPage, freshBalance.cash, categoryFilter);
           const newComponents = createShopComponents(items, currentPage, guildId, userId);
           await i.update({ embeds: [newEmbed], components: newComponents });
         }
         else if (i.customId === 'shop_next') {
           const maxPage = Math.ceil(items.length / ITEMS_PER_PAGE) - 1;
           currentPage = Math.min(maxPage, currentPage + 1);
-          const newEmbed = createShopEmbed(items, currentPage, balance.cash, categoryFilter);
+          const freshBalance = getBalance(guildId, userId);
+          const newEmbed = createShopEmbed(guildId, items, currentPage, freshBalance.cash, categoryFilter);
           const newComponents = createShopComponents(items, currentPage, guildId, userId);
           await i.update({ embeds: [newEmbed], components: newComponents });
         }
@@ -143,16 +146,18 @@ module.exports = {
             return i.reply({ content: '❌ Item not found!', ephemeral: true });
           }
           
-          // Show item details with buy button
-          const detailEmbed = createItemDetailEmbed(item, balance.cash);
-          const detailComponents = createItemDetailComponents(item, balance.cash);
+          // Show item details with buy button (fresh balance check)
+          const freshBalance = getBalance(guildId, userId);
+          const detailEmbed = createItemDetailEmbed(guildId, item, freshBalance.cash);
+          const detailComponents = createItemDetailComponents(item, freshBalance.cash);
           
           await i.update({ embeds: [detailEmbed], components: detailComponents });
         }
         // Handle back to shop
         else if (i.customId === 'shop_back') {
           selectedItemId = null;
-          const newEmbed = createShopEmbed(items, currentPage, balance.cash, categoryFilter);
+          const freshBalance = getBalance(guildId, userId);
+          const newEmbed = createShopEmbed(guildId, items, currentPage, freshBalance.cash, categoryFilter);
           const newComponents = createShopComponents(items, currentPage, guildId, userId);
           await i.update({ embeds: [newEmbed], components: newComponents });
         }
@@ -171,7 +176,7 @@ module.exports = {
           const currentBalance = getBalance(guildId, userId);
           if (currentBalance.cash < item.price) {
             return i.reply({ 
-              content: `❌ You don't have enough cash! You need **${item.price.toLocaleString()}** ${CURRENCY} but only have **${currentBalance.cash.toLocaleString()}** ${CURRENCY}.`, 
+              content: `❌ You don't have enough cash! You need **${item.price.toLocaleString()}** ${getCurrency(guildId)} but only have **${currentBalance.cash.toLocaleString()}** ${getCurrency(guildId)}.`, 
               ephemeral: true 
             });
           }
@@ -202,10 +207,10 @@ module.exports = {
           const successEmbed = new EmbedBuilder()
             .setColor(0x2ecc71)
             .setTitle('✅ Purchase Successful!')
-            .setDescription(`You bought **${item.emoji} ${item.name}** for **${item.price.toLocaleString()}** ${CURRENCY}`)
+            .setDescription(`You bought **${item.emoji} ${item.name}** for **${item.price.toLocaleString()}** ${getCurrency(guildId)}`)
             .addFields(
-              { name: '💵 Previous Balance', value: `${currentBalance.cash.toLocaleString()} ${CURRENCY}`, inline: true },
-              { name: '💰 New Balance', value: `${(currentBalance.cash - item.price).toLocaleString()} ${CURRENCY}`, inline: true }
+              { name: '💵 Previous Balance', value: `${currentBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+              { name: '💰 New Balance', value: `${(currentBalance.cash - item.price).toLocaleString()} ${getCurrency(guildId)}`, inline: true }
             );
           
           // Add different footer based on item type
@@ -231,13 +236,20 @@ module.exports = {
           
           await i.update({ embeds: [successEmbed], components: [backRow] });
         }
+        // Handle dismiss
+        else if (i.customId === 'shop_dismiss') {
+          collector.stop('dismissed');
+          try { await i.message.delete(); } catch (e) {}
+          return;
+        }
         // Handle category filter from menu
         else if (i.customId === 'shop_category') {
           const newCategory = i.values[0] === 'all' ? null : i.values[0];
           const newItems = getShopItems(guildId, newCategory, true);
           currentPage = 0;
           
-          const newEmbed = createShopEmbed(newItems, 0, balance.cash, i.values[0]);
+          const freshBalance = getBalance(guildId, userId);
+          const newEmbed = createShopEmbed(guildId, newItems, 0, freshBalance.cash, i.values[0]);
           const newComponents = createShopComponents(newItems, 0, guildId, userId);
           await i.update({ embeds: [newEmbed], components: newComponents });
         }
@@ -251,7 +263,8 @@ module.exports = {
       }
     });
     
-    collector.on('end', async () => {
+    collector.on('end', async (collected, reason) => {
+      if (reason === 'dismissed') return;
       try {
         const disabledEmbed = new EmbedBuilder()
           .setColor(0x95a5a6)
@@ -266,7 +279,7 @@ module.exports = {
   }
 };
 
-function createShopEmbed(items, page, userCash, categoryFilter) {
+function createShopEmbed(guildId, items, page, userCash, categoryFilter) {
   const startIndex = page * ITEMS_PER_PAGE;
   const pageItems = items.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
@@ -278,7 +291,7 @@ function createShopEmbed(items, page, userCash, categoryFilter) {
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle('🛒 Item Shop')
-    .setDescription(`Browse items and make purchases!\n💰 Your Cash: **${userCash.toLocaleString()}** ${CURRENCY}\n\n**Category: ${categoryName}**`)
+    .setDescription(`Browse items and make purchases!\n💰 Your Cash: **${userCash.toLocaleString()}** ${getCurrency(guildId)}\n\n**Category: ${categoryName}**`)
     .setFooter({ text: `Page ${page + 1}/${totalPages} • ${items.length} items available` });
   
   if (pageItems.length === 0) {
@@ -289,7 +302,7 @@ function createShopEmbed(items, page, userCash, categoryFilter) {
       const durationText = item.duration_hours ? `⏱️ ${item.duration_hours}h` : '';
       
       embed.addFields({
-        name: `${item.emoji} ${item.name} - ${item.price.toLocaleString()} ${CURRENCY} ${affordable}`,
+        name: `${item.emoji} ${item.name} - ${item.price.toLocaleString()} ${getCurrency(guildId)} ${affordable}`,
         value: `${item.description || 'No description'}\n${durationText}`,
         inline: false
       });
@@ -353,14 +366,18 @@ function createShopComponents(items, page, guildId, userId) {
         .setCustomId('shop_next')
         .setLabel('Next ▶️')
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(page >= totalPages - 1)
+        .setDisabled(page >= totalPages - 1),
+      new ButtonBuilder()
+        .setCustomId('shop_dismiss')
+        .setLabel('Dismiss')
+        .setStyle(ButtonStyle.Danger)
     );
   components.push(navRow);
   
   return components;
 }
 
-function createItemDetailEmbed(item, userCash) {
+function createItemDetailEmbed(guildId, item, userCash) {
   const affordable = userCash >= item.price;
   
   const embed = new EmbedBuilder()
@@ -368,9 +385,9 @@ function createItemDetailEmbed(item, userCash) {
     .setTitle(`${item.emoji} ${item.name}`)
     .setDescription(item.description || 'No description available.')
     .addFields(
-      { name: '💰 Price', value: `**${item.price.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '💰 Price', value: `**${item.price.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '📂 Category', value: item.category.charAt(0).toUpperCase() + item.category.slice(1), inline: true },
-      { name: '💵 Your Cash', value: `**${userCash.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: '💵 Your Cash', value: `**${userCash.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
     );
   
   if (item.effect_type) {
@@ -386,7 +403,7 @@ function createItemDetailEmbed(item, userCash) {
   if (!affordable) {
     embed.addFields({
       name: '❌ Cannot Afford',
-      value: `You need **${(item.price - userCash).toLocaleString()}** ${CURRENCY} more to buy this item.`
+      value: `You need **${(item.price - userCash).toLocaleString()}** ${getCurrency(guildId)} more to buy this item.`
     });
   }
   
@@ -431,7 +448,8 @@ function getEffectDisplayName(effectType) {
     'crime_fine_reduction': '⚖️ Crime Fine Reduction',
     'lottery_boost': '🎰 Lottery Boost',
     'bank_interest_boost': '🏦 Bank Interest Boost',
-    'cooldown_reduction': '⏰ Cooldown Reduction'
+    'cooldown_reduction': '⏰ Cooldown Reduction',
+    'dungeon_key': '🗝️ Dungeon Key'
   };
   return names[effectType] || effectType;
 }

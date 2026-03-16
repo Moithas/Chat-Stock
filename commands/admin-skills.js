@@ -1,9 +1,9 @@
 // Admin Skills Panel - XP & Training Settings (Fully Modular)
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 const { getSkillSettings, updateSkillSettings, LEVEL_THRESHOLDS, TRAINING_COSTS, TRAINING_TIMES } = require('../skills');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [
@@ -158,7 +158,7 @@ async function showLevelThresholds(interaction, guildId) {
   let trainingInfo = '';
   for (let i = 1; i <= 9; i++) {
     const hours = TRAINING_TIMES[i] / (1000 * 60 * 60);
-    trainingInfo += `**To Level ${i}**: ${TRAINING_COSTS[i].toLocaleString()} ${CURRENCY} (${hours}h)\n`;
+    trainingInfo += `**To Level ${i}**: ${TRAINING_COSTS[i].toLocaleString()} ${getCurrency(guildId)} (${hours}h)\n`;
   }
   
   // Build max bonuses at level 10

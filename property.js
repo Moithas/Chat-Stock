@@ -1,8 +1,9 @@
 // Property Management System
+const { getCurrency } = require('./admin');
 
 let db = null;
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Default property names by level (upgrade progression)
 const DEFAULT_PROPERTIES = [
@@ -892,7 +893,7 @@ function getAllPropertyOwners(guildId) {
 
 // ============ CARD EFFECT CALCULATION ============
 
-function calculateCardEffect(card, rentAmount, userBalance, portfolioValue, propertyValue) {
+function calculateCardEffect(guildId, card, rentAmount, userBalance, portfolioValue, propertyValue) {
   // Neutral cards have no effect
   if (card.type === 'neutral' || card.effect_type === 'none') {
     return { amount: 0, description: 'No effect', roll: 0 };
@@ -908,24 +909,24 @@ function calculateCardEffect(card, rentAmount, userBalance, portfolioValue, prop
   switch (card.effect_type) {
     case 'flat':
       amount = Math.round(roll);
-      description = `${amount} ${CURRENCY}`;
+      description = `${amount} ${getCurrency(guildId)}`;
       break;
     case 'rent_bonus':
       amount = Math.round(rentAmount * (roll / 100));
-      description = `${roll.toFixed(1)}% of rent (${amount} ${CURRENCY})`;
+      description = `${roll.toFixed(1)}% of rent (${amount} ${getCurrency(guildId)})`;
       break;
     case 'balance':
     case 'ubb_balance': // Legacy support for existing database records
       amount = Math.round(userBalance * (roll / 100));
-      description = `${roll.toFixed(1)}% of bank balance (${amount} ${CURRENCY})`;
+      description = `${roll.toFixed(1)}% of bank balance (${amount} ${getCurrency(guildId)})`;
       break;
     case 'portfolio':
       amount = Math.round(portfolioValue * (roll / 100));
-      description = `${roll.toFixed(1)}% of portfolio (${amount} ${CURRENCY})`;
+      description = `${roll.toFixed(1)}% of portfolio (${amount} ${getCurrency(guildId)})`;
       break;
     case 'property_value':
       amount = Math.round(propertyValue * (roll / 100));
-      description = `${roll.toFixed(1)}% of property value (${amount} ${CURRENCY})`;
+      description = `${roll.toFixed(1)}% of property value (${amount} ${getCurrency(guildId)})`;
       break;
   }
   

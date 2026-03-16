@@ -1,23 +1,85 @@
-// Dungeon Crawl System - Solo PvE combat
+// Dungeon Crawl System - Solo PvE combat with tiered difficulty
 // Fight through floors of NPC enemies for small rewards
 
 const { saveDatabase } = require('./database');
 
 let db = null;
 
-// Default settings
+// ==================== TIER & BOSS DEFINITIONS ====================
+
+// Boss types — one per tier, spawns on final floor
+const BOSS_TYPES = {
+  1: {
+    name: 'Beast Forge',
+    emoji: '⚒️',
+    bias: { exploit: 25, corrupt: 25, isolate: 15, spam: 20, override: 15 },
+    boss: true,
+    abilities: { restoreBoost: true },
+    abilityDescription: '⚒️ **Restore Boost** — Heals 40% instead of 25%',
+    enragedThreshold: 40 // Show enraged image when HP drops to 40%
+  },
+  2: {
+    name: 'Fragmentor',
+    emoji: '🔮',
+    bias: { exploit: 20, corrupt: 20, isolate: 20, spam: 20, override: 20 },
+    boss: true,
+    abilities: { rageMode: true },
+    abilityDescription: '🔮 **Rage Mode** — +25% damage when below 30% HP',
+    enragedThreshold: 30 // Show enraged image when HP drops to 30%
+  },
+  3: {
+    name: 'Chaos',
+    emoji: '🌀',
+    bias: { exploit: 20, corrupt: 20, isolate: 20, spam: 20, override: 20 },
+    boss: true,
+    abilities: { restoreBoost: true, rageMode: true, adaptive: true },
+    abilityDescription: '🌀 **Adaptive AI** — Learns your patterns\n🔮 **Restore Boost** — Heals 40%\n⚒️ **Rage Mode** — +25% damage below 30% HP',
+    enragedThreshold: 30
+  }
+};
+
+// Per-tier default settings
+const TIER_DEFAULTS = {
+  1: {
+    maxFloors: 5,
+    baseReward: 50,
+    rewardPerFloor: 30,
+    baseEnemyHp: 60,
+    enemyHpPerFloor: 10,
+    playerHp: 100,
+    deathPenaltyPercent: 50,
+    floorHealPercent: 20,
+    enragedThreshold: 40
+  },
+  2: {
+    maxFloors: 7,
+    baseReward: 80,
+    rewardPerFloor: 40,
+    baseEnemyHp: 70,
+    enemyHpPerFloor: 12,
+    playerHp: 100,
+    deathPenaltyPercent: 60,
+    floorHealPercent: 15,
+    enragedThreshold: 30
+  },
+  3: {
+    maxFloors: 10,
+    baseReward: 120,
+    rewardPerFloor: 50,
+    baseEnemyHp: 80,
+    enemyHpPerFloor: 15,
+    playerHp: 100,
+    deathPenaltyPercent: 75,
+    floorHealPercent: 10,
+    enragedThreshold: 30
+  }
+};
+
+// Global default settings (shared across all tiers)
 const defaultSettings = {
   enabled: true,
-  maxFloors: 5,
-  baseReward: 50,          // Reward for floor 1
-  rewardPerFloor: 30,       // Additional reward per floor
-  cooldownMinutes: 180,     // 3 hour cooldown
-  baseEnemyHp: 60,          // Floor 1 enemy HP
-  enemyHpPerFloor: 10,      // Additional enemy HP per floor
-  playerHp: 100,            // Player starting HP
-  deathPenaltyPercent: 50,  // Lose 50% of earned gold on death
-  roundTimeSeconds: 15,     // Time to pick a move
-  floorHealPercent: 20      // HP recovered after clearing a floor
+  cooldownMinutes: 180,
+  roundTimeSeconds: 15
 };
 
 // Enemy types with themed names and move tendencies
@@ -39,13 +101,18 @@ const ENEMY_TYPES = [
   { name: 'Botnet Overlord', emoji: '👑', bias: { exploit: 20, corrupt: 25, isolate: 20, spam: 15, override: 20 } }
 ];
 
-// Floor flavor text
+// Floor flavor text (10 intros for Tier 3's max depth)
 const FLOOR_INTROS = [
   "You descend into the server's corrupted memory banks...",
   "The digital corridors grow darker as you push deeper...",
   "Warning signs flash as you breach the next layer...",
   "Encrypted barriers crumble as you force your way through...",
-  "The system's defenses intensify around you..."
+  "The system's defenses intensify around you...",
+  "Corrupted data streams swirl in the darkness ahead...",
+  "The air crackles with volatile code fragments...",
+  "Ancient firewalls groan as you breach the inner sanctum...",
+  "Reality glitches — the system is fighting back...",
+  "You reach the core. Something massive awaits..."
 ];
 
 // Damage values
@@ -123,7 +190,7 @@ const activeRuns = new Map(); // guildId-userId -> run state
 function initDungeon(database) {
   db = database;
 
-  // Create dungeon settings table
+  // Create global dungeon settings table (enabled, cooldown, round timer)
   db.run(`
     CREATE TABLE IF NOT EXISTS dungeon_settings (
       guild_id TEXT PRIMARY KEY,
@@ -138,6 +205,23 @@ function initDungeon(database) {
       death_penalty_percent INTEGER DEFAULT 50,
       round_time_seconds INTEGER DEFAULT 15,
       floor_heal_percent INTEGER DEFAULT 20
+    )
+  `);
+
+  // Create per-tier dungeon settings table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dungeon_tier_settings (
+      guild_id TEXT NOT NULL,
+      tier INTEGER NOT NULL,
+      max_floors INTEGER,
+      base_reward INTEGER,
+      reward_per_floor INTEGER,
+      base_enemy_hp INTEGER,
+      enemy_hp_per_floor INTEGER,
+      player_hp INTEGER,
+      death_penalty_percent INTEGER,
+      floor_heal_percent INTEGER,
+      PRIMARY KEY (guild_id, tier)
     )
   `);
 
@@ -161,7 +245,8 @@ function initDungeon(database) {
       max_floor INTEGER NOT NULL,
       gold_earned INTEGER NOT NULL,
       result TEXT NOT NULL,
-      run_time INTEGER NOT NULL
+      run_time INTEGER NOT NULL,
+      tier INTEGER DEFAULT 1
     )
   `);
 
@@ -172,6 +257,20 @@ function initDungeon(database) {
   // Migration: add floor_heal_percent column if missing
   try {
     db.run(`ALTER TABLE dungeon_settings ADD COLUMN floor_heal_percent INTEGER DEFAULT 20`);
+  } catch (e) {
+    // Column already exists
+  }
+
+  // Migration: add tier column to dungeon_history if missing
+  try {
+    db.run(`ALTER TABLE dungeon_history ADD COLUMN tier INTEGER DEFAULT 1`);
+  } catch (e) {
+    // Column already exists
+  }
+
+  // Migration: add enraged_threshold column to dungeon_tier_settings
+  try {
+    db.run(`ALTER TABLE dungeon_tier_settings ADD COLUMN enraged_threshold INTEGER`);
   } catch (e) {
     // Column already exists
   }
@@ -226,6 +325,65 @@ function updateDungeonSettings(guildId, newSettings) {
   saveDatabase();
 }
 
+// ==================== TIER SETTINGS ====================
+
+function getDungeonTierSettings(guildId, tier) {
+  const tierDefault = TIER_DEFAULTS[tier] || TIER_DEFAULTS[1];
+  if (!db) return { ...tierDefault };
+
+  const stmt = db.prepare(`SELECT * FROM dungeon_tier_settings WHERE guild_id = ? AND tier = ?`);
+  stmt.bind([guildId, tier]);
+
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    stmt.free();
+    return {
+      maxFloors: row.max_floors ?? tierDefault.maxFloors,
+      baseReward: row.base_reward ?? tierDefault.baseReward,
+      rewardPerFloor: row.reward_per_floor ?? tierDefault.rewardPerFloor,
+      baseEnemyHp: row.base_enemy_hp ?? tierDefault.baseEnemyHp,
+      enemyHpPerFloor: row.enemy_hp_per_floor ?? tierDefault.enemyHpPerFloor,
+      playerHp: row.player_hp ?? tierDefault.playerHp,
+      deathPenaltyPercent: row.death_penalty_percent ?? tierDefault.deathPenaltyPercent,
+      floorHealPercent: row.floor_heal_percent ?? tierDefault.floorHealPercent,
+      enragedThreshold: row.enraged_threshold ?? tierDefault.enragedThreshold
+    };
+  }
+
+  stmt.free();
+  return { ...tierDefault };
+}
+
+function updateDungeonTierSettings(guildId, tier, newSettings) {
+  if (!db) return;
+
+  const current = getDungeonTierSettings(guildId, tier);
+  const merged = { ...current, ...newSettings };
+
+  db.run(`INSERT OR REPLACE INTO dungeon_tier_settings 
+    (guild_id, tier, max_floors, base_reward, reward_per_floor, base_enemy_hp, enemy_hp_per_floor, player_hp, death_penalty_percent, floor_heal_percent, enraged_threshold)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [guildId, tier, merged.maxFloors, merged.baseReward, merged.rewardPerFloor,
+     merged.baseEnemyHp, merged.enemyHpPerFloor, merged.playerHp,
+     merged.deathPenaltyPercent, merged.floorHealPercent, merged.enragedThreshold]);
+
+  saveDatabase();
+}
+
+// Get combined settings: global + tier-specific
+function getFullTierSettings(guildId, tier) {
+  const global = getDungeonSettings(guildId);
+  const tierSettings = getDungeonTierSettings(guildId, tier);
+  return {
+    // Global settings
+    enabled: global.enabled,
+    cooldownMinutes: global.cooldownMinutes,
+    roundTimeSeconds: global.roundTimeSeconds,
+    // Tier-specific settings
+    ...tierSettings
+  };
+}
+
 // ==================== COOLDOWN ====================
 
 function canRunDungeon(guildId, userId) {
@@ -268,12 +426,12 @@ function recordDungeonCooldown(guildId, userId) {
 
 // ==================== HISTORY ====================
 
-function recordDungeonRun(guildId, userId, floorsCleared, maxFloor, goldEarned, result) {
+function recordDungeonRun(guildId, userId, floorsCleared, maxFloor, goldEarned, result, tier = 1) {
   if (!db) return;
 
-  db.run(`INSERT INTO dungeon_history (guild_id, user_id, floors_cleared, max_floor, gold_earned, result, run_time) 
-    VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [guildId, userId, floorsCleared, maxFloor, goldEarned, result, Date.now()]);
+  db.run(`INSERT INTO dungeon_history (guild_id, user_id, floors_cleared, max_floor, gold_earned, result, run_time, tier) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [guildId, userId, floorsCleared, maxFloor, goldEarned, result, Date.now(), tier]);
   saveDatabase();
 }
 
@@ -314,11 +472,26 @@ function getDungeonStats(guildId, userId) {
 
 // ==================== ENEMY GENERATION ====================
 
-function generateEnemy(floor, settings) {
-  // Pick a random enemy type, with later types more likely on higher floors
-  const pool = ENEMY_TYPES.slice(0, Math.min(ENEMY_TYPES.length, 5 + floor * 2));
-  const enemy = pool[Math.floor(Math.random() * pool.length)];
+function generateEnemy(floor, settings, tier = 1) {
+  const maxFloors = settings.maxFloors;
 
+  // Boss spawns on the final floor
+  if (floor >= maxFloors && BOSS_TYPES[tier]) {
+    const bossTemplate = BOSS_TYPES[tier];
+    const hp = settings.baseEnemyHp + (floor - 1) * settings.enemyHpPerFloor;
+
+    return {
+      ...bossTemplate,
+      hp,
+      maxHp: hp,
+      floor,
+      enragedThreshold: settings.enragedThreshold ?? bossTemplate.enragedThreshold,
+      lastPlayerMove: null // For adaptive counterplay tracking
+    };
+  }
+
+  // Regular enemies — full random pool (no floor gating)
+  const enemy = ENEMY_TYPES[Math.floor(Math.random() * ENEMY_TYPES.length)];
   const hp = settings.baseEnemyHp + (floor - 1) * settings.enemyHpPerFloor;
 
   return {
@@ -328,6 +501,16 @@ function generateEnemy(floor, settings) {
     floor
   };
 }
+
+// Moves that beat each move (for adaptive counterplay)
+const COUNTER_MOVES = {
+  exploit: ['spam', 'override'],
+  corrupt: ['override', 'exploit'],
+  isolate: ['exploit', 'corrupt'],
+  spam: ['isolate', 'corrupt'],
+  override: ['spam', 'isolate'],
+  restore: ['exploit', 'corrupt', 'isolate', 'spam', 'override'] // Everything beats restore
+};
 
 function getEnemyMove(enemy, restoreCooldown = 0) {
   const { exploit, corrupt, isolate, spam, override } = enemy.bias;
@@ -343,6 +526,17 @@ function getEnemyMove(enemy, restoreCooldown = 0) {
 
   if (restoreCooldown <= 0) {
     moves.push({ name: 'restore', weight: restoreWeight });
+  }
+
+  // Adaptive counterplay (Chaos boss) — boost moves that counter player's last move
+  if (enemy.abilities?.adaptive && enemy.lastPlayerMove) {
+    const counters = COUNTER_MOVES[enemy.lastPlayerMove] || [];
+    const adaptiveBonus = 15; // +15 weight to each counter move
+    for (const m of moves) {
+      if (counters.includes(m.name)) {
+        m.weight += adaptiveBonus;
+      }
+    }
   }
 
   const total = moves.reduce((sum, m) => sum + m.weight, 0);
@@ -474,10 +668,50 @@ function isInDungeon(guildId, userId) {
   return activeRuns.has(`${guildId}-${userId}`);
 }
 
+// ==================== LEADERBOARD ====================
+
+function getDungeonLeaderboard(guildId) {
+  if (!db) return [];
+
+  const stmt = db.prepare(`
+    SELECT 
+      user_id,
+      COUNT(*) as total_runs,
+      COALESCE(SUM(CASE WHEN result = 'cleared' THEN 1 ELSE 0 END), 0) as total_clears,
+      COALESCE(SUM(CASE WHEN result = 'escaped' THEN 1 ELSE 0 END), 0) as total_escapes,
+      COALESCE(SUM(CASE WHEN result = 'died' THEN 1 ELSE 0 END), 0) as total_deaths,
+      COALESCE(SUM(gold_earned), 0) as total_gold,
+      COALESCE(SUM(CASE WHEN tier = 1 THEN 1 ELSE 0 END), 0) as t1_runs,
+      COALESCE(SUM(CASE WHEN tier = 1 AND result = 'cleared' THEN 1 ELSE 0 END), 0) as t1_clears,
+      COALESCE(SUM(CASE WHEN tier = 1 AND result = 'escaped' THEN 1 ELSE 0 END), 0) as t1_escapes,
+      COALESCE(SUM(CASE WHEN tier = 2 THEN 1 ELSE 0 END), 0) as t2_runs,
+      COALESCE(SUM(CASE WHEN tier = 2 AND result = 'cleared' THEN 1 ELSE 0 END), 0) as t2_clears,
+      COALESCE(SUM(CASE WHEN tier = 2 AND result = 'escaped' THEN 1 ELSE 0 END), 0) as t2_escapes,
+      COALESCE(SUM(CASE WHEN tier = 3 THEN 1 ELSE 0 END), 0) as t3_runs,
+      COALESCE(SUM(CASE WHEN tier = 3 AND result = 'cleared' THEN 1 ELSE 0 END), 0) as t3_clears,
+      COALESCE(SUM(CASE WHEN tier = 3 AND result = 'escaped' THEN 1 ELSE 0 END), 0) as t3_escapes
+    FROM dungeon_history
+    WHERE guild_id = ?
+    GROUP BY user_id
+    ORDER BY total_clears DESC, total_gold DESC
+  `);
+  stmt.bind([guildId]);
+
+  const results = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return results;
+}
+
 module.exports = {
   initDungeon,
   getDungeonSettings,
   updateDungeonSettings,
+  getDungeonTierSettings,
+  updateDungeonTierSettings,
+  getFullTierSettings,
   canRunDungeon,
   recordDungeonCooldown,
   recordDungeonRun,
@@ -493,6 +727,9 @@ module.exports = {
   clearActiveRun,
   isInDungeon,
   ENEMY_TYPES,
+  BOSS_TYPES,
+  TIER_DEFAULTS,
   FLOOR_INTROS,
-  DAMAGE
+  DAMAGE,
+  getDungeonLeaderboard
 };

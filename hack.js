@@ -11,7 +11,8 @@ const DEFAULT_SETTINGS = {
   minStealPercent: 2,             // Minimum % of target's bank that can be stolen
   maxStealPercent: 5,             // Maximum % of target's bank that can be stolen
   minFinePercent: 15,             // Minimum fine as % of potential steal
-  maxFinePercent: 20              // Maximum fine as % of potential steal
+  maxFinePercent: 20,             // Maximum fine as % of potential steal
+  attemptPenaltyMinutes: 10       // Penalty cooldown when attempting to hack a protected target
 };
 
 // Cache for settings per guild
@@ -44,6 +45,13 @@ function initHack(database) {
   } catch (e) {
     // Column already exists
   }
+
+  // Add attempt_penalty_minutes column (migration)
+  try {
+    db.run(`ALTER TABLE hack_settings ADD COLUMN attempt_penalty_minutes INTEGER DEFAULT 10`);
+  } catch (e) {
+    // Column already exists
+  }
   
   // Create hacker cooldown tracker table
   db.run(`
@@ -51,9 +59,17 @@ function initHack(database) {
       guild_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       last_hack_time INTEGER DEFAULT 0,
+      penalty_until INTEGER DEFAULT 0,
       PRIMARY KEY (guild_id, user_id)
     )
   `);
+
+  // Add penalty_until column to hack_tracker (migration)
+  try {
+    db.run(`ALTER TABLE hack_tracker ADD COLUMN penalty_until INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists
+  }
   
   // Create target cooldown tracker table
   db.run(`
@@ -116,7 +132,8 @@ function getHackSettings(guildId) {
       minStealPercent: row.min_steal_percent || 2,
       maxStealPercent: row.max_steal_percent || 5,
       minFinePercent: row.min_fine_percent || 15,
-      maxFinePercent: row.max_fine_percent || 20
+      maxFinePercent: row.max_fine_percent || 20,
+      attemptPenaltyMinutes: row.attempt_penalty_minutes !== undefined ? row.attempt_penalty_minutes : 10
     };
     stmt.free();
     guildHackSettings.set(guildId, settings);
@@ -135,8 +152,8 @@ function updateHackSettings(guildId, updates) {
   const settings = { ...current, ...updates };
   
   db.run(`
-    INSERT OR REPLACE INTO hack_settings (guild_id, enabled, hacker_cooldown_minutes, target_cooldown_minutes, unique_targets_required, min_steal_percent, max_steal_percent, min_fine_percent, max_fine_percent)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO hack_settings (guild_id, enabled, hacker_cooldown_minutes, target_cooldown_minutes, unique_targets_required, min_steal_percent, max_steal_percent, min_fine_percent, max_fine_percent, attempt_penalty_minutes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     guildId,
     settings.enabled ? 1 : 0,
@@ -146,7 +163,8 @@ function updateHackSettings(guildId, updates) {
     settings.minStealPercent,
     settings.maxStealPercent,
     settings.minFinePercent,
-    settings.maxFinePercent
+    settings.maxFinePercent,
+    settings.attemptPenaltyMinutes !== undefined ? settings.attemptPenaltyMinutes : 10
   ]);
   
   guildHackSettings.set(guildId, settings);
@@ -161,16 +179,37 @@ function canHack(guildId, userId, cooldownReduction = 0) {
     return { canHack: false, reason: 'Hacking is currently disabled on this server.' };
   }
   
-  const stmt = db.prepare(`SELECT last_hack_time FROM hack_tracker WHERE guild_id = ? AND user_id = ?`);
+  const stmt = db.prepare(`SELECT last_hack_time, penalty_until FROM hack_tracker WHERE guild_id = ? AND user_id = ?`);
   stmt.bind([guildId, userId]);
   
   let lastHackTime = 0;
+  let penaltyUntil = 0;
   if (stmt.step()) {
-    lastHackTime = stmt.getAsObject().last_hack_time;
+    const row = stmt.getAsObject();
+    lastHackTime = row.last_hack_time || 0;
+    penaltyUntil = row.penalty_until || 0;
   }
   stmt.free();
   
   const now = Date.now();
+  
+  // Check attempt penalty first (independent of cooldown reduction)
+  if (penaltyUntil > now) {
+    const remainingMs = penaltyUntil - now;
+    const minutes = Math.floor(remainingMs / (60 * 1000));
+    const seconds = Math.floor((remainingMs % (60 * 1000)) / 1000);
+    
+    let timeStr = '';
+    if (minutes > 0) timeStr += `${minutes}m `;
+    if (seconds > 0) timeStr += `${seconds}s`;
+    
+    return {
+      canHack: false,
+      reason: `🚨 **Security Alert!** Authorities are monitoring your activity. You must wait **${timeStr.trim()}** before hacking again.`,
+      timeRemaining: remainingMs
+    };
+  }
+  
   // Apply cooldown reduction from skills
   const reducedCooldownMinutes = settings.hackerCooldownMinutes * (1 - cooldownReduction / 100);
   const cooldownMs = reducedCooldownMinutes * 60 * 1000;
@@ -300,10 +339,20 @@ function recordHackerCooldown(guildId, hackerId) {
   if (!db) return;
   
   const now = Date.now();
+  
+  // Preserve existing penalty_until when recording cooldown
+  let currentPenaltyUntil = 0;
+  const stmt = db.prepare(`SELECT penalty_until FROM hack_tracker WHERE guild_id = ? AND user_id = ?`);
+  stmt.bind([guildId, hackerId]);
+  if (stmt.step()) {
+    currentPenaltyUntil = stmt.getAsObject().penalty_until || 0;
+  }
+  stmt.free();
+  
   db.run(`
-    INSERT OR REPLACE INTO hack_tracker (guild_id, user_id, last_hack_time)
-    VALUES (?, ?, ?)
-  `, [guildId, hackerId, now]);
+    INSERT OR REPLACE INTO hack_tracker (guild_id, user_id, last_hack_time, penalty_until)
+    VALUES (?, ?, ?, ?)
+  `, [guildId, hackerId, now, currentPenaltyUntil]);
 }
 
 // Record target's cooldown (called only on successful hack)
@@ -333,6 +382,41 @@ function clearHackerCooldown(guildId, hackerId) {
   db.run(`
     DELETE FROM hack_tracker WHERE guild_id = ? AND user_id = ?
   `, [guildId, hackerId]);
+}
+
+// Apply attempt penalty when hacker tries to hack a protected target
+function applyAttemptPenalty(guildId, hackerId) {
+  if (!db) return { applied: false };
+  
+  const settings = getHackSettings(guildId);
+  const penaltyMinutes = settings.attemptPenaltyMinutes;
+  
+  if (!penaltyMinutes || penaltyMinutes <= 0) return { applied: false };
+  
+  const now = Date.now();
+  const penaltyUntil = now + (penaltyMinutes * 60 * 1000);
+  
+  // Get current values to preserve last_hack_time and only extend penalty
+  let currentLastHackTime = 0;
+  let currentPenaltyUntil = 0;
+  const stmt = db.prepare(`SELECT last_hack_time, penalty_until FROM hack_tracker WHERE guild_id = ? AND user_id = ?`);
+  stmt.bind([guildId, hackerId]);
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    currentLastHackTime = row.last_hack_time || 0;
+    currentPenaltyUntil = row.penalty_until || 0;
+  }
+  stmt.free();
+  
+  // Only extend penalty, never reduce an existing one
+  const newPenaltyUntil = Math.max(currentPenaltyUntil, penaltyUntil);
+  
+  db.run(`
+    INSERT OR REPLACE INTO hack_tracker (guild_id, user_id, last_hack_time, penalty_until)
+    VALUES (?, ?, ?, ?)
+  `, [guildId, hackerId, currentLastHackTime, newPenaltyUntil]);
+  
+  return { applied: true, penaltyMinutes };
 }
 
 // Calculate success rate: (target's total balance / 2.5) / (hacker's total balance + target's total balance)
@@ -464,6 +548,7 @@ module.exports = {
   recordTargetHacked,
   clearTargetCooldown,
   clearHackerCooldown,
+  applyAttemptPenalty,
   calculateSuccessRate,
   calculateStealPercent,
   calculateStealAmount,

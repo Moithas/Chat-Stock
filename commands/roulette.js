@@ -10,8 +10,9 @@ const {
   recordRouletteSpin,
   getRouletteStats
 } = require('../gambling');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 const BETTING_WINDOW = 30000; // 30 seconds to place bets
 
 // Active roulette tables per channel
@@ -77,7 +78,7 @@ function buildTableEmbed(table) {
   // Add field for each player
   for (const [odId, data] of playerBets) {
     const betLines = data.bets.map(b => 
-      `${formatChoice(b.choice)} - **${b.amount.toLocaleString()}** ${CURRENCY}`
+      `${formatChoice(b.choice)} - **${b.amount.toLocaleString()}** ${getCurrency(table.guildId)}`
     ).join('\n');
     
     const totalBet = data.bets.reduce((sum, b) => sum + b.amount, 0);
@@ -199,7 +200,7 @@ async function spinWheel(table) {
   
   resultEmbed.setDescription(
     `**${winners}** winning bet${winners !== 1 ? 's' : ''} • **${losers}** losing bet${losers !== 1 ? 's' : ''}\n` +
-    `House ${totalWon > totalLost ? 'lost' : 'won'} **${Math.abs(totalWon - totalLost).toLocaleString()}** ${CURRENCY}`
+    `House ${totalWon > totalLost ? 'lost' : 'won'} **${Math.abs(totalWon - totalLost).toLocaleString()}** ${getCurrency(table.guildId)}`
   );
 
   // Add field for each player's results
@@ -207,7 +208,7 @@ async function spinWheel(table) {
     const resultLines = data.results.map(r => {
       const icon = r.won ? '✅' : '❌';
       const amount = r.won ? `+${r.winnings.toLocaleString()}` : `${r.winnings.toLocaleString()}`;
-      return `${icon} ${formatChoice(r.choice)} → **${amount}** ${CURRENCY}`;
+      return `${icon} ${formatChoice(r.choice)} → **${amount}** ${getCurrency(table.guildId)}`;
     }).join('\n');
     
     const netIcon = data.netWinnings >= 0 ? '🎉' : '💸';
@@ -217,7 +218,7 @@ async function spinWheel(table) {
     
     resultEmbed.addFields({
       name: `${netIcon} ${data.name}`,
-      value: `${resultLines}\n**Net: ${netText}** ${CURRENCY}`,
+      value: `${resultLines}\n**Net: ${netText}** ${getCurrency(table.guildId)}`,
       inline: true
     });
   }
@@ -282,7 +283,7 @@ module.exports = {
     const balanceData = await getBalance(guildId, userId);
     if (balanceData.total < bet) {
       return interaction.reply({
-        content: `❌ You don't have enough! Your balance: **${balanceData.total.toLocaleString()}** ${CURRENCY}`,
+        content: `❌ You don't have enough! Your balance: **${balanceData.total.toLocaleString()}** ${getCurrency(guildId)}`,
         flags: 64
       });
     }
@@ -368,7 +369,7 @@ module.exports = {
       try {
         await table.interaction.editReply({ embeds: [embed], components: [row] });
         await interaction.editReply({ 
-          content: `✅ Bet placed: **${bet.toLocaleString()}** ${CURRENCY} on **${formatChoice(choice)}**`
+          content: `✅ Bet placed: **${bet.toLocaleString()}** ${getCurrency(guildId)} on **${formatChoice(choice)}**`
         });
       } catch (e) {
         // Message might have been deleted, create new one

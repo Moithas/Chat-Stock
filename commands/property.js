@@ -35,13 +35,14 @@ try {
 } catch (e) {
   console.log('Economy not available for property system');
 }
+const { getCurrency } = require('../admin');
 
 // Helper to check if economy is enabled (checked at runtime)
 function isEconomyEnabled() {
   return economy && economy.isEnabled();
 }
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -157,8 +158,8 @@ async function showPropertyPanel(interaction, guildId, userId, settings, isUpdat
       `❌ **Registration Required**\n\n` +
       `You need to register to access the property market.\n\n` +
       `🔒 **Required Role:** <@&${settings.requiredRole}>\n` +
-      `💰 **Registration Fee:** ${settings.registerPrice.toLocaleString()} ${CURRENCY}\n` +
-      `💵 **Your Balance:** ${Math.round(balanceData.total).toLocaleString()} ${CURRENCY}\n\n` +
+      `💰 **Registration Fee:** ${settings.registerPrice.toLocaleString()} ${getCurrency(guildId)}\n` +
+      `💵 **Your Balance:** ${Math.round(balanceData.total).toLocaleString()} ${getCurrency(guildId)}\n\n` +
       `Click the **Register** button below to purchase access!`
     );
     
@@ -181,7 +182,7 @@ async function showPropertyPanel(interaction, guildId, userId, settings, isUpdat
   }
   
   if (userProperties.length === 0) {
-    embed.setDescription(`You don't own any properties yet!\n\n💰 **Balance:** ${Math.round(balanceData.total).toLocaleString()} ${CURRENCY}\n💵 **Purchase Fee:** ${settings.purchaseFee.toLocaleString()} ${CURRENCY}\n\nUse the **Buy Property** button below to get started!`);
+    embed.setDescription(`You don't own any properties yet!\n\n💰 **Balance:** ${Math.round(balanceData.total).toLocaleString()} ${getCurrency(guildId)}\n💵 **Purchase Fee:** ${settings.purchaseFee.toLocaleString()} ${getCurrency(guildId)}\n\nUse the **Buy Property** button below to get started!`);
   } else {
     // Build property list with cooldown timers
     const totalValue = getTotalPropertyValue(guildId, userId);
@@ -204,15 +205,15 @@ async function showPropertyPanel(interaction, guildId, userId, settings, isUpdat
       }
       
       return `**${index + 1}.** ${getTierEmoji(pc.property.tier)} **${pc.property.name}** — ${cooldownStatus}\n` +
-             `   💵 ${effectiveValue.toLocaleString()} ${CURRENCY} | 💰 ${rent.toLocaleString()} ${CURRENCY}/rent`;
+             `   💵 ${effectiveValue.toLocaleString()} ${getCurrency(guildId)} | 💰 ${rent.toLocaleString()} ${getCurrency(guildId)}/rent`;
     }).join('\n\n');
     
     embed.setDescription(`${propertyList}\n\n━━━━━━━━━━━━━━━━━━━━━━`);
     embed.addFields(
-      { name: '💰 Balance', value: `${Math.round(balanceData.total).toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '📊 Portfolio Value', value: `${totalValue.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💰 Balance', value: `${Math.round(balanceData.total).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '📊 Portfolio Value', value: `${totalValue.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '🏘️ Properties', value: `${userProperties.length}/${settings.propertyLimit}`, inline: true },
-      { name: '💵 Total Rent/Day', value: `${totalRent.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💵 Total Rent/Day', value: `${totalRent.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '🧧 Wealth Cards', value: `${userCards.length}`, inline: true },
       { name: '✅ Ready', value: `${readyCount}/${userProperties.length}`, inline: true }
     );
@@ -329,8 +330,8 @@ async function handleRegisterButton(interaction, guildId, userId, settings) {
       .setColor(0xe74c3c)
       .setTitle('❌ Insufficient Funds')
       .setDescription(
-        `You need **${settings.registerPrice.toLocaleString()}** ${CURRENCY} to register.\n\n` +
-        `Your balance: **${Math.round(balanceData.total).toLocaleString()}** ${CURRENCY}`
+        `You need **${settings.registerPrice.toLocaleString()}** ${getCurrency(guildId)} to register.\n\n` +
+        `Your balance: **${Math.round(balanceData.total).toLocaleString()}** ${getCurrency(guildId)}`
       );
     
     return interaction.editReply({ embeds: [embed], components: [] });
@@ -362,7 +363,7 @@ async function handleRegisterButton(interaction, guildId, userId, settings) {
     .setTitle('✅ Registration Complete!')
     .setDescription(
       `You have been registered for the property market!\n\n` +
-      `💰 **Fee Paid:** ${settings.registerPrice.toLocaleString()} ${CURRENCY}\n` +
+      `💰 **Fee Paid:** ${settings.registerPrice.toLocaleString()} ${getCurrency(guildId)}\n` +
       `🎭 **Role Granted:** <@&${settings.requiredRole}>\n\n` +
       `You can now buy and manage properties!`
     );
@@ -416,7 +417,7 @@ async function handleBuyButton(interaction, guildId, userId, settings) {
     const embed = new EmbedBuilder()
       .setColor(0xe74c3c)
       .setTitle('❌ Insufficient Funds')
-      .setDescription(`You need **${settings.purchaseFee.toLocaleString()}** ${CURRENCY} in cash to buy a property.\n\nYou only have **${balanceData.cash.toLocaleString()}** ${CURRENCY} cash.`);
+      .setDescription(`You need **${settings.purchaseFee.toLocaleString()}** ${getCurrency(guildId)} in cash to buy a property.\n\nYou only have **${balanceData.cash.toLocaleString()}** ${getCurrency(guildId)} cash.`);
     
     const backButton = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -465,10 +466,10 @@ async function handleBuyButton(interaction, guildId, userId, settings) {
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .addFields(
       { name: 'Tier', value: `${getTierEmoji(property.tier)} ${getTierName(property.tier)}`, inline: true },
-      { name: 'Value', value: `${property.value.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: 'Daily Rent', value: `${rentAmount.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: 'Value', value: `${property.value.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: 'Daily Rent', value: `${rentAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: 'Cards/Day', value: `${cardsPerDay} Wealth Cards`, inline: true },
-      { name: 'Cost Paid', value: `${settings.purchaseFee.toLocaleString()} ${CURRENCY}`, inline: true }
+      { name: 'Cost Paid', value: `${settings.purchaseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     )
     .setFooter({ text: 'Property is ready to collect rent!' });
   
@@ -503,7 +504,7 @@ async function handleSellButton(interaction, guildId, userId) {
   userProperties.forEach((prop, index) => {
     const sellPrice = Math.round(prop.value * 0.5);
     propertyList += `**${index + 1}.** ${getTierEmoji(prop.tier)} **${prop.name}**\n`;
-    propertyList += `   💵 Value: ${prop.value.toLocaleString()} ${CURRENCY} | 💰 Sell: ${sellPrice.toLocaleString()} ${CURRENCY}\n\n`;
+    propertyList += `   💵 Value: ${prop.value.toLocaleString()} ${getCurrency(guildId)} | 💰 Sell: ${sellPrice.toLocaleString()} ${getCurrency(guildId)}\n\n`;
   });
   
   const embed = new EmbedBuilder()
@@ -516,7 +517,7 @@ async function handleSellButton(interaction, guildId, userId) {
     const sellPrice = Math.round(prop.value * 0.5);
     return {
       label: prop.name,
-      description: `${getTierName(prop.tier)} | Sell for ${sellPrice.toLocaleString()} ${CURRENCY}`,
+      description: `${getTierName(prop.tier)} | Sell for ${sellPrice.toLocaleString()} ${getCurrency(guildId)}`,
       value: prop.id.toString(),
       emoji: getTierEmoji(prop.tier)
     };
@@ -562,8 +563,8 @@ async function handleSellSelect(interaction) {
     .setDescription(`Are you sure you want to sell **${propertyToSell.name}**?`)
     .addFields(
       { name: '🏠 Property', value: `${getTierEmoji(propertyToSell.tier)} ${propertyToSell.name}`, inline: true },
-      { name: '💵 Original Value', value: `${propertyToSell.value.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '🏦 You\'ll Receive', value: `${sellPrice.toLocaleString()} ${CURRENCY}`, inline: true }
+      { name: '💵 Original Value', value: `${propertyToSell.value.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '🏦 You\'ll Receive', value: `${sellPrice.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     )
     .setFooter({ text: 'Funds will be deposited directly into your bank' });
   
@@ -615,11 +616,11 @@ async function handleSellConfirm(interaction, propertyId) {
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71)
     .setTitle('🏠 Property Sold!')
-    .setDescription(`**${interaction.user.displayName}** sold **${propertyToSell.name}** for **${sellPrice.toLocaleString()}** ${CURRENCY}`)
+    .setDescription(`**${interaction.user.displayName}** sold **${propertyToSell.name}** for **${sellPrice.toLocaleString()}** ${getCurrency(guildId)}`)
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .addFields(
-      { name: 'Original Value', value: `${propertyToSell.value.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: 'Sale Price (50%)', value: `${sellPrice.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: 'Original Value', value: `${propertyToSell.value.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: 'Sale Price (50%)', value: `${sellPrice.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '🏦 Deposited To', value: 'Bank', inline: true }
     );
   
@@ -718,7 +719,7 @@ async function showUpgradesPanel(interaction, guildId, userId, settings, isUpdat
       if (status.nextStage === 'upgrade' && prop.property_id >= 15) {
         statusText = `✅ **MAX LEVEL** - Fully upgraded!`;
       } else {
-        statusText = `${getStageEmoji(status.nextStage)} Ready: **${getStageName(status.nextStage)}** — ${nextCost.toLocaleString()} ${CURRENCY} / ${formatUpgradeTime(nextTime)}`;
+        statusText = `${getStageEmoji(status.nextStage)} Ready: **${getStageName(status.nextStage)}** — ${nextCost.toLocaleString()} ${getCurrency(guildId)} / ${formatUpgradeTime(nextTime)}`;
       }
     } else {
       statusText = '✅ All stages complete!';
@@ -735,7 +736,7 @@ async function showUpgradesPanel(interaction, guildId, userId, settings, isUpdat
     const taxShelter = status.expandComplete ? ' 🛡️' : '';
     
     return `**${index + 1}.** ${getTierEmoji(prop.tier)} **${prop.name}** [${stageProgress}]${taxShelter}\n` +
-           `   💵 ${effectiveValue.toLocaleString()}${remodelBonus} ${CURRENCY}\n` +
+           `   💵 ${effectiveValue.toLocaleString()}${remodelBonus} ${getCurrency(guildId)}\n` +
            `   ${statusText}`;
   }).join('\n\n');
   
@@ -761,7 +762,7 @@ async function showUpgradesPanel(interaction, guildId, userId, settings, isUpdat
         
         return {
           label: `${prop.name} - ${getStageName(status.nextStage)}`,
-          description: `${nextCost.toLocaleString()} ${CURRENCY} / ${formatUpgradeTime(nextTime)}`,
+          description: `${nextCost.toLocaleString()} ${getCurrency(guildId)} / ${formatUpgradeTime(nextTime)}`,
           value: `${status.nextStage}_${prop.id}`,
           emoji: getStageEmoji(status.nextStage)
         };
@@ -832,7 +833,7 @@ async function handleUpgradeSelect(interaction) {
   const balanceData = await economy.getBalance(guildId, userId);
   if (balanceData.total < cost) {
     return interaction.reply({
-      content: `❌ Insufficient funds! You need **${cost.toLocaleString()}** ${CURRENCY} but only have **${Math.round(balanceData.total).toLocaleString()}** ${CURRENCY}.`,
+      content: `❌ Insufficient funds! You need **${cost.toLocaleString()}** ${getCurrency(guildId)} but only have **${Math.round(balanceData.total).toLocaleString()}** ${getCurrency(guildId)}.`,
       flags: 64
     });
   }
@@ -858,10 +859,10 @@ async function handleUpgradeSelect(interaction) {
     const nextProp = properties.find(p => p.id === property.property_id + 1);
     if (nextProp) {
       const bonus = Math.floor((nextProp.value - property.value) * 0.5);
-      benefitText = `+${bonus.toLocaleString()} ${CURRENCY} property value`;
+      benefitText = `+${bonus.toLocaleString()} ${getCurrency(guildId)} property value`;
     } else {
       const bonus = Math.floor(property.value * 0.15);
-      benefitText = `+${bonus.toLocaleString()} ${CURRENCY} property value (15%)`;
+      benefitText = `+${bonus.toLocaleString()} ${getCurrency(guildId)} property value (15%)`;
     }
   } else if (stage === 'expand') {
     benefitText = 'Property excluded from wealth tax';
@@ -876,14 +877,22 @@ async function handleUpgradeSelect(interaction) {
     .setTitle(`${getStageEmoji(stage)} ${getStageName(stage)} Started!`)
     .setDescription(`**${property.name}** is now being upgraded.`)
     .addFields(
-      { name: '💰 Cost', value: `${cost.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💰 Cost', value: `${cost.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '⏱️ Time', value: formatUpgradeTime(time), inline: true },
       { name: '✨ Benefit', value: benefitText, inline: true }
     )
     .setFooter({ text: `Completes at: ${new Date(result.completesAt).toLocaleString()}` })
     .setTimestamp();
   
-  await interaction.update({ embeds: [embed], components: [] });
+  const backRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('property_panel_upgrades')
+      .setLabel('Back to Upgrades')
+      .setEmoji('◀️')
+      .setStyle(ButtonStyle.Secondary)
+  );
+  
+  await interaction.update({ embeds: [embed], components: [backRow] });
   
   // Auto-complete after timer (schedule completion check)
   setTimeout(async () => {
@@ -894,15 +903,6 @@ async function handleUpgradeSelect(interaction) {
       performPropertyUpgrade(guildId, userId, ownedPropertyId, property.property_id);
     }
   }, time * 60 * 60 * 1000 + 1000); // Add 1 second buffer
-  
-  // After 3 seconds, show the upgrades panel again
-  setTimeout(async () => {
-    try {
-      await showUpgradesPanel(interaction, guildId, userId, settings, false);
-    } catch (e) {
-      // Interaction may have expired
-    }
-  }, 3000);
 }
 
 // Handle upgrade button click (from property buttons - not currently used)
@@ -919,7 +919,7 @@ async function handleList(interaction, guildId, targetUserId, targetUser) {
   
   if (userProperties.length === 0) {
     const msg = isSelf 
-      ? `🏠 You don't own any properties yet! Use \`/property buy\` to purchase one for **${settings.purchaseFee}** ${CURRENCY}.`
+      ? `🏠 You don't own any properties yet! Use \`/property buy\` to purchase one for **${settings.purchaseFee}** ${getCurrency(guildId)}.`
       : `🏠 **${targetUser.username}** doesn't own any properties.`;
     return interaction.reply({
       content: msg,
@@ -939,7 +939,7 @@ async function handleList(interaction, guildId, targetUserId, targetUser) {
     totalCards += cards;
     
     return `**${index + 1}.** ${getTierEmoji(prop.tier)} **${prop.name}**\n` +
-           `   💵 Value: ${effectiveValue.toLocaleString()} ${CURRENCY} | 💰 Rent: ${rent.toLocaleString()} ${CURRENCY} | 🧧 Cards: ${cards}/day`;
+           `   💵 Value: ${effectiveValue.toLocaleString()} ${getCurrency(guildId)} | 💰 Rent: ${rent.toLocaleString()} ${getCurrency(guildId)} | 🧧 Cards: ${cards}/day`;
   }).join('\n\n');
   
   const embed = new EmbedBuilder()
@@ -947,8 +947,8 @@ async function handleList(interaction, guildId, targetUserId, targetUser) {
     .setTitle(`🏠 ${targetUser.username}'s Property Portfolio`)
     .setDescription(propertyList)
     .addFields(
-      { name: '📊 Total Property Value', value: `${totalValue} ${CURRENCY}`, inline: true },
-      { name: '💰 Total Prospective Rent', value: `${totalRent} ${CURRENCY}`, inline: true },
+      { name: '📊 Total Property Value', value: `${totalValue} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Total Prospective Rent', value: `${totalRent} ${getCurrency(guildId)}`, inline: true },
       { name: '🏘️ Properties Owned', value: `${userProperties.length}/${settings.propertyLimit}`, inline: true },
       { name: '🧧 Wealth Cards', value: `**${userCards.length}**`, inline: true },
       { name: '📈 Cards Earned/Day', value: `${totalCards}`, inline: true }
@@ -976,7 +976,7 @@ async function handleMarketButton(interaction, guildId) {
     
     for (const prop of tierProps) {
       const rent = Math.round(prop.value * (settings.rentPercent / 100));
-      description += `• ${prop.name} - ${prop.value.toLocaleString()} ${CURRENCY} (Rent: ${rent.toLocaleString()})\n`;
+      description += `• ${prop.name} - ${prop.value.toLocaleString()} ${getCurrency(guildId)} (Rent: ${rent.toLocaleString()})\n`;
     }
   }
   
@@ -985,7 +985,7 @@ async function handleMarketButton(interaction, guildId) {
     .setTitle('🏘️ Property Market')
     .setDescription(description)
     .addFields(
-      { name: '💵 Purchase Fee', value: `${settings.purchaseFee.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💵 Purchase Fee', value: `${settings.purchaseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '🏠 Property Limit', value: `${settings.propertyLimit} per player`, inline: true },
       { name: '📈 Rent Rate', value: `${settings.rentPercent}% of value`, inline: true }
     )
@@ -1032,11 +1032,11 @@ async function handleRent(interaction, guildId, userId, settings) {
     const rent = Math.round(effectiveValue * (settings.rentPercent / 100));
     if (pc.canPlay) {
       propertyList += `**${index + 1}.** ${getTierEmoji(pc.property.tier)} **${pc.property.name}** - ✅ Ready\n`;
-      propertyList += `   💵 Rent: ${rent} ${CURRENCY}\n\n`;
+      propertyList += `   💵 Rent: ${rent} ${getCurrency(guildId)}\n\n`;
     } else {
       const nextAvailableTimestamp = Math.floor((Date.now() + pc.remainingMs) / 1000);
       propertyList += `**${index + 1}.** ${getTierEmoji(pc.property.tier)} **${pc.property.name}** - ⏱️ <t:${nextAvailableTimestamp}:R>\n`;
-      propertyList += `   💵 Rent: ${rent} ${CURRENCY}\n\n`;
+      propertyList += `   💵 Rent: ${rent} ${getCurrency(guildId)}\n\n`;
     }
   });
   
@@ -1064,7 +1064,7 @@ async function handleRent(interaction, guildId, userId, settings) {
     const rent = Math.round(effectiveValue * (settings.rentPercent / 100));
     return {
       label: pc.property.name,
-      description: `${getTierName(pc.property.tier)} | Rent: ${rent} ${CURRENCY}`,
+      description: `${getTierName(pc.property.tier)} | Rent: ${rent} ${getCurrency(guildId)}`,
       value: pc.property.id.toString(),
       emoji: getTierEmoji(pc.property.tier)
     };
@@ -1138,7 +1138,7 @@ async function handleRentButton(interaction, guildId, userId, settings, property
   const drawnCard = cards[cardIndex];
   
   // Calculate card effect
-  const effect = calculateCardEffect(drawnCard, rentAmount, userBalance, portfolioValue, propertyValue);
+  const effect = calculateCardEffect(guildId, drawnCard, rentAmount, userBalance, portfolioValue, propertyValue);
   
   // Use the card and set cooldown for THIS property
   useCard(drawnCard.id);
@@ -1178,9 +1178,9 @@ async function handleRentButton(interaction, guildId, userId, settings, property
       { name: '🏠 Property', value: `**${property.name}**`, inline: true },
       { name: '⏱️ Next Rent', value: `<t:${nextAvailableTimestamp}:R>`, inline: true },
       { name: '🧧 Cards Left', value: `**${cards.length - 1}**`, inline: true },
-      { name: '💵 Base Rent', value: `+${rentAmount.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: `${cardEmoji} Card Effect`, value: `${effectStr} ${CURRENCY}`, inline: true },
-      { name: '💰 Total', value: `**${totalStr}** ${CURRENCY}`, inline: true },
+      { name: '💵 Base Rent', value: `+${rentAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: `${cardEmoji} Card Effect`, value: `${effectStr} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Total', value: `**${totalStr}** ${getCurrency(guildId)}`, inline: true },
       { name: '📝 Effect Details', value: effect.description, inline: false }
     );
   
@@ -1266,7 +1266,7 @@ async function handleRentSelect(interaction) {
   const drawnCard = cards[cardIndex];
   
   // Calculate card effect
-  const effect = calculateCardEffect(drawnCard, rentAmount, userBalance, portfolioValue, propertyValue);
+  const effect = calculateCardEffect(guildId, drawnCard, rentAmount, userBalance, portfolioValue, propertyValue);
   
   // Use the card and set cooldown for THIS property
   useCard(drawnCard.id);
@@ -1306,9 +1306,9 @@ async function handleRentSelect(interaction) {
       { name: '🏠 Property', value: `**${property.name}**`, inline: true },
       { name: '⏱️ Next Rent', value: `<t:${nextAvailableTimestamp}:R>`, inline: true },
       { name: '🧧 Cards Left', value: `**${cards.length - 1}**`, inline: true },
-      { name: '💵 Base Rent', value: `+${rentAmount.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: `${cardEmoji} Card Effect`, value: `${effectStr} ${CURRENCY}`, inline: true },
-      { name: '💰 Total', value: `**${totalStr}** ${CURRENCY}`, inline: true },
+      { name: '💵 Base Rent', value: `+${rentAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: `${cardEmoji} Card Effect`, value: `${effectStr} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Total', value: `**${totalStr}** ${getCurrency(guildId)}`, inline: true },
       { name: '📝 Effect Details', value: effect.description, inline: false }
     );
   

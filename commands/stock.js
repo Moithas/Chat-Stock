@@ -36,8 +36,9 @@ const { calculateBuyFee, calculateSellFee, getGuildSettings } = require('../fees
 const { recordPurchase, recordPriceImpact, getMarketSettings, checkSellCooldown, consumePurchaseShares, calculateCapitalGainsTax, previewCapitalGainsTax } = require('../market');
 const { getActiveMarketEvent } = require('../events');
 const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Time range options for price charts
 const TIME_RANGES = {
@@ -204,6 +205,13 @@ module.exports = {
 
     if (customId === 'stock_panel_portfolio') {
       return showPortfolioUserSelect(interaction, guildId, userId);
+    }
+
+    if (customId.startsWith('stock_portfolio_page_')) {
+      const parts = customId.split('_');
+      const page = parseInt(parts[3]);
+      const targetUserId = parts[4];
+      return showPortfolioView(interaction, guildId, targetUserId, false, page);
     }
 
     if (customId === 'stock_panel_history') {
@@ -461,13 +469,13 @@ async function showStockPanel(interaction, guildId, userId, isUpdate = false, is
     .setTimestamp();
   
   // Stock price header
-  embed.setDescription(`**Your Stock Price:** ${Math.round(stockPrice).toLocaleString()} ${CURRENCY}`);
+  embed.setDescription(`**Your Stock Price:** ${Math.round(stockPrice).toLocaleString()} ${getCurrency(guildId)}`);
   
   // Portfolio summary (like /portfolio)
   embed.addFields(
-    { name: '💰 Total Value', value: `${Math.round(totalValue).toLocaleString()} ${CURRENCY}`, inline: true },
-    { name: '💵 Total Invested', value: `${Math.round(totalInvested).toLocaleString()} ${CURRENCY}`, inline: true },
-    { name: `${totalProfit >= 0 ? '📈' : '📉'} Profit/Loss`, value: `${totalProfit >= 0 ? '+' : ''}${Math.round(totalProfit).toLocaleString()} ${CURRENCY} (${profitPercentage}%)`, inline: true },
+    { name: '💰 Total Value', value: `${Math.round(totalValue).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+    { name: '💵 Total Invested', value: `${Math.round(totalInvested).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+    { name: `${totalProfit >= 0 ? '📈' : '📉'} Profit/Loss`, value: `${totalProfit >= 0 ? '+' : ''}${Math.round(totalProfit).toLocaleString()} ${getCurrency(guildId)} (${profitPercentage}%)`, inline: true },
     { name: '🏆 Stock Rank', value: stockRankText, inline: true },
     { name: '💼 Investor Rank', value: portfolioRankText, inline: true },
     { name: '📊 Holdings', value: `${portfolio.length} stocks`, inline: true }
@@ -481,14 +489,14 @@ async function showStockPanel(interaction, guildId, userId, isUpdate = false, is
         const user = await interaction.client.users.fetch(d.stockUserId);
         username = user.username;
       } catch (e) {}
-      return `${username}: **${d.shares}** shares → **${d.dividend.toLocaleString()}** ${CURRENCY}`;
+      return `${username}: **${d.shares}** shares → **${d.dividend.toLocaleString()}** ${getCurrency(guildId)}`;
     });
     
     const resolvedDividends = await Promise.all(topDividends);
     
     embed.addFields({
       name: `💰 Expected ${frequencyText[settings.payoutFrequency] || 'Periodic'} Dividend`,
-      value: `**${totalExpectedDividend.toLocaleString()}** ${CURRENCY}`,
+      value: `**${totalExpectedDividend.toLocaleString()}** ${getCurrency(guildId)}`,
       inline: false
     });
     
@@ -533,7 +541,7 @@ async function showStockPanel(interaction, guildId, userId, isUpdate = false, is
       splitStatusText = `⏳ Cooldown ends <t:${Math.floor(cooldownEnds / 1000)}:R>`;
     } else if (!splitCheck.canSplit && stockPrice < settings.splitMinPrice) {
       // Price too low
-      splitStatusText = `📉 Need **${settings.splitMinPrice.toLocaleString()}** ${CURRENCY} (currently ${Math.round(stockPrice).toLocaleString()})`;
+      splitStatusText = `📉 Need **${settings.splitMinPrice.toLocaleString()}** ${getCurrency(guildId)} (currently ${Math.round(stockPrice).toLocaleString()})`;
     } else if (splitCheck.canSplit) {
       splitStatusText = `✅ Ready to split!`;
     } else {
@@ -676,9 +684,9 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
     .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
     .setDescription(`📅 **Chat Streak:** ${streakText}`)
     .addFields(
-      { name: '💰 Current Price', value: `**${Math.round(stockPrice).toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '💰 Current Price', value: `**${Math.round(stockPrice).toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '📈 Total Shares', value: `**${totalShares.toLocaleString()}**`, inline: true },
-      { name: '🏦 Market Cap', value: `**${Math.round(marketCap).toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '🏦 Market Cap', value: `**${Math.round(marketCap).toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '👥 Shareholders', value: `**${shareholders.length}**`, inline: true },
       { name: '🏆 Stock Rank', value: stockRank ? `${getRankEmoji(stockRank.rank)} of ${stockRank.total}` : 'Unranked', inline: true }
     )
@@ -755,7 +763,7 @@ async function showBuyView(interaction, guildId, userId) {
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71)
     .setTitle('💵 Buy Stocks')
-    .setDescription(`**Your Bank:** ${Math.round(balance).toLocaleString()} ${CURRENCY}\n\nSelect a user from the dropdown, or search by their Discord username if you can't find them.`);
+    .setDescription(`**Your Bank:** ${Math.round(balance).toLocaleString()} ${getCurrency(guildId)}\n\nSelect a user from the dropdown, or search by their Discord username if you can't find them.`);
   
   const userSelect = new UserSelectMenuBuilder()
     .setCustomId('stock_buy_select')
@@ -841,9 +849,9 @@ async function showBuyAmountButtons(interaction, guildId, userId, targetUserId, 
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71)
     .setTitle(`💵 Buy ${username}`)
-    .setDescription(`**Your Bank:** ${Math.round(balance).toLocaleString()} ${CURRENCY}`)
+    .setDescription(`**Your Bank:** ${Math.round(balance).toLocaleString()} ${getCurrency(guildId)}`)
     .addFields(
-      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}${lpNote}`, inline: true },
+      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}${lpNote}`, inline: true },
       { name: 'Max Buyable', value: `${Math.max(0, maxShares).toLocaleString()} shares`, inline: true }
     );
   
@@ -980,7 +988,7 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
   }
   
   const subtotal = Math.round(currentPrice * shares);
-  const fee = calculateBuyFee(guildId, subtotal);
+  const fee = calculateBuyFee(guildId, subtotal, userId);
   const totalCost = subtotal + fee;
   
   // Check if user has enough
@@ -988,7 +996,7 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
     const hasEnough = await hasEnoughInBank(guildId, userId, totalCost);
     if (!hasEnough) {
       return interaction.editReply({ 
-        content: `❌ Insufficient funds! Need **${totalCost.toLocaleString()}** ${CURRENCY}`, 
+        content: `❌ Insufficient funds! Need **${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, 
         embeds: [], 
         components: [] 
       });
@@ -1001,12 +1009,12 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
     .setDescription(`You are about to buy shares of **${username}**`)
     .addFields(
       { name: '📊 Shares', value: `${shares.toLocaleString()}`, inline: true },
-      { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
-      { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '💰 Trading Fee', value: `${fee.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Trading Fee', value: `${fee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
-      { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${CURRENCY}`, inline: false }
+      { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
     );
   
   // Add Lucky Penny modifier line if active
@@ -1014,7 +1022,7 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
     const lpDiff = subtotal - Math.round(basePrice * shares);
     const lpSign = lpDiff >= 0 ? '+' : '';
     embed.spliceFields(3, 0,
-      { name: `🪙 Lucky Penny (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${CURRENCY}`, inline: false }
+      { name: `🪙 Lucky Penny (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
     );
   }
   
@@ -1075,7 +1083,7 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
   }
   
   const subtotal = Math.round(currentPrice * shares);
-  const fee = calculateBuyFee(guildId, subtotal);
+  const fee = calculateBuyFee(guildId, subtotal, userId);
   const totalCost = subtotal + fee;
   
   // Check if user has enough
@@ -1083,7 +1091,7 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
     const hasEnough = await hasEnoughInBank(guildId, userId, totalCost);
     if (!hasEnough) {
       return interaction.editReply({ 
-        content: `❌ Insufficient funds! Need **${totalCost.toLocaleString()}** ${CURRENCY}`, 
+        content: `❌ Insufficient funds! Need **${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, 
         embeds: [], 
         components: [] 
       });
@@ -1096,12 +1104,12 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
     .setDescription(`You are about to buy shares of **${username}**`)
     .addFields(
       { name: '📊 Shares', value: `${shares.toLocaleString()}`, inline: true },
-      { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
-      { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '💰 Trading Fee', value: `${fee.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Trading Fee', value: `${fee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
-      { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${CURRENCY}`, inline: false }
+      { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
     );
   
   // Add Lucky Penny modifier line if active
@@ -1109,7 +1117,7 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
     const lpDiff = subtotal - Math.round(basePrice * shares);
     const lpSign = lpDiff >= 0 ? '+' : '';
     embed.spliceFields(3, 0,
-      { name: `🪙 Lucky Penny (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${CURRENCY}`, inline: false }
+      { name: `🪙 Lucky Penny (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
     );
   }
   
@@ -1181,7 +1189,7 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
     ? Math.max(0.01, Math.round(baseSellPrice * (1 + lpSellMod / 100) * 100) / 100)
     : baseSellPrice;
   const grossValue = Math.round(currentPrice * shares);
-  const fee = calculateSellFee(guildId, grossValue);
+  const fee = calculateSellFee(guildId, grossValue, userId);
   
   // Preview capital gains tax without modifying database
   const { totalTax, breakdown } = previewCapitalGainsTax(guildId, userId, targetUserId, shares, currentPrice);
@@ -1195,10 +1203,10 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
     .setDescription(`You are about to sell shares of **${username}**`)
     .addFields(
       { name: '📊 Shares', value: `${shares.toLocaleString()}`, inline: true },
-      { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
-      { name: '📝 Gross Sale', value: `${grossValue.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '💰 Trading Fee', value: `-${fee.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '📝 Gross Sale', value: `${grossValue.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Trading Fee', value: `-${fee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true }
     );
   
@@ -1207,7 +1215,7 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
     const lpDiff = grossValue - Math.round(baseSellPrice * shares);
     const lpSign = lpDiff >= 0 ? '+' : '';
     embed.addFields(
-      { name: `🪙 Lucky Penny (${lpSellMod > 0 ? '+' : ''}${lpSellMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${CURRENCY}`, inline: false }
+      { name: `🪙 Lucky Penny (${lpSellMod > 0 ? '+' : ''}${lpSellMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
     );
   }
   
@@ -1221,10 +1229,10 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
     const longTermTax = breakdown.filter(b => !b.isShortTerm).reduce((sum, b) => sum + b.tax, 0);
     
     if (shortTermTax > 0) {
-      taxDetails += `Short-term (${marketSettings.shortTermTaxPercent}%): -${shortTermTax.toLocaleString()} ${CURRENCY}\n`;
+      taxDetails += `Short-term (${marketSettings.shortTermTaxPercent}%): -${shortTermTax.toLocaleString()} ${getCurrency(guildId)}\n`;
     }
     if (longTermTax > 0) {
-      taxDetails += `Long-term (${marketSettings.longTermTaxPercent}%): -${longTermTax.toLocaleString()} ${CURRENCY}\n`;
+      taxDetails += `Long-term (${marketSettings.longTermTaxPercent}%): -${longTermTax.toLocaleString()} ${getCurrency(guildId)}\n`;
     }
     
     embed.addFields(
@@ -1233,7 +1241,7 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
   }
   
   embed.addFields(
-    { name: '💳 You Will Receive', value: `**${netValue.toLocaleString()}** ${CURRENCY}`, inline: false }
+    { name: '💳 You Will Receive', value: `**${netValue.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
   );
   
   embed.setFooter({ text: 'Do you want to proceed with this sale?' });
@@ -1313,7 +1321,7 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
   }
   
   const subtotal = Math.round(currentPrice * shares);
-  const fee = calculateBuyFee(guildId, subtotal);
+  const fee = calculateBuyFee(guildId, subtotal, userId);
   totalCost = subtotal + fee;
   
   // Check and deduct balance
@@ -1322,7 +1330,7 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
     
     if (!hasEnough) {
       return interaction.editReply({ 
-        content: `❌ Insufficient funds! Need **${totalCost.toLocaleString()}** ${CURRENCY}`, 
+        content: `❌ Insufficient funds! Need **${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, 
         embeds: [], 
         components: [] 
       });
@@ -1334,8 +1342,8 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
   
   buyStock(userId, targetUserId, shares, currentPrice);
   logTransaction(userId, targetUserId, shares, currentPrice, 'BUY', Date.now());
-  recordPurchase(userId, targetUserId, shares, currentPrice);
-  recordPriceImpact(targetUserId, shares);
+  recordPurchase(guildId, userId, targetUserId, shares, currentPrice);
+  recordPriceImpact(guildId, targetUserId, shares);
   
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71)
@@ -1343,10 +1351,10 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
     .setDescription(`**${interaction.user.displayName}** bought **${shares}** shares of **${username}**`)
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .addFields(
-      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: 'Subtotal', value: `${subtotal.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: 'Fee', value: `${fee.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: 'Total Paid', value: `**${totalCost.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: 'Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: 'Fee', value: `${fee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: 'Total Paid', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
     );
   
   // Show market protection info
@@ -1424,7 +1432,7 @@ async function showSellView(interaction, guildId, userId) {
     
     options.push({
       label: username,
-      description: `${stock.shares} shares (${value.toLocaleString()} ${CURRENCY})`,
+      description: `${stock.shares} shares (${value.toLocaleString()} ${getCurrency(guildId)})`,
       value: stock.stock_user_id
     });
   }
@@ -1481,9 +1489,9 @@ async function showSellAmountButtons(interaction, guildId, userId, targetUserId,
   const embed = new EmbedBuilder()
     .setColor(0xe74c3c)
     .setTitle(`💰 Sell ${username}`)
-    .setDescription(`You own **${stock.shares}** shares\nCurrent value: **${totalValue.toLocaleString()}** ${CURRENCY}`)
+    .setDescription(`You own **${stock.shares}** shares\nCurrent value: **${totalValue.toLocaleString()}** ${getCurrency(guildId)}`)
     .addFields(
-      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}${lpNote}`, inline: true }
+      { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}${lpNote}`, inline: true }
     );
   
   // Create amount buttons based on shares owned
@@ -1586,9 +1594,9 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     ? Math.max(0.01, Math.round(baseSellPrice * (1 + lpSellStockMod / 100) * 100) / 100)
     : baseSellPrice;
   const grossValue = Math.round(currentPrice * shares);
-  const fee = calculateSellFee(guildId, grossValue);
+  const fee = calculateSellFee(guildId, grossValue, userId);
   
-  const consumedPurchases = consumePurchaseShares(userId, targetUserId, shares);
+  const consumedPurchases = consumePurchaseShares(guildId, userId, targetUserId, shares);
   const { totalTax } = calculateCapitalGainsTax(guildId, consumedPurchases, currentPrice);
   
   const netValue = Math.max(0, grossValue - fee - totalTax);
@@ -1599,10 +1607,25 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
   soldPrice = currentPrice;
   sharesSold = true;
   logTransaction(userId, targetUserId, shares, currentPrice, 'SELL', Date.now());
-  recordPriceImpact(targetUserId, -shares);
+  recordPriceImpact(guildId, targetUserId, -shares);
   
   if (isEnabled() && netValue > 0) {
     await addMoney(guildId, userId, netValue, `Sold ${shares} shares of ${username}`);
+  }
+
+  // --- Insider Trading Check ---
+  try {
+    const { checkInsiderTrading, addInfamy, announceInsiderTrading, getInfamySettings } = require('../infamy');
+    const infSettings = getInfamySettings(guildId);
+    if (infSettings && infSettings.enabled) {
+      const insiderResult = checkInsiderTrading(guildId, userId, targetUserId, currentPrice, shares);
+      if (insiderResult && insiderResult.detected) {
+        await addInfamy(guildId, userId, insiderResult.infamyGain, 'insider');
+        await announceInsiderTrading(interaction.client, guildId, userId, targetUserId, insiderResult.profitPercent, insiderResult.infamyGain);
+      }
+    }
+  } catch (e) {
+    console.error('[Infamy] Insider trading check error:', e);
   }
   
   const embed = new EmbedBuilder()
@@ -1611,9 +1634,9 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     .setDescription(`**${interaction.user.displayName}** sold **${shares}** shares of **${username}**`)
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .addFields(
-      { name: 'Gross Value', value: `${grossValue.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: 'Fees/Tax', value: `-${(fee + totalTax).toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: 'You Received', value: `**${netValue.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: 'Gross Value', value: `${grossValue.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: 'Fees/Tax', value: `-${(fee + totalTax).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: 'You Received', value: `**${netValue.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
     );
   
   // For modal confirmations, clear the ephemeral confirmation message
@@ -1652,11 +1675,11 @@ async function showSplitView(interaction, guildId, userId) {
   const embed = new EmbedBuilder()
     .setColor(splitCheck.canSplit ? 0x9b59b6 : 0xe74c3c)
     .setTitle('✂️ Stock Split')
-    .setDescription(`**Your Stock Price:** ${Math.round(stockPrice).toLocaleString()} ${CURRENCY}`);
+    .setDescription(`**Your Stock Price:** ${Math.round(stockPrice).toLocaleString()} ${getCurrency(guildId)}`);
   
   // Add requirements info
   embed.addFields(
-    { name: '📈 Min Price Required', value: `${settings.splitMinPrice.toLocaleString()} ${CURRENCY}`, inline: true },
+    { name: '📈 Min Price Required', value: `${settings.splitMinPrice.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
     { name: '⏱️ Cooldown', value: `${settings.splitCooldownHours} hours`, inline: true }
   );
   
@@ -1668,9 +1691,9 @@ async function showSplitView(interaction, guildId, userId) {
     
     embed.addFields({
       name: '📊 Split Results',
-      value: `**2:1** → ${price2to1.toLocaleString()} ${CURRENCY} (shares x2)\n` +
-             `**3:1** → ${price3to1.toLocaleString()} ${CURRENCY} (shares x3)\n` +
-             `**4:1** → ${price4to1.toLocaleString()} ${CURRENCY} (shares x4)`,
+      value: `**2:1** → ${price2to1.toLocaleString()} ${getCurrency(guildId)} (shares x2)\n` +
+             `**3:1** → ${price3to1.toLocaleString()} ${getCurrency(guildId)} (shares x3)\n` +
+             `**4:1** → ${price4to1.toLocaleString()} ${getCurrency(guildId)} (shares x4)`,
       inline: false
     });
     
@@ -1774,8 +1797,8 @@ async function executeStockSplit(interaction, guildId, userId, ratio) {
           .setTitle('✂️ Stock Split!')
           .setDescription(`**${interaction.user.username}** just performed a **${ratio}** stock split!`)
           .addFields(
-            { name: '💰 Price Before', value: `${Math.round(result.priceBefore).toLocaleString()} ${CURRENCY}`, inline: true },
-            { name: '💰 Price After', value: `${Math.round(newPrice).toLocaleString()} ${CURRENCY}`, inline: true },
+            { name: '💰 Price Before', value: `${Math.round(result.priceBefore).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+            { name: '💰 Price After', value: `${Math.round(newPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
             { name: '📈 Share Multiplier', value: `x${result.multiplier}`, inline: true },
             { name: '👥 Shareholders', value: `${result.shareholdersAffected} shareholders received additional shares`, inline: false }
           )
@@ -1794,8 +1817,8 @@ async function executeStockSplit(interaction, guildId, userId, ratio) {
     .setTitle('✂️ Stock Split Complete!')
     .setDescription(`You performed a **${ratio}** stock split!`)
     .addFields(
-      { name: '💰 Price Before', value: `${Math.round(result.priceBefore).toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '💰 Price After', value: `${Math.round(newPrice).toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💰 Price Before', value: `${Math.round(result.priceBefore).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Price After', value: `${Math.round(newPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '👥 Shareholders Affected', value: `${result.shareholdersAffected}`, inline: true },
       { name: '📈 Share Multiplier', value: `x${result.multiplier}`, inline: true }
     )
@@ -1841,7 +1864,7 @@ async function showPortfolioUserSelect(interaction, guildId, userId) {
   await interaction.update({ embeds: [embed], components: [selectRow, buttonRow] });
 }
 
-async function showPortfolioView(interaction, guildId, targetUserId, isDeferred = false) {
+async function showPortfolioView(interaction, guildId, targetUserId, isDeferred = false, page = 0) {
   // Helper to respond correctly based on deferred state
   const respond = (data) => isDeferred ? interaction.editReply(data) : interaction.update(data);
   
@@ -1901,11 +1924,18 @@ async function showPortfolioView(interaction, guildId, targetUserId, isDeferred 
   
   holdings.sort((a, b) => b.currentValue - a.currentValue);
   
-  const holdingsList = holdings.slice(0, 10).map((h, i) => {
+  const perPage = 10;
+  const totalPages = Math.ceil(holdings.length / perPage);
+  if (page < 0) page = 0;
+  if (page >= totalPages) page = totalPages - 1;
+  const start = page * perPage;
+  const pageHoldings = holdings.slice(start, start + perPage);
+  
+  const holdingsList = pageHoldings.map((h, i) => {
     const profitSign = h.profit >= 0 ? '+' : '';
     const profitEmoji = h.profit >= 0 ? '📈' : '📉';
-    return `**${i + 1}. ${h.username}** (${h.shares} shares @ ${Math.round(h.currentPrice).toLocaleString()} ${CURRENCY})\n` +
-           `   💵 Avg: ${Math.round(h.avgBuyPrice).toLocaleString()} | 💰 ${Math.round(h.currentValue).toLocaleString()} ${CURRENCY} ${profitEmoji} ${profitSign}${Math.round(h.profit).toLocaleString()}`;
+    return `**${start + i + 1}. ${h.username}** (${h.shares} shares @ ${Math.round(h.currentPrice).toLocaleString()} ${getCurrency(guildId)})\n` +
+           `   💵 Avg: ${Math.round(h.avgBuyPrice).toLocaleString()} | 💰 ${Math.round(h.currentValue).toLocaleString()} ${getCurrency(guildId)} ${profitEmoji} ${profitSign}${Math.round(h.profit).toLocaleString()}`;
   }).join('\n\n');
   
   const totalProfitSign = totalProfit >= 0 ? '+' : '';
@@ -1916,16 +1946,33 @@ async function showPortfolioView(interaction, guildId, targetUserId, isDeferred 
     .setTitle(`💼 ${targetUser.username}'s Portfolio`)
     .setDescription(holdingsList || 'No holdings')
     .addFields(
-      { name: '💰 Total Value', value: `${Math.round(totalValue).toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: `${totalProfitEmoji} Total P/L`, value: `${totalProfitSign}${Math.round(totalProfit).toLocaleString()} ${CURRENCY}`, inline: true }
+      { name: '💰 Total Value', value: `${Math.round(totalValue).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: `${totalProfitEmoji} Total P/L`, value: `${totalProfitSign}${Math.round(totalProfit).toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     )
-    .setFooter({ text: `${portfolio.length} total holdings` });
+    .setFooter({ text: `Page ${page + 1}/${totalPages} • ${portfolio.length} total holdings` });
   
   if (targetUser.displayAvatarURL()) {
     embed.setThumbnail(targetUser.displayAvatarURL({ dynamic: true }));
   }
   
-  const backButton = new ActionRowBuilder().addComponents(
+  const buttons = []
+  if (totalPages > 1) {
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(`stock_portfolio_page_${page - 1}_${targetUserId}`)
+        .setLabel('Previous')
+        .setEmoji('◀️')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(page === 0),
+      new ButtonBuilder()
+        .setCustomId(`stock_portfolio_page_${page + 1}_${targetUserId}`)
+        .setLabel('Next')
+        .setEmoji('▶️')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(page >= totalPages - 1)
+    );
+  }
+  buttons.push(
     new ButtonBuilder()
       .setCustomId('stock_panel_back')
       .setLabel('Back to Panel')
@@ -1933,7 +1980,9 @@ async function showPortfolioView(interaction, guildId, targetUserId, isDeferred 
       .setStyle(ButtonStyle.Secondary)
   );
   
-  await respond({ embeds: [embed], components: [backButton] });
+  const buttonRow = new ActionRowBuilder().addComponents(buttons);
+  
+  await respond({ embeds: [embed], components: [buttonRow] });
 }
 
 async function showHistoryView(interaction, guildId, userId) {
@@ -1948,18 +1997,18 @@ async function showHistoryView(interaction, guildId, userId) {
   const embed = new EmbedBuilder()
     .setColor(0x9b59b6)
     .setTitle('📜 Dividend & CEO Bonus History')
-    .setDescription(`**Combined Total Earnings:** ${grandTotal.toLocaleString()} ${CURRENCY}`);
+    .setDescription(`**Combined Total Earnings:** ${grandTotal.toLocaleString()} ${getCurrency(guildId)}`);
   
   embed.addFields({
     name: '💰 Total Dividends',
-    value: `**${totalReceived.toLocaleString()}** ${CURRENCY}`,
+    value: `**${totalReceived.toLocaleString()}** ${getCurrency(guildId)}`,
     inline: true
   });
   
   if (settings.selfDividendEnabled) {
     embed.addFields({
       name: '🎩 Total CEO Bonuses',
-      value: `**${totalCeoReceived.toLocaleString()}** ${CURRENCY}`,
+      value: `**${totalCeoReceived.toLocaleString()}** ${getCurrency(guildId)}`,
       inline: true
     });
   }
@@ -1975,7 +2024,7 @@ async function showHistoryView(interaction, guildId, userId) {
     let historyText = '';
     for (const [date, payouts] of Object.entries(grouped).slice(0, 5)) {
       const totalForDay = payouts.reduce((sum, p) => sum + p.dividend_amount, 0);
-      historyText += `**${date}** - ${totalForDay.toLocaleString()} ${CURRENCY} (${payouts.length} stocks)\n`;
+      historyText += `**${date}** - ${totalForDay.toLocaleString()} ${getCurrency(guildId)} (${payouts.length} stocks)\n`;
     }
     
     embed.addFields({
@@ -1987,7 +2036,7 @@ async function showHistoryView(interaction, guildId, userId) {
   if (ceoHistory.length > 0) {
     const ceoText = ceoHistory.map(h => {
       const date = new Date(h.payout_time).toLocaleDateString();
-      return `**${date}** - ${h.bonus_amount.toLocaleString()} ${CURRENCY}`;
+      return `**${date}** - ${h.bonus_amount.toLocaleString()} ${getCurrency(guildId)}`;
     }).join('\n');
     
     embed.addFields({
@@ -2055,7 +2104,7 @@ async function showShareholdersView(interaction, guildId, targetUserId, isDeferr
       .setColor(0xf39c12)
       .setTitle(`👥 Shareholders of ${targetUser.username}`)
       .setDescription('No one owns shares of this stock yet!')
-      .addFields({ name: '💰 Current Price', value: `**${Math.round(currentPrice).toLocaleString()}** ${CURRENCY}`, inline: true });
+      .addFields({ name: '💰 Current Price', value: `**${Math.round(currentPrice).toLocaleString()}** ${getCurrency(guildId)}`, inline: true });
     
     if (targetUser.displayAvatarURL()) {
       embed.setThumbnail(targetUser.displayAvatarURL({ dynamic: true }));
@@ -2094,7 +2143,7 @@ async function showShareholdersView(interaction, guildId, targetUserId, isDeferr
   
   const holdersList = holdersWithDetails.slice(0, 10).map((h, i) => {
     const percentage = ((h.shares / totalShares) * 100).toFixed(1);
-    return `**${i + 1}. ${h.username}**\n   📈 ${h.shares} shares (${percentage}%) | 💰 ${Math.round(h.value).toLocaleString()} ${CURRENCY}`;
+    return `**${i + 1}. ${h.username}**\n   📈 ${h.shares} shares (${percentage}%) | 💰 ${Math.round(h.value).toLocaleString()} ${getCurrency(guildId)}`;
   }).join('\n\n');
   
   const embed = new EmbedBuilder()
@@ -2102,9 +2151,9 @@ async function showShareholdersView(interaction, guildId, targetUserId, isDeferr
     .setTitle(`👥 Shareholders of ${targetUser.username}`)
     .setDescription(holdersList)
     .addFields(
-      { name: '💰 Price', value: `${Math.round(currentPrice).toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💰 Price', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '📈 Total Shares', value: `${totalShares}`, inline: true },
-      { name: '🏦 Market Cap', value: `${Math.round(totalValue).toLocaleString()} ${CURRENCY}`, inline: true }
+      { name: '🏦 Market Cap', value: `${Math.round(totalValue).toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     )
     .setFooter({ text: `${shareholders.length} total shareholders` });
   

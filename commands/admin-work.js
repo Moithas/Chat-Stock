@@ -1,19 +1,22 @@
-// Admin Work Panel - Work, Crime, Slut, Rob settings (Fully Modular)
+// Admin Work Panel - Work, Hunt, Lucky Penny, Rob settings (Fully Modular)
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, RoleSelectMenuBuilder } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 const { getWorkSettings, updateWorkSettings } = require('../work');
-const { getCrimeSettings, updateCrimeSettings } = require('../crime');
-const { getSlutSettings, updateSlutSettings } = require('../slut');
+const { getHuntSettings, updateHuntSettings } = require('../hunt');
+const { getShopItems, getShopItem, updateShopItem } = require('../items');
+const { getLuckyPennySettings, updateLuckyPennySettings, DEFAULT_SETTINGS: LP_DEFAULTS } = require('../luckypenny');
 const { getRobSettings, updateRobSettings, getImmuneRoles, addImmuneRole, removeImmuneRole } = require('../rob');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [
-  'admin_income_work', 'admin_income_crime', 'admin_income_slut',
+  'admin_income_work', 'admin_income_hunt', 'admin_income_lp',
   'work_toggle', 'work_edit_settings',
-  'crime_toggle', 'crime_edit_settings',
-  'slut_toggle', 'slut_edit_settings',
+  'hunt_toggle', 'hunt_edit_settings',
+  'hunt_manage_items', 'hunt_items_prev', 'hunt_items_next',
+  'back_hunt',
+  'admin_lp_toggle', 'admin_lp_edit_general', 'admin_lp_edit_buffs', 'admin_lp_edit_currency',
   'rob_toggle', 'rob_edit_settings', 'rob_immunity_settings', 'rob_add_immune_role', 'rob_clear_immune_roles', 'rob_defense_settings',
   'rob_defense_toggle', 'rob_defense_edit', 'back_rob_defense',
   'rob_target_cooldown',
@@ -22,8 +25,8 @@ const BUTTON_IDS = [
 
 const MODAL_IDS = [
   'modal_work_settings',
-  'modal_crime_settings',
-  'modal_slut_settings',
+  'modal_hunt_settings',
+  'modal_admin_lp_general', 'modal_admin_lp_buffs', 'modal_admin_lp_currency',
   'modal_rob_settings',
   'modal_rob_defense_settings',
   'modal_rob_target_cooldown'
@@ -33,12 +36,22 @@ const SELECT_IDS = [
   'rob_immunity_role_select'
 ];
 
+const HUNT_ITEMS_PER_PAGE = 8;
+const huntPagination = new Map();
+
 // ==================== MAIN INTERACTION HANDLER ====================
 async function handleInteraction(interaction, guildId) {
   const customId = interaction.customId;
   
   // Handle button interactions
   if (interaction.isButton()) {
+    // Dynamic hunt item toggle buttons
+    if (customId.startsWith('hunt_item_toggle_')) {
+      const itemId = parseInt(customId.split('hunt_item_toggle_')[1]);
+      await handleToggleHuntItem(interaction, guildId, itemId);
+      return true;
+    }
+
     if (!BUTTON_IDS.includes(customId)) return false;
     
     switch (customId) {
@@ -47,13 +60,13 @@ async function handleInteraction(interaction, guildId) {
         await interaction.deferUpdate();
         await showWorkPanel(interaction, guildId);
         return true;
-      case 'admin_income_crime':
+      case 'admin_income_hunt':
         await interaction.deferUpdate();
-        await showCrimePanel(interaction, guildId);
+        await showHuntPanel(interaction, guildId);
         return true;
-      case 'admin_income_slut':
+      case 'admin_income_lp':
         await interaction.deferUpdate();
-        await showSlutPanel(interaction, guildId);
+        await showLuckyPennyPanel(interaction, guildId);
         return true;
       case 'back_income':
         await interaction.deferUpdate();
@@ -68,20 +81,49 @@ async function handleInteraction(interaction, guildId) {
         await handleWorkEditSettings(interaction, guildId);
         return true;
         
-      // Crime buttons
-      case 'crime_toggle':
-        await handleCrimeToggle(interaction, guildId);
+      // Hunt buttons
+      case 'hunt_toggle':
+        await handleHuntToggle(interaction, guildId);
         return true;
-      case 'crime_edit_settings':
-        await handleCrimeEditSettings(interaction, guildId);
+      case 'hunt_edit_settings':
+        await handleHuntEditSettings(interaction, guildId);
+        return true;
+      case 'hunt_manage_items':
+        await interaction.deferUpdate();
+        await showHuntItemsPanel(interaction, guildId, 0);
+        return true;
+      case 'hunt_items_prev': {
+        await interaction.deferUpdate();
+        const stateKey = `${guildId}-${interaction.user.id}`;
+        const state = huntPagination.get(stateKey) || { page: 0 };
+        await showHuntItemsPanel(interaction, guildId, Math.max(0, state.page - 1));
+        return true;
+      }
+      case 'hunt_items_next': {
+        await interaction.deferUpdate();
+        const stateKey = `${guildId}-${interaction.user.id}`;
+        const state = huntPagination.get(stateKey) || { page: 0 };
+        await showHuntItemsPanel(interaction, guildId, state.page + 1);
+        return true;
+      }
+      case 'back_hunt':
+        await interaction.deferUpdate();
+        await showHuntPanel(interaction, guildId);
         return true;
         
-      // Slut buttons
-      case 'slut_toggle':
-        await handleSlutToggle(interaction, guildId);
+      // Lucky Penny buttons
+      case 'admin_lp_toggle':
+        await interaction.deferUpdate();
+        await handleLpToggle(interaction, guildId);
         return true;
-      case 'slut_edit_settings':
-        await handleSlutEditSettings(interaction, guildId);
+      case 'admin_lp_edit_general':
+        await handleLpEditGeneral(interaction, guildId);
+        return true;
+      case 'admin_lp_edit_buffs':
+        await handleLpEditBuffs(interaction, guildId);
+        return true;
+      case 'admin_lp_edit_currency':
+        await handleLpEditCurrency(interaction, guildId);
         return true;
         
       // Rob buttons
@@ -131,11 +173,17 @@ async function handleInteraction(interaction, guildId) {
       case 'modal_work_settings':
         await handleWorkSettingsModal(interaction, guildId);
         return true;
-      case 'modal_crime_settings':
-        await handleCrimeSettingsModal(interaction, guildId);
+      case 'modal_hunt_settings':
+        await handleHuntSettingsModal(interaction, guildId);
         return true;
-      case 'modal_slut_settings':
-        await handleSlutSettingsModal(interaction, guildId);
+      case 'modal_admin_lp_general':
+        await handleLpGeneralModal(interaction, guildId);
+        return true;
+      case 'modal_admin_lp_buffs':
+        await handleLpBuffsModal(interaction, guildId);
+        return true;
+      case 'modal_admin_lp_currency':
+        await handleLpCurrencyModal(interaction, guildId);
         return true;
       case 'modal_rob_settings':
         await handleRobSettingsModal(interaction, guildId);
@@ -164,10 +212,10 @@ async function handleInteraction(interaction, guildId) {
 
 // ==================== INCOME PANEL ====================
 async function showIncomePanel(interaction, guildId) {
-  let workSettings, crimeSettings, slutSettings;
+  let workSettings, huntSettings, lpSettings;
   try { workSettings = getWorkSettings(guildId); } catch { workSettings = { enabled: false }; }
-  try { crimeSettings = getCrimeSettings(guildId); } catch { crimeSettings = { enabled: false }; }
-  try { slutSettings = getSlutSettings(guildId); } catch { slutSettings = { enabled: false }; }
+  try { huntSettings = getHuntSettings(guildId); } catch { huntSettings = { enabled: false }; }
+  try { lpSettings = getLuckyPennySettings(guildId); } catch { lpSettings = { enabled: false }; }
   
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
@@ -175,8 +223,8 @@ async function showIncomePanel(interaction, guildId) {
     .setDescription('Configure income commands - safe and risky ways to earn money')
     .addFields(
       { name: '💼 Work', value: workSettings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-      { name: '🔫 Crime', value: crimeSettings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-      { name: '💋 Slut', value: slutSettings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true }
+      { name: '🏹 Hunt', value: huntSettings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+      { name: '🪙 Lucky Penny', value: lpSettings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true }
     );
 
   const workBtn = new ButtonBuilder()
@@ -184,14 +232,14 @@ async function showIncomePanel(interaction, guildId) {
     .setLabel('💼 Work')
     .setStyle(ButtonStyle.Primary);
 
-  const crimeBtn = new ButtonBuilder()
-    .setCustomId('admin_income_crime')
-    .setLabel('🔫 Crime')
+  const huntBtn = new ButtonBuilder()
+    .setCustomId('admin_income_hunt')
+    .setLabel('🏹 Hunt')
     .setStyle(ButtonStyle.Primary);
 
-  const slutBtn = new ButtonBuilder()
-    .setCustomId('admin_income_slut')
-    .setLabel('💋 Slut')
+  const lpBtn = new ButtonBuilder()
+    .setCustomId('admin_income_lp')
+    .setLabel('🪙 Lucky Penny')
     .setStyle(ButtonStyle.Primary);
 
   const backBtn = new ButtonBuilder()
@@ -199,7 +247,7 @@ async function showIncomePanel(interaction, guildId) {
     .setLabel('◀️ Back')
     .setStyle(ButtonStyle.Secondary);
 
-  const row = new ActionRowBuilder().addComponents(workBtn, crimeBtn, slutBtn, backBtn);
+  const row = new ActionRowBuilder().addComponents(workBtn, huntBtn, lpBtn, backBtn);
 
   await interaction.editReply({ embeds: [embed], components: [row] });
 }
@@ -305,253 +353,504 @@ function createWorkSettingsModal(settings) {
     );
 }
 
-// ==================== CRIME PANEL ====================
-async function showCrimePanel(interaction, guildId) {
-  let settings;
-  try {
-    settings = getCrimeSettings(guildId);
-  } catch {
-    settings = { enabled: false, minReward: 100, maxReward: 500, cooldownHours: 4, successRate: 50, fineMinPercent: 15, fineMaxPercent: 35 };
+// ==================== HUNT PANEL ====================
+async function showHuntPanel(interaction, guildId) {
+  const settings = getHuntSettings(guildId);
+  const totalWeight = settings.itemChance + settings.currencyChance + settings.nothingChance;
+
+  const embed = new EmbedBuilder()
+    .setColor(settings.enabled ? 0x2ecc71 : 0xe74c3c)
+    .setTitle('🏹 Hunt Settings')
+    .setDescription('Configure the hunt (random item/currency drops from the income panel)')
+    .addFields(
+      { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+      { name: '⏱️ Cooldown', value: `${settings.cooldownMinutes} minutes`, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true },
+      { name: '💰 Currency Range', value: `${settings.minCurrency.toLocaleString()} - ${settings.maxCurrency.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true },
+      { name: '\u200b', value: '\u200b', inline: true },
+      { name: '🎁 Item Chance', value: `${settings.itemChance}/${totalWeight} (${Math.round(settings.itemChance / totalWeight * 100)}%)`, inline: true },
+      { name: '💵 Currency Chance', value: `${settings.currencyChance}/${totalWeight} (${Math.round(settings.currencyChance / totalWeight * 100)}%)`, inline: true },
+      { name: '❌ Nothing Chance', value: `${settings.nothingChance}/${totalWeight} (${Math.round(settings.nothingChance / totalWeight * 100)}%)`, inline: true }
+    );
+
+  const row = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId('hunt_toggle')
+        .setLabel(settings.enabled ? 'Disable' : 'Enable')
+        .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success)
+        .setEmoji(settings.enabled ? '❌' : '✅'),
+      new ButtonBuilder()
+        .setCustomId('hunt_edit_settings')
+        .setLabel('Edit Settings')
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji('⚙️'),
+      new ButtonBuilder()
+        .setCustomId('hunt_manage_items')
+        .setLabel('Manage Eligible Items')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('🎁'),
+      new ButtonBuilder()
+        .setCustomId('back_income')
+        .setLabel('Back')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('◀️')
+    );
+
+  await interaction.editReply({ embeds: [embed], components: [row] });
+}
+
+async function handleHuntToggle(interaction, guildId) {
+  const settings = getHuntSettings(guildId);
+  updateHuntSettings(guildId, { enabled: !settings.enabled });
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'HUNT_TOGGLE',
+    `Hunt ${!settings.enabled ? 'enabled' : 'disabled'}`);
+  await interaction.deferUpdate();
+  await showHuntPanel(interaction, guildId);
+}
+
+async function handleHuntEditSettings(interaction, guildId) {
+  const settings = getHuntSettings(guildId);
+  const modal = createHuntSettingsModal(settings);
+  await interaction.showModal(modal);
+}
+
+async function handleHuntSettingsModal(interaction, guildId) {
+  const cooldownMinutes = parseInt(interaction.fields.getTextInputValue('cooldown_minutes')) || 60;
+  const minCurrency = parseInt(interaction.fields.getTextInputValue('min_currency')) || 50;
+  const maxCurrency = parseInt(interaction.fields.getTextInputValue('max_currency')) || 300;
+
+  const chancesRaw = interaction.fields.getTextInputValue('chances');
+  const chanceParts = chancesRaw.split('/').map(s => parseInt(s.trim()));
+
+  let itemChance = 15, currencyChance = 50, nothingChance = 35;
+  if (chanceParts.length === 3 && chanceParts.every(n => !isNaN(n) && n >= 0)) {
+    itemChance = chanceParts[0];
+    currencyChance = chanceParts[1];
+    nothingChance = chanceParts[2];
   }
-  
-  const embed = new EmbedBuilder()
-    .setColor(0x3498db)
-    .setTitle('🔫 Crime Settings')
-    .setDescription('Configure the /crime command (risky income with chance of fines)')
-    .addFields(
-      { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-      { name: '💵 Min Reward', value: (settings.minReward || 100).toLocaleString(), inline: true },
-      { name: '💰 Max Reward', value: (settings.maxReward || 500).toLocaleString(), inline: true },
-      { name: '⏱️ Cooldown', value: `${settings.cooldownHours || 4} hours`, inline: true },
-      { name: '🎯 Success Rate', value: `${settings.successRate || 50}%`, inline: true },
-      { name: '💸 Fine Range', value: `${settings.fineMinPercent || 15}% - ${settings.fineMaxPercent || 35}%`, inline: true }
-    );
 
-  const toggleBtn = new ButtonBuilder()
-    .setCustomId('crime_toggle')
-    .setLabel(settings.enabled ? 'Disable' : 'Enable')
-    .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success);
+  if (minCurrency > maxCurrency) {
+    return interaction.reply({ content: '❌ Minimum currency cannot be greater than maximum!', flags: 64 });
+  }
 
-  const editBtn = new ButtonBuilder()
-    .setCustomId('crime_edit_settings')
-    .setLabel('⚙️ Edit Settings')
-    .setStyle(ButtonStyle.Primary);
+  const totalChance = itemChance + currencyChance + nothingChance;
+  if (totalChance <= 0) {
+    return interaction.reply({ content: '❌ At least one chance value must be greater than 0!', flags: 64 });
+  }
 
-  const backBtn = new ButtonBuilder()
-    .setCustomId('back_income')
-    .setLabel('◀️ Back')
-    .setStyle(ButtonStyle.Secondary);
+  updateHuntSettings(guildId, {
+    cooldownMinutes: Math.max(1, cooldownMinutes),
+    minCurrency: Math.max(0, minCurrency),
+    maxCurrency: Math.max(1, maxCurrency),
+    itemChance,
+    currencyChance,
+    nothingChance
+  });
 
-  const row = new ActionRowBuilder().addComponents(toggleBtn, editBtn, backBtn);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'HUNT_SETTINGS',
+    `Updated hunt: cooldown=${cooldownMinutes}m, currency=${minCurrency}-${maxCurrency}, chances=${itemChance}/${currencyChance}/${nothingChance}`);
 
-  await interaction.editReply({ embeds: [embed], components: [row] });
+  await interaction.reply({ content: '✅ Hunt settings updated!', flags: 64 });
+  await showHuntPanel(interaction, guildId);
 }
 
-async function handleCrimeToggle(interaction, guildId) {
-  const settings = getCrimeSettings(guildId);
-  const newEnabled = !settings.enabled;
-  updateCrimeSettings(guildId, { enabled: newEnabled });
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `${newEnabled ? 'Enabled' : 'Disabled'} crime command`);
-  await interaction.deferUpdate();
-  await showCrimePanel(interaction, guildId);
-}
-
-async function handleCrimeEditSettings(interaction, guildId) {
-  const settings = getCrimeSettings(guildId);
-  const modal = createCrimeSettingsModal(settings);
-  await interaction.showModal(modal);
-}
-
-async function handleCrimeSettingsModal(interaction, guildId) {
-  const minReward = parseInt(interaction.fields.getTextInputValue('min_reward')) || 100;
-  const maxReward = parseInt(interaction.fields.getTextInputValue('max_reward')) || 500;
-  const cooldownHours = parseFloat(interaction.fields.getTextInputValue('cooldown_hours')) || 4;
-  const successRate = parseInt(interaction.fields.getTextInputValue('success_rate')) || 50;
-  
-  // Parse fine range (format: "min-max" like "10-30")
-  const fineRangeInput = interaction.fields.getTextInputValue('fine_range') || '10-30';
-  const [fineMinPercent, fineMaxPercent] = fineRangeInput.split('-').map(s => parseInt(s.trim()));
-  
-  updateCrimeSettings(guildId, { minReward, maxReward, cooldownHours, successRate, fineMinPercent: fineMinPercent || 10, fineMaxPercent: fineMaxPercent || 30 });
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated crime settings`);
-  
-  await interaction.reply({ content: '✅ Crime settings updated!', flags: 64 });
-  await showCrimePanel(interaction, guildId);
-}
-
-function createCrimeSettingsModal(settings) {
+function createHuntSettingsModal(settings) {
   return new ModalBuilder()
-    .setCustomId('modal_crime_settings')
-    .setTitle('Crime Settings')
+    .setCustomId('modal_hunt_settings')
+    .setTitle('Hunt Settings')
     .addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId('min_reward')
-          .setLabel('Minimum Reward')
-          .setPlaceholder('100')
-          .setValue(String(settings.minReward || 100))
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('max_reward')
-          .setLabel('Maximum Reward')
-          .setPlaceholder('500')
-          .setValue(String(settings.maxReward || 500))
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('cooldown_hours')
-          .setLabel('Cooldown (hours)')
-          .setPlaceholder('4')
-          .setValue(String(settings.cooldownHours || 4))
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('success_rate')
-          .setLabel('Success Rate (%)')
-          .setPlaceholder('50')
-          .setValue(String(settings.successRate || 50))
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('fine_range')
-          .setLabel('Fine Range (% of balance, min-max)')
-          .setPlaceholder('10-30')
-          .setValue(`${settings.fineMinPercent || 10}-${settings.fineMaxPercent || 30}`)
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      )
-    );
-}
-
-// ==================== SLUT PANEL ====================
-async function showSlutPanel(interaction, guildId) {
-  const settings = getSlutSettings(guildId);
-  
-  const embed = new EmbedBuilder()
-    .setColor(0x3498db)
-    .setTitle('💋 Slut Settings')
-    .setDescription('Configure the /slut command (adult content - disabled by default)')
-    .addFields(
-      { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-      { name: '💵 Min Reward', value: settings.minReward.toLocaleString(), inline: true },
-      { name: '💰 Max Reward', value: settings.maxReward.toLocaleString(), inline: true },
-      { name: '⏱️ Cooldown', value: `${settings.cooldownHours} hours`, inline: true },
-      { name: '🎯 Success Rate', value: `${settings.successRate}%`, inline: true },
-      { name: '💸 Fine Range', value: `${settings.fineMinPercent}% - ${settings.fineMaxPercent}%`, inline: true }
-    );
-
-  const toggleBtn = new ButtonBuilder()
-    .setCustomId('slut_toggle')
-    .setLabel(settings.enabled ? 'Disable' : 'Enable')
-    .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success);
-
-  const editBtn = new ButtonBuilder()
-    .setCustomId('slut_edit_settings')
-    .setLabel('⚙️ Edit Settings')
-    .setStyle(ButtonStyle.Primary);
-
-  const backBtn = new ButtonBuilder()
-    .setCustomId('back_income')
-    .setLabel('◀️ Back')
-    .setStyle(ButtonStyle.Secondary);
-
-  const row = new ActionRowBuilder().addComponents(toggleBtn, editBtn, backBtn);
-
-  await interaction.editReply({ embeds: [embed], components: [row] });
-}
-
-async function handleSlutToggle(interaction, guildId) {
-  const settings = getSlutSettings(guildId);
-  const newEnabled = !settings.enabled;
-  updateSlutSettings(guildId, { enabled: newEnabled });
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `${newEnabled ? 'Enabled' : 'Disabled'} slut command`);
-  await interaction.deferUpdate();
-  await showSlutPanel(interaction, guildId);
-}
-
-async function handleSlutEditSettings(interaction, guildId) {
-  const settings = getSlutSettings(guildId);
-  const modal = createSlutSettingsModal(settings);
-  await interaction.showModal(modal);
-}
-
-async function handleSlutSettingsModal(interaction, guildId) {
-  const minReward = parseInt(interaction.fields.getTextInputValue('min_reward')) || 100;
-  const maxReward = parseInt(interaction.fields.getTextInputValue('max_reward')) || 500;
-  const cooldownHours = parseFloat(interaction.fields.getTextInputValue('cooldown_hours')) || 2;
-  const successRate = parseInt(interaction.fields.getTextInputValue('success_rate')) || 60;
-  
-  // Parse fine range (format: "min-max" like "10-30")
-  const fineRangeInput = interaction.fields.getTextInputValue('fine_range') || '10-30';
-  const [fineMinPercent, fineMaxPercent] = fineRangeInput.split('-').map(s => parseInt(s.trim()));
-  
-  updateSlutSettings(guildId, { minReward, maxReward, cooldownHours, successRate, fineMinPercent: fineMinPercent || 10, fineMaxPercent: fineMaxPercent || 30 });
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated slut settings`);
-  
-  await interaction.reply({ content: '✅ Slut settings updated!', flags: 64 });
-  await showSlutPanel(interaction, guildId);
-}
-
-function createSlutSettingsModal(settings) {
-  return new ModalBuilder()
-    .setCustomId('modal_slut_settings')
-    .setTitle('Slut Settings')
-    .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('min_reward')
-          .setLabel('Minimum Reward')
-          .setPlaceholder('100')
-          .setValue(String(settings.minReward || 100))
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('max_reward')
-          .setLabel('Maximum Reward')
-          .setPlaceholder('500')
-          .setValue(String(settings.maxReward || 500))
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('cooldown_hours')
-          .setLabel('Cooldown (hours)')
-          .setPlaceholder('2')
-          .setValue(String(settings.cooldownHours || 2))
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('success_rate')
-          .setLabel('Success Rate (%)')
+          .setCustomId('cooldown_minutes')
+          .setLabel('Cooldown (minutes)')
           .setPlaceholder('60')
-          .setValue(String(settings.successRate || 60))
+          .setValue(String(settings.cooldownMinutes))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId('fine_range')
-          .setLabel('Fine Range (% of balance, min-max)')
-          .setPlaceholder('10-30')
-          .setValue(`${settings.fineMinPercent || 10}-${settings.fineMaxPercent || 30}`)
+          .setCustomId('min_currency')
+          .setLabel('Minimum Currency Reward')
+          .setPlaceholder('50')
+          .setValue(String(settings.minCurrency))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('max_currency')
+          .setLabel('Maximum Currency Reward')
+          .setPlaceholder('300')
+          .setValue(String(settings.maxCurrency))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('chances')
+          .setLabel('Chances: Item / Currency / Nothing')
+          .setPlaceholder('15 / 50 / 35')
+          .setValue(`${settings.itemChance} / ${settings.currencyChance} / ${settings.nothingChance}`)
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
       )
     );
+}
+
+// ==================== HUNT ITEM ELIGIBILITY ====================
+async function showHuntItemsPanel(interaction, guildId, page = 0) {
+  const allItems = getShopItems(guildId, null, false);
+  const totalPages = Math.max(1, Math.ceil(allItems.length / HUNT_ITEMS_PER_PAGE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const startIndex = currentPage * HUNT_ITEMS_PER_PAGE;
+  const pageItems = allItems.slice(startIndex, startIndex + HUNT_ITEMS_PER_PAGE);
+
+  const stateKey = `${guildId}-${interaction.user.id}`;
+  huntPagination.set(stateKey, { page: currentPage });
+
+  const eligibleCount = allItems.filter(i => i.hunt_eligible === 1).length;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x3498db)
+    .setTitle('🏹 Hunt-Eligible Items')
+    .setDescription(`Toggle which items can drop from hunt.\n**${eligibleCount}** of **${allItems.length}** items are eligible.`)
+    .setFooter({ text: `Page ${currentPage + 1}/${totalPages}` });
+
+  if (pageItems.length === 0) {
+    embed.setDescription(embed.data.description + '\n\nNo shop items exist yet. Create items in the Item Shop admin panel first.');
+  } else {
+    let desc = embed.data.description + '\n\n';
+    for (const item of pageItems) {
+      const eligible = item.hunt_eligible === 1;
+      const status = eligible ? '🏹' : '⬛';
+      const shopStatus = item.enabled === 1 ? '' : ' *(not in shop)*';
+      desc += `${status} ${item.emoji} **${item.name}**${shopStatus}\n`;
+    }
+    embed.setDescription(desc);
+  }
+
+  const components = [];
+
+  if (pageItems.length > 0) {
+    const row1Items = pageItems.slice(0, 4);
+    const row2Items = pageItems.slice(4, 8);
+
+    if (row1Items.length > 0) {
+      const row1 = new ActionRowBuilder();
+      for (const item of row1Items) {
+        const eligible = item.hunt_eligible === 1;
+        row1.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`hunt_item_toggle_${item.id}`)
+            .setLabel(item.name.substring(0, 20))
+            .setStyle(eligible ? ButtonStyle.Success : ButtonStyle.Secondary)
+            .setEmoji(eligible ? '🏹' : '⬛')
+        );
+      }
+      components.push(row1);
+    }
+
+    if (row2Items.length > 0) {
+      const row2 = new ActionRowBuilder();
+      for (const item of row2Items) {
+        const eligible = item.hunt_eligible === 1;
+        row2.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`hunt_item_toggle_${item.id}`)
+            .setLabel(item.name.substring(0, 20))
+            .setStyle(eligible ? ButtonStyle.Success : ButtonStyle.Secondary)
+            .setEmoji(eligible ? '🏹' : '⬛')
+        );
+      }
+      components.push(row2);
+    }
+  }
+
+  const navRow = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId('hunt_items_prev')
+        .setLabel('◀️')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(currentPage === 0),
+      new ButtonBuilder()
+        .setCustomId('hunt_items_next')
+        .setLabel('▶️')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(currentPage >= totalPages - 1),
+      new ButtonBuilder()
+        .setCustomId('back_hunt')
+        .setLabel('Back to Hunt')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('◀️')
+    );
+  components.push(navRow);
+
+  await interaction.editReply({ embeds: [embed], components });
+}
+
+async function handleToggleHuntItem(interaction, guildId, itemId) {
+  const item = getShopItem(guildId, itemId);
+  if (!item) {
+    return interaction.reply({ content: '❌ Item not found!', flags: 64 });
+  }
+
+  const currentEligible = item.hunt_eligible === 1;
+  updateShopItem(guildId, itemId, { hunt_eligible: currentEligible ? 0 : 1 });
+
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'HUNT_ITEM_TOGGLE',
+    `${currentEligible ? 'Removed from' : 'Added to'} hunt pool: ${item.name}`);
+
+  await interaction.deferUpdate();
+  const stateKey = `${guildId}-${interaction.user.id}`;
+  const state = huntPagination.get(stateKey) || { page: 0 };
+  await showHuntItemsPanel(interaction, guildId, state.page);
+}
+
+// ==================== LUCKY PENNY PANEL ====================
+async function showLuckyPennyPanel(interaction, guildId) {
+  const settings = getLuckyPennySettings(guildId);
+  
+  const embed = new EmbedBuilder()
+    .setColor(settings.enabled ? 0xf1c40f : 0x95a5a6)
+    .setTitle('🪙 Lucky Penny Settings')
+    .setDescription('Configure the Lucky Penny buff/debuff/currency roller')
+    .addFields(
+      { name: '⚙️ General', value: 
+        `Status: **${settings.enabled ? '✅ Enabled' : '❌ Disabled'}**\n` +
+        `Cooldown: **${settings.cooldownHours}** hours\n` +
+        `Nothing Cooldown: **${settings.nothingCooldownHours}** hours`,
+        inline: true 
+      },
+      { name: '🎲 Buff/Debuff Range', value: 
+        `Strength: **${settings.minBuffPercent}%** - **${settings.maxBuffPercent}%**\n` +
+        `Duration: **${settings.minDurationHours}h** - **${settings.maxDurationHours}h**`,
+        inline: true 
+      },
+      { name: `💰 Currency Range`, value: 
+        `Min: **${settings.minCurrency.toLocaleString()}** ${getCurrency(guildId)}\n` +
+        `Max: **${settings.maxCurrency.toLocaleString()}** ${getCurrency(guildId)}`,
+        inline: true 
+      },
+      { name: '📊 Outcome Odds', value: 
+        `🎲 Buff or Debuff: **33.3%**\n` +
+        `💰 Currency: **33.3%**\n` +
+        `💨 Nothing: **33.3%**\n` +
+        `_(Buff vs Debuff is 50/50 within the buff outcome)_`,
+        inline: false 
+      }
+    )
+    .setFooter({ text: 'Lucky Penny buffs stack with item effects • Stored in active_effects table' });
+
+  const toggleBtn = new ButtonBuilder()
+    .setCustomId('admin_lp_toggle')
+    .setLabel(settings.enabled ? 'Disable' : 'Enable')
+    .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success)
+    .setEmoji(settings.enabled ? '❌' : '✅');
+
+  const editGeneralBtn = new ButtonBuilder()
+    .setCustomId('admin_lp_edit_general')
+    .setLabel('Cooldown')
+    .setStyle(ButtonStyle.Primary)
+    .setEmoji('⏱️');
+
+  const editBuffsBtn = new ButtonBuilder()
+    .setCustomId('admin_lp_edit_buffs')
+    .setLabel('Buff Settings')
+    .setStyle(ButtonStyle.Primary)
+    .setEmoji('🎲');
+
+  const editCurrencyBtn = new ButtonBuilder()
+    .setCustomId('admin_lp_edit_currency')
+    .setLabel('Currency Settings')
+    .setStyle(ButtonStyle.Primary)
+    .setEmoji('💰');
+
+  const backBtn = new ButtonBuilder()
+    .setCustomId('back_income')
+    .setLabel('Back')
+    .setStyle(ButtonStyle.Secondary)
+    .setEmoji('◀️');
+
+  const row1 = new ActionRowBuilder().addComponents(toggleBtn, editGeneralBtn, editBuffsBtn, editCurrencyBtn);
+  const row2 = new ActionRowBuilder().addComponents(backBtn);
+
+  await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+}
+
+async function handleLpToggle(interaction, guildId) {
+  const settings = getLuckyPennySettings(guildId);
+  const newEnabled = !settings.enabled;
+  updateLuckyPennySettings(guildId, { enabled: newEnabled });
+  logAdminAction(guildId, interaction.user.id, interaction.user.username,
+    `${newEnabled ? 'Enabled' : 'Disabled'} Lucky Penny system`);
+  await showLuckyPennyPanel(interaction, guildId);
+}
+
+async function handleLpEditGeneral(interaction, guildId) {
+  const settings = getLuckyPennySettings(guildId);
+  
+  const modal = new ModalBuilder()
+    .setCustomId('modal_admin_lp_general')
+    .setTitle('Edit Lucky Penny Cooldown');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('cooldown_hours')
+        .setLabel('Cooldown (hours)')
+        .setStyle(TextInputStyle.Short)
+        .setValue(String(settings.cooldownHours))
+        .setPlaceholder('8')
+        .setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('nothing_cooldown_hours')
+        .setLabel('Nothing Cooldown (hours) — reduced CD')
+        .setStyle(TextInputStyle.Short)
+        .setValue(String(settings.nothingCooldownHours))
+        .setPlaceholder('2')
+        .setRequired(true)
+    )
+  );
+
+  await interaction.showModal(modal);
+}
+
+async function handleLpGeneralModal(interaction, guildId) {
+  const cooldownHours = parseFloat(interaction.fields.getTextInputValue('cooldown_hours')) || LP_DEFAULTS.cooldownHours;
+  const nothingCooldownHours = parseFloat(interaction.fields.getTextInputValue('nothing_cooldown_hours')) || LP_DEFAULTS.nothingCooldownHours;
+
+  updateLuckyPennySettings(guildId, {
+    cooldownHours: Math.max(0.5, cooldownHours),
+    nothingCooldownHours: Math.max(0, Math.min(nothingCooldownHours, cooldownHours))
+  });
+
+  logAdminAction(guildId, interaction.user.id, interaction.user.username,
+    `Updated Lucky Penny cooldown: ${cooldownHours}h (nothing: ${nothingCooldownHours}h)`);
+
+  await interaction.deferUpdate();
+  await showLuckyPennyPanel(interaction, guildId);
+}
+
+async function handleLpEditBuffs(interaction, guildId) {
+  const settings = getLuckyPennySettings(guildId);
+  
+  const modal = new ModalBuilder()
+    .setCustomId('modal_admin_lp_buffs')
+    .setTitle('Edit Buff/Debuff Settings');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('min_percent')
+        .setLabel('Min Buff/Debuff % (strength)')
+        .setStyle(TextInputStyle.Short)
+        .setValue(String(settings.minBuffPercent))
+        .setPlaceholder('10')
+        .setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('max_percent')
+        .setLabel('Max Buff/Debuff % (strength)')
+        .setStyle(TextInputStyle.Short)
+        .setValue(String(settings.maxBuffPercent))
+        .setPlaceholder('30')
+        .setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('min_duration')
+        .setLabel('Min Duration (hours)')
+        .setStyle(TextInputStyle.Short)
+        .setValue(String(settings.minDurationHours))
+        .setPlaceholder('2')
+        .setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('max_duration')
+        .setLabel('Max Duration (hours)')
+        .setStyle(TextInputStyle.Short)
+        .setValue(String(settings.maxDurationHours))
+        .setPlaceholder('8')
+        .setRequired(true)
+    )
+  );
+
+  await interaction.showModal(modal);
+}
+
+async function handleLpBuffsModal(interaction, guildId) {
+  const minPercent = parseInt(interaction.fields.getTextInputValue('min_percent')) || LP_DEFAULTS.minBuffPercent;
+  const maxPercent = parseInt(interaction.fields.getTextInputValue('max_percent')) || LP_DEFAULTS.maxBuffPercent;
+  const minDuration = parseInt(interaction.fields.getTextInputValue('min_duration')) || LP_DEFAULTS.minDurationHours;
+  const maxDuration = parseInt(interaction.fields.getTextInputValue('max_duration')) || LP_DEFAULTS.maxDurationHours;
+
+  updateLuckyPennySettings(guildId, {
+    minBuffPercent: Math.max(1, Math.min(minPercent, 100)),
+    maxBuffPercent: Math.max(1, Math.min(Math.max(maxPercent, minPercent), 100)),
+    minDurationHours: Math.max(1, minDuration),
+    maxDurationHours: Math.max(Math.max(1, minDuration), maxDuration)
+  });
+
+  logAdminAction(guildId, interaction.user.id, interaction.user.username,
+    `Updated Lucky Penny buffs: ${minPercent}-${maxPercent}% strength, ${minDuration}-${maxDuration}h duration`);
+
+  await interaction.deferUpdate();
+  await showLuckyPennyPanel(interaction, guildId);
+}
+
+async function handleLpEditCurrency(interaction, guildId) {
+  const settings = getLuckyPennySettings(guildId);
+  
+  const modal = new ModalBuilder()
+    .setCustomId('modal_admin_lp_currency')
+    .setTitle('Edit Currency Reward Range');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('min_currency')
+        .setLabel('Min Currency Reward')
+        .setStyle(TextInputStyle.Short)
+        .setValue(String(settings.minCurrency))
+        .setPlaceholder('500')
+        .setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('max_currency')
+        .setLabel('Max Currency Reward')
+        .setStyle(TextInputStyle.Short)
+        .setValue(String(settings.maxCurrency))
+        .setPlaceholder('1500')
+        .setRequired(true)
+    )
+  );
+
+  await interaction.showModal(modal);
+}
+
+async function handleLpCurrencyModal(interaction, guildId) {
+  const minCurrency = parseInt(interaction.fields.getTextInputValue('min_currency')) || LP_DEFAULTS.minCurrency;
+  const maxCurrency = parseInt(interaction.fields.getTextInputValue('max_currency')) || LP_DEFAULTS.maxCurrency;
+
+  updateLuckyPennySettings(guildId, {
+    minCurrency: Math.max(0, minCurrency),
+    maxCurrency: Math.max(minCurrency, maxCurrency)
+  });
+
+  logAdminAction(guildId, interaction.user.id, interaction.user.username,
+    `Updated Lucky Penny currency range: ${minCurrency.toLocaleString()} - ${maxCurrency.toLocaleString()}`);
+
+  await interaction.deferUpdate();
+  await showLuckyPennyPanel(interaction, guildId);
 }
 
 // ==================== ROB PANEL ====================
@@ -972,11 +1271,10 @@ module.exports = {
   handleInteraction,
   showIncomePanel,
   showWorkPanel,
-  showCrimePanel,
-  showSlutPanel,
+  showHuntPanel,
+  showLuckyPennyPanel,
   showRobPanel,
   createWorkSettingsModal,
-  createCrimeSettingsModal,
-  createSlutSettingsModal,
+  createHuntSettingsModal,
   createRobSettingsModal
 };

@@ -1,6 +1,7 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
+const { getSupportServerUrl } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Help page content
 const helpPages = {
@@ -13,7 +14,7 @@ const helpPages = {
         name: '🎯 Getting Started',
         value: 
           `1. **Chat actively** - Your stock price rises with messages\n` +
-          `2. **Check your balance** - Use \`/balance\` to see your ${CURRENCY}\n` +
+          `2. **Check your balance** - Use \`/balance\` to see your money\n` +
           `3. **Deposit to bank** - Use \`/deposit\` to protect your money\n` +
           `4. **Buy stocks** - Invest in active chatters with \`/stock buy\`\n` +
           `5. **Earn income** - Use \`/income\` commands when off cooldown`,
@@ -22,7 +23,7 @@ const helpPages = {
       {
         name: '💰 Ways to Earn Money',
         value: 
-          `• **Work / Crime** - Steady or risky income\n` +
+          `• **Work / Hunt** - Steady income or random loot drops\n` +
           `• **Lucky Penny** - Roll for random buffs, debuffs, or cash\n` +
           `• **Gambling** - Blackjack, Roulette, Poker, SYN & more\n` +
           `• **Stock Trading** - Buy low, sell high\n` +
@@ -211,12 +212,12 @@ const helpPages = {
         inline: true
       },
       {
-        name: '🔫 Crime',
+        name: '🏹 Hunt',
         value: 
-          `**High Risk**\n` +
-          `• Highest potential rewards\n` +
-          `• Higher chance of failure\n` +
-          `• Fines are % of your balance`,
+          `**Random Drops**\n` +
+          `• Chance to find items, currency, or nothing\n` +
+          `• No risk — just a cooldown\n` +
+          `• Eligible items set by admins`,
         inline: true
       },
       {
@@ -531,75 +532,158 @@ const helpPages = {
       }
     ]
   },
+
+  infamy: {
+    title: '🏴‍☠️ Infamy & Bounty System',
+    color: 0x8b0000,
+    description: `Criminal activity builds **Infamy** — a reputation score that tracks how notorious you are. Higher infamy brings powerful perks but also severe penalties.`,
+    fields: [
+      {
+        name: '📊 Infamy Tiers',
+        value:
+          `Your tier is based on your total infamy points:\n` +
+          `• **T0 — Clean** (0-14,999) — No effects\n` +
+          `• **T1 — Suspect** 🔍 (15k-29,999) — No effects yet\n` +
+          `• **T2 — Criminal** 🔓 (30k-59,999) — +5% success, +10% fines\n` +
+          `• **T3 — Wanted** ⚠️ (60k-99,999) — +10% success, -5% earnings, +20% fines\n` +
+          `• **T4 — Most Wanted** 🚨 (100k-149,999) — +15% success, -10% earnings, +30% fines, +5% trade fees, +2s vault delay\n` +
+          `• **T5 — Blacklisted** 💀 (150k+) — +20% success, -20% earnings, +50% fines, +10% trade fees, vault locked`,
+        inline: false
+      },
+      {
+        name: '💰 How You Gain Infamy',
+        value:
+          `Infamy is earned from criminal activities:\n` +
+          `• **Hacking** — 0.2× the amount stolen\n` +
+          `• **Robbing** — 0.5× the amount stolen\n` +
+          `• **Vault Claims** — 1.0× the vault reward\n` +
+          `• **Insider Trading** — 1,000 flat per detected stock`,
+        inline: false
+      },
+      {
+        name: '🏴‍☠️ Bounty System',
+        value:
+          `At T3+, each crime has a chance to post a **Bounty** on you:\n` +
+          `• T3: 15% chance | T4: 30% | T5: 50%\n` +
+          `• Bounty amount = your current infamy points\n` +
+          `• Bounty grows with each crime you commit\n` +
+          `• Anyone who successfully hacks/robs you **claims the bounty**\n` +
+          `• Only 1 active bounty per player at a time\n` +
+          `• View active bounties on the **Bounty Board** in \`/bank\``,
+        inline: false
+      },
+      {
+        name: '🔍 Insider Trading',
+        value:
+          `When a market event hits, the system snapshots all portfolios.\n` +
+          `If you sell stocks that gained value from the event:\n` +
+          `• **5-10% gain** → 10% detection chance per stock\n` +
+          `• **10-20% gain** → 25% detection chance\n` +
+          `• **20%+ gain** → 45% detection chance\n` +
+          `Detection = 1,000 infamy + public announcement`,
+        inline: false
+      },
+      {
+        name: '⏬ Reducing Infamy',
+        value:
+          `Infamy decays and can be actively reduced:\n` +
+          `• **Hourly Decay** — 1 point/hour (automatic)\n` +
+          `• **Charity** — Give money to players in debt (0.1× debt cleared)\n` +
+          `• **Dungeon** — Clear dungeon floors (25 points/floor)\n` +
+          `• **Bounty Claimed** — When someone claims your bounty, you enter **probation** (1 day per tier), then reset to 0`,
+        inline: false
+      },
+      {
+        name: '📋 Commands',
+        value:
+          `\`/infamy\` — View your infamy tier, stats & effects\n` +
+          `\`/infamy [user]\` — Check another player's infamy\n` +
+          `\`/bank\` → **Bounty Board** — See all active bounties`,
+        inline: false
+      }
+    ]
+  },
+
+  profile: {
+    title: '📋 Player Profile',
+    color: 0x3498db,
+    description: `Use \`/profile\` to view detailed stats about any player across all systems.`,
+    fields: [
+      {
+        name: '📋 Overview',
+        value:
+          `The default landing page shows total wealth, server rank, account age, messages, and items owned.`,
+        inline: false
+      },
+      {
+        name: '📂 Categories',
+        value:
+          `Use the buttons to switch between detailed category views:\n` +
+          `• **💰 Finance** — Cash, bank, properties, credit score, streak, taxes, loans & bonds\n` +
+          `• **📈 Stock** — Portfolio, shareholders, price rank, dividends & capital gains\n` +
+          `• **🔓 Crime** — Hack/rob levels, infamy, bounties & steal history\n` +
+          `• **🎰 Gambling** — Per-game stats for every casino game + total P/L\n` +
+          `• **🥊 Fight** — Wins, losses, KOs, win rate & streaks\n` +
+          `• **🏰 Dungeon** — Per-tier runs, clears, gold earned & keys owned`,
+        inline: false
+      },
+      {
+        name: '👤 Viewing Other Players',
+        value:
+          `Use the **user dropdown** at the top of the embed to select any server member and view their profile.`,
+        inline: false
+      }
+    ]
+  },
   
   admin: {
     title: '⚙️ Admin Commands',
     color: 0x607d8b,
-    description: `Server admin commands for configuring the bot.`,
+    description: `Use \`/admin\` to open the admin dashboard. All settings are managed through the dropdown menu.`,
     fields: [
       {
-        name: '📊 /admin dashboard',
-        value: `View all bot settings and system status.`,
+        name: '💰 Economy',
+        value: 'Wealth tax brackets, bank loans & bonds, dividend payouts',
         inline: true
       },
       {
-        name: '🎰 /admin gambling',
-        value: `Configure gambling games and limits.`,
+        name: '💵 Income',
+        value: 'Work, Hunt & Lucky Penny settings',
         inline: true
       },
       {
-        name: '💼 /admin work',
-        value: `Set work/slut/crime payouts & cooldowns.`,
+        name: '🎰 Gambling',
+        value: 'Lottery, scratch cards, SYN & vault',
         inline: true
       },
       {
-        name: '🏦 /admin bank',
-        value: `Configure banking and interest rates.`,
+        name: '⚔️ Combat',
+        value: 'Fight wagers, dungeon, rob & hack',
         inline: true
       },
       {
-        name: '💰 /admin dividends',
-        value: `Set dividend rates and payout times.`,
+        name: '�‍☠️ Infamy',
+        value: 'Criminal reputation, bounties & insider trading',
         inline: true
       },
       {
-        name: '🏠 /admin property',
-        value: `Configure property system settings.`,
+        name: '🎓 Skills',
+        value: 'XP rates, training & level bonuses',
         inline: true
       },
       {
-        name: '💻 /admin hack',
-        value: `Configure hack system settings.`,
+        name: '🛒 Items',
+        value: 'Shop items, prices & effects',
         inline: true
       },
       {
-        name: '🛒 /admin items',
-        value: `Manage shop items and prices.`,
+        name: '🏠 Properties',
+        value: 'Wealth cards, tiers & upgrades',
         inline: true
       },
       {
-        name: '🔧 /admin maintenance',
-        value: `Bot maintenance and data tools.`,
-        inline: true
-      },
-      {
-        name: '🪙 /admin lucky-penny',
-        value: `Configure Lucky Penny settings.`,
-        inline: true
-      },
-      {
-        name: '🥊 /admin fight',
-        value: `Configure fight & dungeon settings.`,
-        inline: true
-      },
-      {
-        name: '💰 /admin wealth-tax',
-        value: `Configure wealth tax brackets.`,
-        inline: true
-      },
-      {
-        name: '⚙️ /admin system',
-        value: `System settings, channels & events.`,
+        name: '⚙️ System',
+        value: 'Market fees, ticker, events & anti-spam',
         inline: true
       },
       {
@@ -636,13 +720,15 @@ function buildHelpMenu(currentPage = 'overview', isAdmin = false) {
     { label: 'Overview', description: 'Getting started & basics', value: 'overview', emoji: '📊', default: currentPage === 'overview' },
     { label: 'Stock Market', description: 'Trading, streaks & dividends', value: 'stocks', emoji: '📈', default: currentPage === 'stocks' },
     { label: 'Banking & Money', description: 'Bank, loans, bonds & taxes', value: 'banking', emoji: '🏦', default: currentPage === 'banking' },
-    { label: 'Income Commands', description: 'Work, crime & Lucky Penny', value: 'income', emoji: '💼', default: currentPage === 'income' },
+    { label: 'Income Commands', description: 'Work, Hunt & Lucky Penny', value: 'income', emoji: '💼', default: currentPage === 'income' },
     { label: 'Gambling', description: 'Casino games & betting', value: 'gambling', emoji: '🎰', default: currentPage === 'gambling' },
     { label: 'Rob & Hack', description: 'Stealing from players', value: 'crime', emoji: '🔓', default: currentPage === 'crime' },
     { label: 'Property', description: 'Real estate & passive income', value: 'property', emoji: '🏠', default: currentPage === 'property' },
     { label: 'Shop & Items', description: 'Buying & using items', value: 'items', emoji: '🛒', default: currentPage === 'items' },
     { label: 'Fight & Dungeon', description: 'PvP battles & PvE dungeon', value: 'fight', emoji: '🥊', default: currentPage === 'fight' },
-    { label: 'Events & Leaderboard', description: 'Market events, vault & rankings', value: 'events', emoji: '🎪', default: currentPage === 'events' }
+    { label: 'Events & Leaderboard', description: 'Market events, vault & rankings', value: 'events', emoji: '🎪', default: currentPage === 'events' },
+    { label: 'Infamy & Bounty', description: 'Criminal reputation system', value: 'infamy', emoji: '🏴‍☠️', default: currentPage === 'infamy' },
+    { label: 'Player Profile', description: 'View detailed player stats', value: 'profile', emoji: '📋', default: currentPage === 'profile' }
   ];
   
   // Only show admin option to admins
@@ -655,6 +741,19 @@ function buildHelpMenu(currentPage = 'overview', isAdmin = false) {
       .setCustomId('help_menu')
       .setPlaceholder('Select a help topic...')
       .addOptions(options)
+  );
+}
+
+function buildLinkButtons(guildId) {
+  const supportUrl = getSupportServerUrl(guildId);
+  if (!supportUrl) return null;
+
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setLabel('Support Server')
+      .setStyle(ButtonStyle.Link)
+      .setURL(supportUrl)
+      .setEmoji('❓')
   );
 }
 
@@ -673,8 +772,11 @@ module.exports = {
     const isAdmin = isUserAdmin(interaction.member);
     const embed = buildHelpEmbed('overview');
     const menu = buildHelpMenu('overview', isAdmin);
+    const components = [menu];
+    const linkRow = buildLinkButtons(interaction.guildId);
+    if (linkRow) components.push(linkRow);
     
-    await interaction.reply({ embeds: [embed], components: [menu] });
+    await interaction.reply({ embeds: [embed], components });
   },
   
   // Handle menu interactions
@@ -693,8 +795,11 @@ module.exports = {
     
     const embed = buildHelpEmbed(selectedPage);
     const menu = buildHelpMenu(selectedPage, isAdmin);
+    const components = [menu];
+    const linkRow = buildLinkButtons(interaction.guildId);
+    if (linkRow) components.push(linkRow);
     
-    await interaction.update({ embeds: [embed], components: [menu] });
+    await interaction.update({ embeds: [embed], components });
     return true;
   }
 };

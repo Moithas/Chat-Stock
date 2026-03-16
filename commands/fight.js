@@ -27,8 +27,9 @@ const {
   GIFS
 } = require('../fight');
 const { saveDatabase } = require('../database');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Prevent double-click processing on fight buttons
 const processingInteractions = new Set();
@@ -99,7 +100,7 @@ module.exports = {
     const challengerBalance = await getBalance(guildId, challenger.id);
     if (challengerBalance.cash < betAmount) {
       return interaction.editReply({ 
-        content: `❌ You don't have enough cash! You have **${challengerBalance.cash.toLocaleString()}** ${CURRENCY} in cash.`
+        content: `❌ You don't have enough cash! You have **${challengerBalance.cash.toLocaleString()}** ${getCurrency(guildId)} in cash.`
       });
     }
 
@@ -152,7 +153,7 @@ module.exports = {
           value: `Record: **${opponentStats.wins}-${opponentStats.losses}**${opponentStats.draws > 0 ? `-${opponentStats.draws}` : ''}\nKOs: **${opponentStats.knockouts}** | TKOs: **${opponentStats.tkos}**`, 
           inline: true 
         },
-        { name: '💰 Wager', value: `**${betAmount.toLocaleString()}** ${CURRENCY}`, inline: false }
+        { name: '💰 Wager', value: `**${betAmount.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
       )
       .setFooter({ text: `${opponentMember.displayName} has ${settings.challengeTimeoutSeconds} seconds to respond!` });
 
@@ -355,7 +356,7 @@ module.exports = {
 
       // Validate amount
       if (amount > fight.betAmount) {
-        return interaction.update({ content: `❌ Maximum bet is **${fight.betAmount.toLocaleString()}** ${CURRENCY}`, components: [] });
+        return interaction.update({ content: `❌ Maximum bet is **${fight.betAmount.toLocaleString()}** ${getCurrency(guildId)}`, components: [] });
       }
 
       processingInteractions.add(processingKey);
@@ -364,7 +365,7 @@ module.exports = {
       // Check balance
       const balance = await getBalance(guildId, interaction.user.id);
       if (balance.cash < amount) {
-        return interaction.update({ content: `❌ You don't have enough cash! You have **${balance.cash.toLocaleString()}** ${CURRENCY}`, components: [] });
+        return interaction.update({ content: `❌ You don't have enough cash! You have **${balance.cash.toLocaleString()}** ${getCurrency(guildId)}`, components: [] });
       }
 
       // Take money and record bet
@@ -381,7 +382,7 @@ module.exports = {
       const fighterName = fighterId === fight.challenger.id ? fight.challenger.displayName : fight.opponent.displayName;
       
       await interaction.update({ 
-        content: `✅ Bet placed: **${amount.toLocaleString()}** ${CURRENCY} on **${fighterName}**!`, 
+        content: `✅ Bet placed: **${amount.toLocaleString()}** ${getCurrency(guildId)} on **${fighterName}**!`, 
         components: [] 
       });
 
@@ -544,7 +545,7 @@ async function startBettingPhase(interaction, fight) {
   const embed = new EmbedBuilder()
     .setColor(0xFFD700)
     .setTitle('🥊 CAGE FIGHT - BETTING OPEN!')
-    .setDescription(`**${fight.challenger.displayName}** vs **${fight.opponent.displayName}**\n\n💰 **Prize Pool:** ${(fight.betAmount * 2).toLocaleString()} ${CURRENCY}${loserWarning}`)
+    .setDescription(`**${fight.challenger.displayName}** vs **${fight.opponent.displayName}**\n\n💰 **Prize Pool:** ${(fight.betAmount * 2).toLocaleString()} ${getCurrency(fight.guildId)}${loserWarning}`)
     .addFields(
       { 
         name: `🔴 ${fight.challenger.displayName}`, 
@@ -558,7 +559,7 @@ async function startBettingPhase(interaction, fight) {
       },
       { 
         name: '💰 Spectator Bets', 
-        value: `${fight.challenger.displayName}: **0** ${CURRENCY} (0 bets)\n${fight.opponent.displayName}: **0** ${CURRENCY} (0 bets)`, 
+        value: `${fight.challenger.displayName}: **0** ${getCurrency(fight.guildId)} (0 bets)\n${fight.opponent.displayName}: **0** ${getCurrency(fight.guildId)} (0 bets)`, 
         inline: false 
       }
     )
@@ -606,7 +607,7 @@ async function startBettingPhase(interaction, fight) {
         const updatedEmbed = EmbedBuilder.from(embed)
           .spliceFields(2, 1, {
             name: '💰 Spectator Bets',
-            value: `${fight.challenger.displayName}: **${betTotals.fighter1Total.toLocaleString()}** ${CURRENCY} (${betTotals.fighter1Count} bets)\n${fight.opponent.displayName}: **${betTotals.fighter2Total.toLocaleString()}** ${CURRENCY} (${betTotals.fighter2Count} bets)`,
+            value: `${fight.challenger.displayName}: **${betTotals.fighter1Total.toLocaleString()}** ${getCurrency(fight.guildId)} (${betTotals.fighter1Count} bets)\n${fight.opponent.displayName}: **${betTotals.fighter2Total.toLocaleString()}** ${getCurrency(fight.guildId)} (${betTotals.fighter2Count} bets)`,
             inline: false
           })
           .setFooter({ text: `⏱️ Betting closes in ${remaining} seconds!` });
@@ -637,7 +638,7 @@ async function updateBettingEmbed(channel, fight) {
     const updatedEmbed = EmbedBuilder.from(embed)
       .spliceFields(2, 1, {
         name: '💰 Spectator Bets',
-        value: `${fight.challenger.displayName}: **${betTotals.fighter1Total.toLocaleString()}** ${CURRENCY} (${betTotals.fighter1Count} bets)\n${fight.opponent.displayName}: **${betTotals.fighter2Total.toLocaleString()}** ${CURRENCY} (${betTotals.fighter2Count} bets)`,
+        value: `${fight.challenger.displayName}: **${betTotals.fighter1Total.toLocaleString()}** ${getCurrency(fight.guildId)} (${betTotals.fighter1Count} bets)\n${fight.opponent.displayName}: **${betTotals.fighter2Total.toLocaleString()}** ${getCurrency(fight.guildId)} (${betTotals.fighter2Count} bets)`,
         inline: false
       });
 
@@ -1144,8 +1145,8 @@ async function endFight(channel, fight, endReason, winnerId, loserId) {
       { 
         name: '💰 Fighter Payout', 
         value: isDraw 
-          ? `Both: **${fight.betAmount.toLocaleString()}** ${CURRENCY} returned`
-          : `${winnerObj.displayName}: **+${totalPot.toLocaleString()}** ${CURRENCY}`, 
+          ? `Both: **${fight.betAmount.toLocaleString()}** ${getCurrency(fight.guildId)} returned`
+          : `${winnerObj.displayName}: **+${totalPot.toLocaleString()}** ${getCurrency(fight.guildId)}`, 
         inline: false 
       }
     );
@@ -1155,13 +1156,13 @@ async function endFight(channel, fight, endReason, winnerId, loserId) {
   }
 
   if (totalSpectatorPool > 0) {
-    let spectatorSummary = `Total Pool: **${totalSpectatorPool.toLocaleString()}** ${CURRENCY}\nHouse Cut: **${houseCut.toLocaleString()}** ${CURRENCY}`;
+    let spectatorSummary = `Total Pool: **${totalSpectatorPool.toLocaleString()}** ${getCurrency(fight.guildId)}\nHouse Cut: **${houseCut.toLocaleString()}** ${getCurrency(fight.guildId)}`;
     
     const winners = spectatorPayoutInfo.filter(p => p.type === 'win' && p.payout > 0);
     if (winners.length > 0) {
       spectatorSummary += `\n\n**Winners:**`;
       for (const w of winners.slice(0, 5)) {
-        spectatorSummary += `\n<@${w.oddsMinFights}>: **+${w.payout.toLocaleString()}** ${CURRENCY}`;
+        spectatorSummary += `\n<@${w.oddsMinFights}>: **+${w.payout.toLocaleString()}** ${getCurrency(fight.guildId)}`;
       }
       if (winners.length > 5) {
         spectatorSummary += `\n...and ${winners.length - 5} more`;

@@ -373,7 +373,7 @@ function getGuildShoe(guildId) {
   return shoe;
 }
 
-function startBlackjackGame(userId, bet, guildId) {
+function startBlackjackGame(guildId, userId, bet) {
   // Get the persistent shoe for this guild
   const shoe = getGuildShoe(guildId);
   
@@ -407,7 +407,7 @@ function startBlackjackGame(userId, bet, guildId) {
   // If dealer shows Ace and player doesn't have blackjack, offer insurance first
   if (dealerShowsAce && playerValue !== 21) {
     game.status = 'insurance';
-    activeBlackjackGames.set(userId, game);
+    activeBlackjackGames.set(`${guildId}_${userId}`, game);
     return game;
   }
   
@@ -417,17 +417,17 @@ function startBlackjackGame(userId, bet, guildId) {
     game.status = 'blackjack';
   }
   
-  activeBlackjackGames.set(userId, game);
+  activeBlackjackGames.set(`${guildId}_${userId}`, game);
   return game;
 }
 
-function getBlackjackGame(userId) {
-  return activeBlackjackGames.get(userId);
+function getBlackjackGame(guildId, userId) {
+  return activeBlackjackGames.get(`${guildId}_${userId}`);
 }
 
 // Take insurance bet
-function blackjackTakeInsurance(userId, insuranceAmount) {
-  const game = activeBlackjackGames.get(userId);
+function blackjackTakeInsurance(guildId, userId, insuranceAmount) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game || game.status !== 'insurance') return null;
   
   game.insuranceBet = insuranceAmount;
@@ -443,8 +443,8 @@ function blackjackTakeInsurance(userId, insuranceAmount) {
 }
 
 // Decline insurance
-function blackjackDeclineInsurance(userId) {
-  const game = activeBlackjackGames.get(userId);
+function blackjackDeclineInsurance(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game || game.status !== 'insurance') return null;
   
   game.insuranceDeclined = true;
@@ -460,15 +460,15 @@ function blackjackDeclineInsurance(userId) {
 }
 
 // Check if dealer has blackjack (used after insurance decision)
-function dealerHasBlackjack(userId) {
-  const game = activeBlackjackGames.get(userId);
+function dealerHasBlackjack(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game) return false;
   
   return calculateHandValue(game.dealerHand) === 21;
 }
 
-function blackjackHit(userId) {
-  const game = activeBlackjackGames.get(userId);
+function blackjackHit(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game || game.status !== 'playing') return null;
   
   game.playerHand.push(game.deck.pop());
@@ -478,14 +478,14 @@ function blackjackHit(userId) {
     game.status = 'playerBust';
   } else if (value === 21) {
     // Auto-stand on 21
-    return blackjackStand(userId);
+    return blackjackStand(guildId, userId);
   }
   
   return game;
 }
 
-function blackjackStand(userId) {
-  const game = activeBlackjackGames.get(userId);
+function blackjackStand(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game || game.status !== 'playing') return null;
   
   // Dealer draws until 17 or higher (must hit on soft 17)
@@ -510,8 +510,8 @@ function blackjackStand(userId) {
 }
 
 // Check if dealer needs another card (for animated dealer play)
-function dealerNeedsCard(userId) {
-  const game = activeBlackjackGames.get(userId);
+function dealerNeedsCard(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game) return false;
   
   const value = calculateHandValue(game.dealerHand);
@@ -519,8 +519,8 @@ function dealerNeedsCard(userId) {
 }
 
 // Deal one card to dealer (for animated dealer play)
-function dealerHit(userId) {
-  const game = activeBlackjackGames.get(userId);
+function dealerHit(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game) return null;
   
   game.dealerHand.push(game.deck.pop());
@@ -528,8 +528,8 @@ function dealerHit(userId) {
 }
 
 // Finalize dealer's turn and determine winner
-function finalizeDealerTurn(userId) {
-  const game = activeBlackjackGames.get(userId);
+function finalizeDealerTurn(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game) return null;
   
   const playerValue = calculateHandValue(game.playerHand);
@@ -569,8 +569,8 @@ function isSoft17(hand) {
   return hardValue === 7;
 }
 
-function blackjackDoubleDown(userId) {
-  const game = activeBlackjackGames.get(userId);
+function blackjackDoubleDown(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game || game.status !== 'playing') return null;
   if (game.playerHand.length !== 2) return null; // Can only double on first two cards
   
@@ -584,7 +584,7 @@ function blackjackDoubleDown(userId) {
   }
   
   // Must stand after double down
-  return blackjackStand(userId);
+  return blackjackStand(guildId, userId);
 }
 
 // Check if hand can be split (two cards of same rank)
@@ -594,8 +594,8 @@ function canSplitHand(hand) {
 }
 
 // Split hand - creates a split hand in the game
-function blackjackSplit(userId) {
-  const game = activeBlackjackGames.get(userId);
+function blackjackSplit(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game || game.status !== 'playing') return null;
   if (!canSplitHand(game.playerHand)) return null;
   if (game.hasSplit) return null; // Already split
@@ -623,8 +623,8 @@ function blackjackSplit(userId) {
 }
 
 // Hit on split hand
-function blackjackHitSplit(userId) {
-  const game = activeBlackjackGames.get(userId);
+function blackjackHitSplit(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game || !game.hasSplit || game.currentHand !== 'split') return null;
   if (game.splitStatus !== 'playing') return null;
   
@@ -641,8 +641,8 @@ function blackjackHitSplit(userId) {
 }
 
 // Stand on split hand
-function blackjackStandSplit(userId) {
-  const game = activeBlackjackGames.get(userId);
+function blackjackStandSplit(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game || !game.hasSplit || game.currentHand !== 'split') return null;
   
   game.splitStatus = 'stand';
@@ -650,8 +650,8 @@ function blackjackStandSplit(userId) {
 }
 
 // Resolve split game (dealer plays and determine outcomes)
-function resolveSplitGame(userId) {
-  const game = activeBlackjackGames.get(userId);
+function resolveSplitGame(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
   if (!game || !game.hasSplit) return null;
   
   // Dealer draws until 17 or higher
@@ -693,10 +693,27 @@ function resolveSplitGame(userId) {
   return game;
 }
 
-function endBlackjackGame(userId) {
-  const game = activeBlackjackGames.get(userId);
-  activeBlackjackGames.delete(userId);
+function endBlackjackGame(guildId, userId) {
+  const game = activeBlackjackGames.get(`${guildId}_${userId}`);
+  activeBlackjackGames.delete(`${guildId}_${userId}`);
   return game;
+}
+
+// Clean up stale blackjack games (abandoned by users)
+const BLACKJACK_GAME_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+
+function cleanupStaleBlackjackGames() {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [key, game] of activeBlackjackGames) {
+    if (now - game.startTime > BLACKJACK_GAME_TIMEOUT) {
+      activeBlackjackGames.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[GC] Cleaned up ${cleaned} stale blackjack game(s)`);
+  }
 }
 
 function updateBlackjackStats(userId, result, amount) {
@@ -1581,6 +1598,8 @@ module.exports = {
   // Settings
   getGamblingSettings,
   updateGamblingSettings,
+  // Game cleanup
+  cleanupStaleBlackjackGames,
   // Lottery
   getLotteryInfo,
   buyLotteryTicket,

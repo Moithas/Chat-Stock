@@ -1,9 +1,9 @@
 // Admin Hack Panel - Hack settings (Fully Modular)
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, RoleSelectMenuBuilder } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 const { getHackSettings, updateHackSettings, getHackImmuneRoles, addHackImmuneRole, clearHackImmuneRoles } = require('../hack');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [
@@ -113,7 +113,8 @@ async function showHackPanel(interaction, guildId) {
       { name: '🎯 Target Cooldown', value: `${settings.targetCooldownMinutes} minutes (${(settings.targetCooldownMinutes / 60).toFixed(1)} hours)`, inline: true },
       { name: '💰 Steal Range', value: `${settings.minStealPercent}% - ${settings.maxStealPercent}%`, inline: true },
       { name: '💸 Fine Range', value: `${settings.minFinePercent}% - ${settings.maxFinePercent}% of potential steal`, inline: true },
-      { name: '🔄 XP Farm Protection', value: uniqueTargetsStr, inline: true },
+      { name: '� Attempt Penalty', value: settings.attemptPenaltyMinutes > 0 ? `${settings.attemptPenaltyMinutes} minutes` : 'Disabled', inline: true },
+      { name: '�🔄 XP Farm Protection', value: uniqueTargetsStr, inline: true },
       { name: '🛡️ Immune Roles', value: immuneRoles.length > 0 ? immuneRoles.map(r => `<@&${r}>`).join(', ') : 'None', inline: false }
     )
     .setFooter({ text: 'Hack targets bank balances with a progress-based defense system' });
@@ -212,6 +213,15 @@ function createHackSettingsModal(settings) {
           .setValue(`${settings.minFinePercent}-${settings.maxFinePercent}`)
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('attempt_penalty')
+          .setLabel('Attempt Penalty Minutes (0 = disabled)')
+          .setPlaceholder('10')
+          .setValue(String(settings.attemptPenaltyMinutes || 0))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
       )
     );
 }
@@ -221,6 +231,7 @@ async function handleHackSettingsModal(interaction, guildId) {
   const targetCooldown = parseInt(interaction.fields.getTextInputValue('target_cooldown')) || 720;
   const stealRange = interaction.fields.getTextInputValue('steal_range');
   const fineRange = interaction.fields.getTextInputValue('fine_range');
+  const attemptPenalty = parseInt(interaction.fields.getTextInputValue('attempt_penalty'));
   
   // Parse ranges
   const stealParts = stealRange.split('-').map(s => parseInt(s.trim()));
@@ -232,7 +243,8 @@ async function handleHackSettingsModal(interaction, guildId) {
     minStealPercent: Math.max(1, Math.min(100, stealParts[0] || 2)),
     maxStealPercent: Math.max(1, Math.min(100, stealParts[1] || stealParts[0] || 5)),
     minFinePercent: Math.max(1, Math.min(100, fineParts[0] || 15)),
-    maxFinePercent: Math.max(1, Math.min(100, fineParts[1] || fineParts[0] || 20))
+    maxFinePercent: Math.max(1, Math.min(100, fineParts[1] || fineParts[0] || 20)),
+    attemptPenaltyMinutes: Math.max(0, Math.min(1440, isNaN(attemptPenalty) ? 10 : attemptPenalty))
   };
   
   // Ensure min <= max

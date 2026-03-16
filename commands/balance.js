@@ -1,7 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getBalance, getAllBalances } = require('../economy');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -29,9 +30,9 @@ module.exports = {
       .setColor(0x3498db)
       .setTitle(`💰 ${targetUser.username}'s Balance`)
       .addFields(
-        { name: '💵 Cash', value: `${balance.cash.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: '🏦 Bank', value: `${balance.bank.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: '💎 Total', value: `${balance.total.toLocaleString()} ${CURRENCY}`, inline: true }
+        { name: '💵 Cash', value: `${balance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+        { name: '🏦 Bank', value: `${balance.bank.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+        { name: '💎 Total', value: `${balance.total.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
       )
       .setFooter({ text: rank > 0 ? `Rank #${rank} of ${totalUsers}` : 'Unranked' })
       .setTimestamp();

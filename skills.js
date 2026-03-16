@@ -3,7 +3,7 @@
 
 let db = null;
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Lazy-load items module to avoid circular dependency
 function getXpBoostValue(guildId, userId) {
@@ -19,6 +19,7 @@ function getXpBoostValue(guildId, userId) {
 function getLpXpBoost(guildId, userId, skill) {
   try {
     const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('./luckypenny');
+const { getCurrency } = require('./admin');
     const effectType = skill === 'hack' ? LP_EFFECT_TYPES.HACK_XP : LP_EFFECT_TYPES.ROB_XP;
     return getLuckyPennyEffect(guildId, userId, effectType) || 0;
   } catch (e) {

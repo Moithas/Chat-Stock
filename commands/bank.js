@@ -36,8 +36,9 @@ const {
   getImmuneRoles
 } = require('../rob');
 const { getWealthTaxSettings, calculateUserWealth, calculateTaxForWealth, getDayName } = require('../wealth-tax');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -70,13 +71,13 @@ async function showBankPanel(interaction, guildId, userId, isUpdate = false) {
   // Bank Balance Section
   embed.addFields({
     name: '💰 Bank Balance',
-    value: `**${balance.bank.toLocaleString()}** ${CURRENCY}`,
+    value: `**${balance.bank.toLocaleString()}** ${getCurrency(guildId)}`,
     inline: true
   });
   
   embed.addFields({
     name: '💵 Cash on Hand',
-    value: `**${balance.cash.toLocaleString()}** ${CURRENCY}`,
+    value: `**${balance.cash.toLocaleString()}** ${getCurrency(guildId)}`,
     inline: true
   });
   
@@ -91,7 +92,7 @@ async function showBankPanel(interaction, guildId, userId, isUpdate = false) {
   let creditText = [
     `**Score:** ${creditTier.emoji} **${creditInfo.score}** / ${MAX_CREDIT_SCORE} (${creditTier.name})`,
     `${creditBar}`,
-    `**Max Loan:** ${creditLimits.maxLoan > 0 ? creditLimits.maxLoan.toLocaleString() + ' ' + CURRENCY : '❌ Not eligible'}`,
+    `**Max Loan:** ${creditLimits.maxLoan > 0 ? creditLimits.maxLoan.toLocaleString() + ' ' + getCurrency(guildId) : '❌ Not eligible'}`,
     `**Interest Rate:** ${creditLimits.interestRate}%`
   ];
   
@@ -100,7 +101,7 @@ async function showBankPanel(interaction, guildId, userId, isUpdate = false) {
   }
   
   if (creditLimits.defaultPenaltyPercent > 0) {
-    creditText.push(`⚠️ **Default penalty:** -${Math.round(creditLimits.defaultPenaltyPercent)}% max loan (${creditInfo.totalDefaultedAmount.toLocaleString()} ${CURRENCY} lifetime defaults)`);
+    creditText.push(`⚠️ **Default penalty:** -${Math.round(creditLimits.defaultPenaltyPercent)}% max loan (${creditInfo.totalDefaultedAmount.toLocaleString()} ${getCurrency(guildId)} lifetime defaults)`);
   }
   
   if (creditLimits.defaultCooldownRemaining > 0) {
@@ -125,13 +126,13 @@ async function showBankPanel(interaction, guildId, userId, isUpdate = false) {
     const progressBar = createProgressBar(progressPercent);
     
     const paymentDisplay = effectivePayment < activeLoan.payment_amount
-      ? `~~${activeLoan.payment_amount.toLocaleString()}~~ **${effectivePayment.toLocaleString()}** ${CURRENCY} (${activeLoan.payment_interval})`
-      : `${effectivePayment.toLocaleString()} ${CURRENCY} (${activeLoan.payment_interval})`;
+      ? `~~${activeLoan.payment_amount.toLocaleString()}~~ **${effectivePayment.toLocaleString()}** ${getCurrency(guildId)} (${activeLoan.payment_interval})`
+      : `${effectivePayment.toLocaleString()} ${getCurrency(guildId)} (${activeLoan.payment_interval})`;
     
     embed.addFields({
       name: '💳 Active Loan',
       value: [
-        `**Remaining:** ${remaining.toLocaleString()} ${CURRENCY}`,
+        `**Remaining:** ${remaining.toLocaleString()} ${getCurrency(guildId)}`,
         `**Payment:** ${paymentDisplay}`,
         `**Next Payment:** <t:${Math.floor(nextPayment / 1000)}:R>`,
         `**Progress:** ${progressBar} ${progressPercent}%`,
@@ -192,14 +193,14 @@ async function showBankPanel(interaction, guildId, userId, isUpdate = false) {
     let taxText = '';
     if (totalTax > 0) {
       taxText = [
-        `**Your Wealth:** ${wealth.total.toLocaleString()} ${CURRENCY}`,
+        `**Your Wealth:** ${wealth.total.toLocaleString()} ${getCurrency(guildId)}`,
         `└ 💵 Cash: ${wealth.cash.toLocaleString()} | 📈 Stocks: ${wealth.stocks.toLocaleString()} | 🏠 Properties: ${wealth.properties.toLocaleString()}`,
-        `**Estimated Tax:** ${totalTax.toLocaleString()} ${CURRENCY}`,
+        `**Estimated Tax:** ${totalTax.toLocaleString()} ${getCurrency(guildId)}`,
         `**Next Collection:** <t:${Math.floor(nextCollection.getTime() / 1000)}:R> (${getDayName(taxSettings.collectionDay)})`
       ].join('\n');
     } else {
       taxText = [
-        `**Your Wealth:** ${wealth.total.toLocaleString()} ${CURRENCY}`,
+        `**Your Wealth:** ${wealth.total.toLocaleString()} ${getCurrency(guildId)}`,
         `✅ **Tax Exempt** - Below taxable threshold`,
         `**Next Collection:** <t:${Math.floor(nextCollection.getTime() / 1000)}:R> (${getDayName(taxSettings.collectionDay)})`
       ].join('\n');
@@ -263,7 +264,16 @@ async function showBankPanel(interaction, guildId, userId, isUpdate = false) {
       .setEmoji('🔄')
   );
   
-  const replyOptions = { embeds: [embed], components: [row1], flags: 64 };
+  // Bounty Board button (second row)
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('bounty_board')
+      .setLabel('Bounty Board')
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji('🏴‍☠️')
+  );
+  
+  const replyOptions = { embeds: [embed], components: [row1, row2], flags: 64 };
   
   if (isUpdate) {
     return interaction.update(replyOptions);
@@ -408,10 +418,10 @@ async function showPayLoanPanel(interaction, guildId, userId) {
     .setTitle('💳 Loan Payment')
     .setDescription(`Choose how much to pay toward your loan.${prepaidNote}`)
     .addFields(
-      { name: '💰 Your Bank Balance', value: `${balance.bank.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '📊 Remaining Balance', value: `${remaining.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💰 Your Bank Balance', value: `${balance.bank.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '📊 Remaining Balance', value: `${remaining.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200B', value: '\u200B', inline: true },
-      { name: '📅 Next Payment Due', value: `${effectivePayment.toLocaleString()} ${CURRENCY} <t:${Math.floor(loan.next_payment_time / 1000)}:R>`, inline: true },
+      { name: '📅 Next Payment Due', value: `${effectivePayment.toLocaleString()} ${getCurrency(guildId)} <t:${Math.floor(loan.next_payment_time / 1000)}:R>`, inline: true },
       { name: '📈 Progress', value: `${progressBar} ${progressPercent}%`, inline: true }
     )
     .setFooter({ text: 'Payments are deducted from your bank balance' });
@@ -483,14 +493,14 @@ async function showBondShop(interaction, guildId, userId) {
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle('🏦 Savings Bonds')
-    .setDescription(`Purchase a bond to receive a role for a limited time.\nThe role may provide income via \`/collect\`.\n\n**Your Cash:** ${balance.cash.toLocaleString()} ${CURRENCY}`)
+    .setDescription(`Purchase a bond to receive a role for a limited time.\nThe role may provide income via \`/collect\`.\n\n**Your Cash:** ${balance.cash.toLocaleString()} ${getCurrency(guildId)}`)
     .setFooter({ text: 'Select a bond to purchase • Bond cost is paid from cash' });
   
   for (const bond of bonds) {
     const canAfford = balance.cash >= bond.price;
     embed.addFields({
       name: `${canAfford ? '✅' : '❌'} ${bond.name}`,
-      value: `**Price:** ${bond.price.toLocaleString()} ${CURRENCY}\n**Duration:** ${bond.duration_days} days\n**Role:** <@&${bond.role_id}>`,
+      value: `**Price:** ${bond.price.toLocaleString()} ${getCurrency(guildId)}\n**Duration:** ${bond.duration_days} days\n**Role:** <@&${bond.role_id}>`,
       inline: true
     });
   }
@@ -538,15 +548,15 @@ async function showHistory(interaction, guildId, userId) {
       '',
       `✅ Loans Completed: **${creditInfo.loansCompleted}** | ❌ Defaulted: **${creditInfo.loansDefaulted}**`,
       `📈 On-Time Payments: **${creditInfo.onTimePayments}** | ⚠️ Missed: **${creditInfo.missedPayments}**`,
-      `💰 Total Borrowed: **${creditInfo.totalBorrowed.toLocaleString()}** ${CURRENCY}`,
-      `💸 Total Repaid: **${creditInfo.totalRepaid.toLocaleString()}** ${CURRENCY}`
+      `💰 Total Borrowed: **${creditInfo.totalBorrowed.toLocaleString()}** ${getCurrency(guildId)}`,
+      `💸 Total Repaid: **${creditInfo.totalRepaid.toLocaleString()}** ${getCurrency(guildId)}`
     ].join('\n'));
   
   if (loanHistory.length > 0) {
     const loanText = loanHistory.map(l => {
       const date = new Date(l.created_at).toLocaleDateString();
       const status = l.status === 'completed' ? '✅' : l.status === 'defaulted' ? '❌' : '🔄';
-      return `${status} **${l.principal.toLocaleString()}** ${CURRENCY} (${date}) - ${l.status}`;
+      return `${status} **${l.principal.toLocaleString()}** ${getCurrency(guildId)} (${date}) - ${l.status}`;
     }).join('\n');
     
     embed.addFields({ name: '💰 Recent Loans', value: loanText, inline: false });
@@ -557,7 +567,7 @@ async function showHistory(interaction, guildId, userId) {
   if (bondHist.length > 0) {
     const bondText = bondHist.map(b => {
       const date = new Date(b.purchased_at).toLocaleDateString();
-      return `📜 **${b.bond_name}** - ${b.price.toLocaleString()} ${CURRENCY} (${date})`;
+      return `📜 **${b.bond_name}** - ${b.price.toLocaleString()} ${getCurrency(guildId)} (${date})`;
     }).join('\n');
     
     embed.addFields({ name: '📜 Recent Bonds', value: bondText, inline: false });
@@ -567,7 +577,7 @@ async function showHistory(interaction, guildId, userId) {
   
   // Total bond income collected
   if (totalBondIncomeCollected > 0) {
-    embed.addFields({ name: '💵 Total Income Collected This Bond', value: `**${totalBondIncomeCollected.toLocaleString()}** ${CURRENCY}`, inline: false });
+    embed.addFields({ name: '💵 Total Income Collected This Bond', value: `**${totalBondIncomeCollected.toLocaleString()}** ${getCurrency(guildId)}`, inline: false });
   }
   
   // Immunity history
@@ -575,7 +585,7 @@ async function showHistory(interaction, guildId, userId) {
   if (immunityHist.length > 0) {
     const immunityText = immunityHist.map(i => {
       const date = new Date(i.purchased_at).toLocaleDateString();
-      return `🛡️ **${i.tier_name}** - ${i.price.toLocaleString()} ${CURRENCY} (${date})`;
+      return `🛡️ **${i.tier_name}** - ${i.price.toLocaleString()} ${getCurrency(guildId)} (${date})`;
     }).join('\n');
     
     embed.addFields({ name: '🛡️ Recent Protection', value: immunityText, inline: false });
@@ -645,13 +655,13 @@ async function showSecurityPanel(interaction, guildId, userId) {
   if (immunityTiers.length > 0) {
     embed.addFields({
       name: '💰 Your Cash',
-      value: `**${balance.cash.toLocaleString()}** ${CURRENCY}`,
+      value: `**${balance.cash.toLocaleString()}** ${getCurrency(guildId)}`,
       inline: true
     });
     
     const tierText = immunityTiers.map(tier => {
       const canAfford = balance.cash >= tier.price;
-      return `${canAfford ? '✅' : '❌'} **${tier.name}** - ${tier.price.toLocaleString()} ${CURRENCY} (${tier.duration_days} days)`;
+      return `${canAfford ? '✅' : '❌'} **${tier.name}** - ${tier.price.toLocaleString()} ${getCurrency(guildId)} (${tier.duration_days} days)`;
     }).join('\n');
     
     embed.addFields({
@@ -728,6 +738,11 @@ async function handleBankInteraction(interaction) {
     return showBankPanel(interaction, guildId, userId, true);
   }
   
+  // Bounty Board
+  if (customId === 'bounty_board') {
+    return showBountyBoard(interaction, guildId);
+  }
+  
   // Immunity purchase
   if (customId === 'bank_immunity_select') {
     const tierId = parseInt(interaction.values[0]);
@@ -756,7 +771,7 @@ async function handleBankInteraction(interaction) {
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Insufficient Funds')
-          .setDescription(`You need **${tier.price.toLocaleString()}** ${CURRENCY} in cash.\nYou have **${balance.cash.toLocaleString()}** ${CURRENCY}`)],
+          .setDescription(`You need **${tier.price.toLocaleString()}** ${getCurrency(guildId)} in cash.\nYou have **${balance.cash.toLocaleString()}** ${getCurrency(guildId)}`)],
         flags: 64
       });
     }
@@ -791,7 +806,7 @@ async function handleBankInteraction(interaction) {
         .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
         .addFields(
           { name: '📋 Plan', value: result.tierName, inline: true },
-          { name: '💵 Price Paid', value: `${result.price.toLocaleString()} ${CURRENCY}`, inline: true },
+          { name: '💵 Price Paid', value: `${result.price.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
           { name: '⏱️ Duration', value: `${result.durationDays} days`, inline: true },
           { name: '📅 Expires', value: `<t:${Math.floor(result.expiresAt / 1000)}:F>`, inline: false }
         )
@@ -823,8 +838,8 @@ async function handleBankInteraction(interaction) {
 
   // Loan modal submit
   if (customId === 'bank_loan_modal') {
-    const amount = parseInt(interaction.fields.getTextInputValue('loan_amount'));
-    const days = parseInt(interaction.fields.getTextInputValue('loan_duration'));
+    const amount = parseInt(interaction.fields.getTextInputValue('loan_amount').replace(/,/g, ''));
+    const days = parseInt(interaction.fields.getTextInputValue('loan_duration').replace(/,/g, ''));
     const interval = interaction.fields.getTextInputValue('loan_interval').toLowerCase().trim();
     
     const settings = getBankSettings(guildId);
@@ -871,12 +886,12 @@ async function handleBankInteraction(interaction) {
       .setTitle('📋 Loan Application Review')
       .setDescription(`Please review your loan terms before confirming.\n📊 Credit: ${formatCreditScore(creditInfo.score, guildId)}`)
       .addFields(
-        { name: '💵 Principal', value: `${amount.toLocaleString()} ${CURRENCY}`, inline: true },
+        { name: '💵 Principal', value: `${amount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
         { name: '📈 Interest Rate', value: `${effectiveRate}%${effectiveRate !== settings.loanInterestRate ? ` (base ${settings.loanInterestRate}%)` : ''}`, inline: true },
-        { name: '💰 Interest Amount', value: `${interest.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: '📊 Total to Repay', value: `${totalOwed.toLocaleString()} ${CURRENCY}`, inline: true },
+        { name: '💰 Interest Amount', value: `${interest.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+        { name: '📊 Total to Repay', value: `${totalOwed.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
         { name: '📅 Duration', value: `${days} days`, inline: true },
-        { name: '🔄 Payment Schedule', value: `${paymentAmount.toLocaleString()} ${CURRENCY} ${interval}`, inline: true }
+        { name: '🔄 Payment Schedule', value: `${paymentAmount.toLocaleString()} ${getCurrency(guildId)} ${interval}`, inline: true }
       )
       .setFooter({ text: '⚠️ Missed payments hurt your credit score! Defaults result in a loan ban.' });
     
@@ -920,10 +935,10 @@ async function handleBankInteraction(interaction) {
       const embed = new EmbedBuilder()
         .setColor(0x2ecc71)
         .setTitle('✅ Loan Approved!')
-        .setDescription(`Your loan of **${amount.toLocaleString()}** ${CURRENCY} has been deposited into your cash balance.`)
+        .setDescription(`Your loan of **${amount.toLocaleString()}** ${getCurrency(guildId)} has been deposited into your cash balance.`)
         .addFields(
-          { name: '💰 Total to Repay', value: `${loan.totalOwed.toLocaleString()} ${CURRENCY}`, inline: true },
-          { name: '📅 Payment Schedule', value: `${loan.paymentAmount.toLocaleString()} ${CURRENCY} ${paymentInterval}`, inline: true },
+          { name: '💰 Total to Repay', value: `${loan.totalOwed.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+          { name: '📅 Payment Schedule', value: `${loan.paymentAmount.toLocaleString()} ${getCurrency(guildId)} ${paymentInterval}`, inline: true },
           { name: '⏰ First Payment', value: `<t:${Math.floor(loan.nextPaymentTime / 1000)}:R>`, inline: true }
         )
         .setFooter({ text: '⚠️ Missed payments hurt your credit score! Defaults ban you from loans.' });
@@ -1004,7 +1019,7 @@ async function handleBankInteraction(interaction) {
 
   // Custom payment modal submit
   if (customId === 'bank_pay_custom_modal') {
-    const amount = parseInt(interaction.fields.getTextInputValue('payment_amount'));
+    const amount = parseInt(interaction.fields.getTextInputValue('payment_amount').replace(/,/g, ''));
     
     if (isNaN(amount) || amount <= 0) {
       return interaction.reply({ content: '❌ Invalid amount.', flags: 64 });
@@ -1017,7 +1032,7 @@ async function handleBankInteraction(interaction) {
     
     const remaining = loan.total_owed - loan.amount_paid;
     if (amount > remaining) {
-      return interaction.reply({ content: `❌ You only owe ${remaining.toLocaleString()} ${CURRENCY}`, flags: 64 });
+      return interaction.reply({ content: `❌ You only owe ${remaining.toLocaleString()} ${getCurrency(guildId)}`, flags: 64 });
     }
     
     await processPayment(interaction, guildId, userId, loan, amount);
@@ -1051,7 +1066,7 @@ async function handleBankInteraction(interaction) {
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Insufficient Funds')
-          .setDescription(`You need **${bond.price.toLocaleString()}** ${CURRENCY} in cash.\nYou have **${balance.cash.toLocaleString()}** ${CURRENCY}`)],
+          .setDescription(`You need **${bond.price.toLocaleString()}** ${getCurrency(guildId)} in cash.\nYou have **${balance.cash.toLocaleString()}** ${getCurrency(guildId)}`)],
         flags: 64
       });
     }
@@ -1086,7 +1101,7 @@ async function handleBankInteraction(interaction) {
         .setDescription(`**${interaction.user.displayName}** purchased the **${bond.name}** bond.`)
         .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
         .addFields(
-          { name: '💵 Price Paid', value: `${bond.price.toLocaleString()} ${CURRENCY}`, inline: true },
+          { name: '💵 Price Paid', value: `${bond.price.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
           { name: '🎭 Role Granted', value: `<@&${bond.role_id}>`, inline: true },
           { name: '📅 Expires', value: `<t:${Math.floor(result.expiresAt / 1000)}:D>`, inline: true }
         )
@@ -1120,7 +1135,7 @@ async function processPayment(interaction, guildId, userId, loan, amount) {
       embeds: [new EmbedBuilder()
         .setColor(0xe74c3c)
         .setTitle('❌ Insufficient Funds')
-        .setDescription(`You need **${amount.toLocaleString()}** ${CURRENCY} in your bank.\nYou have **${balance.bank.toLocaleString()}** ${CURRENCY}`)],
+        .setDescription(`You need **${amount.toLocaleString()}** ${getCurrency(guildId)} in your bank.\nYou have **${balance.bank.toLocaleString()}** ${getCurrency(guildId)}`)],
       flags: 64
     });
   }
@@ -1151,7 +1166,7 @@ async function processPayment(interaction, guildId, userId, loan, amount) {
       const embed = new EmbedBuilder()
         .setColor(0x2ecc71)
         .setTitle('🎉 Loan Paid Off!')
-        .setDescription(`Congratulations! You've paid off your entire loan!${isEarly ? ' 🌟 **Early payoff bonus!**' : ''}\n\n**Final Payment:** ${amount.toLocaleString()} ${CURRENCY}\n📊 Credit Score: ${formatCreditScore(creditInfo.score, guildId)}`);
+        .setDescription(`Congratulations! You've paid off your entire loan!${isEarly ? ' 🌟 **Early payoff bonus!**' : ''}\n\n**Final Payment:** ${amount.toLocaleString()} ${getCurrency(guildId)}\n📊 Credit Score: ${formatCreditScore(creditInfo.score, guildId)}`);
       
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -1166,9 +1181,9 @@ async function processPayment(interaction, guildId, userId, loan, amount) {
     const embed = new EmbedBuilder()
       .setColor(0x2ecc71)
       .setTitle('✅ Payment Successful')
-      .setDescription(`You paid **${amount.toLocaleString()}** ${CURRENCY} toward your loan.`)
+      .setDescription(`You paid **${amount.toLocaleString()}** ${getCurrency(guildId)} toward your loan.`)
       .addFields(
-        { name: 'Remaining Balance', value: `${newRemaining.toLocaleString()} ${CURRENCY}`, inline: true }
+        { name: 'Remaining Balance', value: `${newRemaining.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
       );
     
     const row = new ActionRowBuilder().addComponents(
@@ -1191,6 +1206,69 @@ async function processPayment(interaction, guildId, userId, loan, amount) {
         .setTitle('❌ Error')
         .setDescription('Failed to process payment. Please try again.')],
       components: [] 
+    });
+  }
+}
+
+// ============ BOUNTY BOARD ============
+async function showBountyBoard(interaction, guildId) {
+  try {
+    const { getActiveBounties, getInfamySettings, INFAMY_TIERS, getTierFromPoints } = require('../infamy');
+    const settings = getInfamySettings(guildId);
+    
+    if (!settings.enabled) {
+      return interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(0x95a5a6)
+          .setTitle('🏴‍☠️ Bounty Board')
+          .setDescription('The infamy system is currently disabled.')],
+        flags: 64
+      });
+    }
+    
+    const bounties = getActiveBounties(guildId);
+    
+    const embed = new EmbedBuilder()
+      .setColor(0xff0000)
+      .setTitle('🏴‍☠️ Bounty Board')
+      .setTimestamp();
+    
+    if (bounties.length === 0) {
+      embed.setDescription('No active bounties. The streets are clean... for now.');
+    } else {
+      let desc = `**${bounties.length}** active ${bounties.length === 1 ? 'bounty' : 'bounties'}:\n\n`;
+      
+      for (const bounty of bounties) {
+        let username = bounty.target_user_id;
+        try {
+          const user = await interaction.client.users.fetch(bounty.target_user_id);
+          username = user.username;
+        } catch (e) {}
+        
+        const tier = getTierFromPoints(bounty.posted_infamy, guildId);
+        const postedAgo = `<t:${Math.floor(bounty.posted_at / 1000)}:R>`;
+        
+        desc += `${tier.emoji} **${username}**\n`;
+        desc += `└ 💰 **${bounty.bounty_amount.toLocaleString()}** ${getCurrency(guildId)} • ${tier.name} • Posted ${postedAgo}\n\n`;
+      }
+      
+      desc += `*Successfully hack or rob a bounty target to claim their bounty!*`;
+      embed.setDescription(desc);
+    }
+    
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('bank_panel_back')
+        .setLabel('Back to Bank')
+        .setStyle(ButtonStyle.Secondary)
+    );
+    
+    return interaction.update({ embeds: [embed], components: [row] });
+  } catch (error) {
+    console.error('Error showing bounty board:', error);
+    return interaction.reply({
+      content: '❌ Failed to load bounty board.',
+      flags: 64
     });
   }
 }

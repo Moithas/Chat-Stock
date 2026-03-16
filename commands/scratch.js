@@ -22,8 +22,9 @@ const {
   getCardTypes,
   CARD_CONFIGS
 } = require('../scratchcard');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Note: The /scratch command has been removed. Use /scratcher instead.
 // This file is kept only for handling legacy scratch card buttons (scratch_play_, scratch_reveal_, etc.)
@@ -93,7 +94,7 @@ async function handleBuy(interaction, guildId, userId) {
   const balanceData = await getBalance(guildId, userId);
   if (balanceData.total < price) {
     return interaction.reply({
-      content: `❌ You need **${price.toLocaleString()}** ${CURRENCY} to buy a ${config.name} card! You have **${balanceData.total.toLocaleString()}** ${CURRENCY}`,
+      content: `❌ You need **${price.toLocaleString()}** ${getCurrency(guildId)} to buy a ${config.name} card! You have **${balanceData.total.toLocaleString()}** ${getCurrency(guildId)}`,
       flags: 64
     });
   }
@@ -116,7 +117,7 @@ async function handleBuy(interaction, guildId, userId) {
     .setTitle(`${config.emoji} ${config.name} Purchased!`)
     .setDescription(`Ticket #${ticket.id}\n\nGood luck! Scratch to reveal your prizes!`)
     .addFields(
-      { name: '💰 Cost', value: `**${price.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '💰 Cost', value: `**${price.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '📊 Grid', value: `${config.grid.rows}x${config.grid.cols} (${config.grid.rows * config.grid.cols} boxes)`, inline: true }
     )
     .setImage(`attachment://scratch-${ticket.id}.png`)
@@ -344,15 +345,15 @@ async function finishCard(interaction, ticket, guildId, userId) {
   if (winType === 'JACKPOT' || winType === 'MEGA JACKPOT') {
     resultColor = 0xFFD700;
     resultTitle = `🎉 ${winType}! ${config.emoji} ${config.name}`;
-    resultDesc = `**INCREDIBLE!** You hit the ${winType}!\n\n💎 **Won: ${winnings.toLocaleString()}** ${CURRENCY}`;
+    resultDesc = `**INCREDIBLE!** You hit the ${winType}!\n\n💎 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
   } else if (winType === 'MEGA WIN') {
     resultColor = 0xE91E63;
     resultTitle = `🎊 MEGA WIN! ${config.emoji} ${config.name}`;
-    resultDesc = `**AMAZING!** You got a MEGA WIN!\n\n🏆 **Won: ${winnings.toLocaleString()}** ${CURRENCY}`;
+    resultDesc = `**AMAZING!** You got a MEGA WIN!\n\n🏆 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
   } else if (winType === 'WIN') {
     resultColor = 0x4CAF50;
     resultTitle = `✨ Winner! ${config.emoji} ${config.name}`;
-    resultDesc = `**Congratulations!** You matched 3!\n\n💰 **Won: ${winnings.toLocaleString()}** ${CURRENCY}`;
+    resultDesc = `**Congratulations!** You matched 3!\n\n💰 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
   } else if (winType === 'FREE_TICKET') {
     resultColor = 0x9C27B0;
     resultTitle = `🎟️ Free Ticket! ${config.emoji} ${config.name}`;
@@ -360,7 +361,7 @@ async function finishCard(interaction, ticket, guildId, userId) {
   } else {
     resultColor = 0x9E9E9E;
     resultTitle = `${config.emoji} ${config.name} - No Win`;
-    resultDesc = `Better luck next time!\n\n💸 **Cost:** ${cardSettings.price.toLocaleString()} ${CURRENCY}`;
+    resultDesc = `Better luck next time!\n\n💸 **Cost:** ${cardSettings.price.toLocaleString()} ${getCurrency(guildId)}`;
   }
 
   const embed = new EmbedBuilder()
@@ -378,8 +379,8 @@ async function finishCard(interaction, ticket, guildId, userId) {
   } else {
     embed.addFields(
       { name: '🎟️ Ticket', value: `#${ticket.id}`, inline: true },
-      { name: '💵 Cost', value: `${cardSettings.price.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '📊 Net', value: `${(winnings - cardSettings.price).toLocaleString()} ${CURRENCY}`, inline: true }
+      { name: '💵 Cost', value: `${cardSettings.price.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '📊 Net', value: `${(winnings - cardSettings.price).toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     );
   }
   
@@ -489,16 +490,16 @@ async function handleInfo(interaction, guildId) {
     const settings = allSettings[cardType];
     const totalBoxes = config.grid.rows * config.grid.cols;
     
-    let prizesText = `Match 3: **${settings.match3}x** (${(settings.price * settings.match3).toLocaleString()} ${CURRENCY})`;
+    let prizesText = `Match 3: **${settings.match3}x** (${(settings.price * settings.match3).toLocaleString()} ${getCurrency(guildId)})`;
     if (settings.match4) {
-      prizesText += `\nMatch 4: **${settings.match4}x** (${(settings.price * settings.match4).toLocaleString()} ${CURRENCY})`;
+      prizesText += `\nMatch 4: **${settings.match4}x** (${(settings.price * settings.match4).toLocaleString()} ${getCurrency(guildId)})`;
     }
-    prizesText += `\nJackpot (💎): **${settings.jackpot}x** (${(settings.price * settings.jackpot).toLocaleString()} ${CURRENCY})`;
+    prizesText += `\nJackpot (💎): **${settings.jackpot}x** (${(settings.price * settings.jackpot).toLocaleString()} ${getCurrency(guildId)})`;
     
     embed.addFields({
       name: `${config.emoji} ${config.name}`,
       value: [
-        `**Price:** ${settings.price.toLocaleString()} ${CURRENCY}`,
+        `**Price:** ${settings.price.toLocaleString()} ${getCurrency(guildId)}`,
         `**Grid:** ${config.grid.rows}x${config.grid.cols} (${totalBoxes} boxes)`,
         `**Prizes:**`,
         prizesText
@@ -551,9 +552,9 @@ async function handleStats(interaction, guildId, userId) {
       name: `${config.emoji} ${config.name}`,
       value: [
         `Cards: **${stat.total_purchased}**`,
-        `Spent: **${stat.total_spent.toLocaleString()}** ${CURRENCY}`,
-        `Won: **${stat.total_won.toLocaleString()}** ${CURRENCY}`,
-        `Net: **${(stat.total_won - stat.total_spent).toLocaleString()}** ${CURRENCY}`,
+        `Spent: **${stat.total_spent.toLocaleString()}** ${getCurrency(guildId)}`,
+        `Won: **${stat.total_won.toLocaleString()}** ${getCurrency(guildId)}`,
+        `Net: **${(stat.total_won - stat.total_spent).toLocaleString()}** ${getCurrency(guildId)}`,
         `Jackpots: **${stat.jackpots_won}** 💎`
       ].join('\n'),
       inline: true
@@ -562,9 +563,9 @@ async function handleStats(interaction, guildId, userId) {
 
   embed.setDescription([
     `**Total Cards:** ${totalPurchased}`,
-    `**Total Spent:** ${totalSpent.toLocaleString()} ${CURRENCY}`,
-    `**Total Won:** ${totalWon.toLocaleString()} ${CURRENCY}`,
-    `**Net Profit:** ${(totalWon - totalSpent).toLocaleString()} ${CURRENCY}`,
+    `**Total Spent:** ${totalSpent.toLocaleString()} ${getCurrency(guildId)}`,
+    `**Total Won:** ${totalWon.toLocaleString()} ${getCurrency(guildId)}`,
+    `**Net Profit:** ${(totalWon - totalSpent).toLocaleString()} ${getCurrency(guildId)}`,
     `**Jackpots:** ${totalJackpots} 💎`
   ].join('\n'));
 

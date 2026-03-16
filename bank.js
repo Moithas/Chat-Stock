@@ -205,6 +205,27 @@ function initBank(database) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_bond_history_guild_user ON bond_history(guild_id, user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_credit_scores_guild_user ON loan_credit_scores(guild_id, user_id)`);
   
+  // Backfill expired_at for any already-expired bonds missing it in bond_history
+  try {
+    db.run(`
+      UPDATE bond_history SET expired_at = (
+        SELECT ab.expires_at FROM active_bonds ab
+        WHERE ab.guild_id = bond_history.guild_id
+          AND ab.user_id = bond_history.user_id
+          AND ab.purchased_at = bond_history.purchased_at
+          AND ab.status = 'expired'
+      )
+      WHERE expired_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM active_bonds ab
+          WHERE ab.guild_id = bond_history.guild_id
+            AND ab.user_id = bond_history.user_id
+            AND ab.purchased_at = bond_history.purchased_at
+            AND ab.status = 'expired'
+        )
+    `);
+  } catch (e) {}
+
   console.log('🏦 Bank system initialized');
 }
 
@@ -634,7 +655,17 @@ function getExpiredBonds() {
 
 function expireBond(bondId) {
   if (!db) return;
+  // Mark active bond as expired
+  const bondData = db.exec('SELECT guild_id, user_id, purchased_at FROM active_bonds WHERE id = ?', [bondId]);
   db.run(`UPDATE active_bonds SET status = 'expired' WHERE id = ?`, [bondId]);
+  // Update bond_history so profile can track collected bonds
+  if (bondData.length > 0 && bondData[0].values.length > 0) {
+    const [guildId, userId, purchasedAt] = bondData[0].values[0];
+    db.run(
+      `UPDATE bond_history SET expired_at = ? WHERE guild_id = ? AND user_id = ? AND purchased_at = ? AND expired_at IS NULL`,
+      [Date.now(), guildId, userId, purchasedAt]
+    );
+  }
 }
 
 function recordBondHistory(guildId, userId, bondName, price, durationDays) {

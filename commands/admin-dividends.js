@@ -1,8 +1,8 @@
 // Admin Dividends Panel - Fully Modular with handleInteraction
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // ==================== INTERACTION IDS ====================
 const BUTTON_IDS = [
@@ -421,7 +421,7 @@ async function showRoleIncomePanel(interaction, guildId) {
       let fieldValue = '';
       for (const ri of chunk) {
         const status = ri.enabled ? '✅' : '❌';
-        fieldValue += `${status} <@&${ri.role_id}> - **${ri.amount.toLocaleString()}** ${CURRENCY} every ${ri.cooldown_hours}h\n`;
+        fieldValue += `${status} <@&${ri.role_id}> - **${ri.amount.toLocaleString()}** ${getCurrency(guildId)} every ${ri.cooldown_hours}h\n`;
       }
       const fieldName = i === 0 ? `Role Incomes (${roleIncomes.length} total)` : '\u200B';
       embed.addFields({ name: fieldName, value: fieldValue });
@@ -474,7 +474,7 @@ async function showRoleIncomeEditPanel(interaction, guildId, roleIncomeId) {
     .setTitle('✏️ Edit Role Income')
     .addFields(
       { name: '🎭 Role', value: `<@&${ri.role_id}>`, inline: true },
-      { name: '💵 Amount', value: `${ri.amount.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💵 Amount', value: `${ri.amount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '⏱️ Cooldown', value: `${ri.cooldown_hours} hours`, inline: true },
       { name: '📊 Status', value: ri.enabled ? '✅ Enabled' : '❌ Disabled', inline: true }
     );

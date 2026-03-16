@@ -1,7 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { addMoney, addToBank, forceRemoveMoney, removeFromBank, getBalance } = require('../economy');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -81,7 +82,7 @@ module.exports = {
     const embed = new EmbedBuilder()
       .setColor(amount >= 0 ? 0x2ecc71 : 0xe74c3c)
       .setTitle(`💰 ${action} Money`)
-      .setDescription(`${action} ${absAmount.toLocaleString()} ${CURRENCY} ${amount >= 0 ? 'to' : 'from'} ${targetUser.username}'s ${type}`)
+      .setDescription(`${action} ${absAmount.toLocaleString()} ${getCurrency(guildId)} ${amount >= 0 ? 'to' : 'from'} ${targetUser.username}'s ${type}`)
       .addFields(
         { name: 'Before', value: `💵 Cash: ${before.cash.toLocaleString()}\n🏦 Bank: ${before.bank.toLocaleString()}\n💰 Total: ${before.total.toLocaleString()}`, inline: true },
         { name: 'After', value: `💵 Cash: ${after.cash.toLocaleString()}\n🏦 Bank: ${after.bank.toLocaleString()}\n💰 Total: ${after.total.toLocaleString()}`, inline: true },

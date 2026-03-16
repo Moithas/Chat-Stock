@@ -11,9 +11,9 @@ const {
 } = require('discord.js');
 const { getWealthTaxSettings, updateWealthTaxSettings, previewWealthTaxCollection, getDayName } = require('../wealth-tax');
 const { getLotteryInfo } = require('../gambling');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [
@@ -205,8 +205,8 @@ async function showWealthTaxPanel(interaction, guildId, useEditReply = false) {
   // Show collection preview
   embed.addFields(
     { name: '👥 Taxable Users', value: `${preview.taxableUsers} / ${preview.totalUsers}`, inline: true },
-    { name: '💰 Projected Collection', value: `${preview.totalTax.toLocaleString()} ${CURRENCY}`, inline: true },
-    { name: '🎰 Projected Jackpot', value: `${preview.projectedJackpot.toLocaleString()} ${CURRENCY}`, inline: true }
+    { name: '💰 Projected Collection', value: `${preview.totalTax.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+    { name: '🎰 Projected Jackpot', value: `${preview.projectedJackpot.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
   );
   
   // Show last collection info
@@ -214,7 +214,7 @@ async function showWealthTaxPanel(interaction, guildId, useEditReply = false) {
     const lastDate = new Date(settings.lastCollection);
     embed.addFields({
       name: '📜 Last Collection',
-      value: `${lastDate.toLocaleDateString()} ${lastDate.toLocaleTimeString()} - **${settings.lastCollectionAmount.toLocaleString()}** ${CURRENCY}`,
+      value: `${lastDate.toLocaleDateString()} ${lastDate.toLocaleTimeString()} - **${settings.lastCollectionAmount.toLocaleString()}** ${getCurrency(guildId)}`,
       inline: false
     });
   }
@@ -602,9 +602,9 @@ async function showWealthTaxPreviewPanel(interaction, guildId) {
     .setDescription('Preview of what would be collected if tax ran now.')
     .addFields(
       { name: '👥 Users to Tax', value: `${preview.taxableUsers} / ${preview.totalUsers}`, inline: true },
-      { name: '💰 Total to Collect', value: `${preview.totalTax.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '🎰 Current Jackpot', value: `${preview.currentJackpot.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '🎰 After Collection', value: `${preview.projectedJackpot.toLocaleString()} ${CURRENCY}`, inline: false }
+      { name: '💰 Total to Collect', value: `${preview.totalTax.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '🎰 Current Jackpot', value: `${preview.currentJackpot.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '🎰 After Collection', value: `${preview.projectedJackpot.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
     );
   
   // Show top taxpayers - split into chunks to avoid 1024 char limit
@@ -616,7 +616,7 @@ async function showWealthTaxPreviewPanel(interaction, guildId) {
     for (let i = 0; i < topUsers.length; i++) {
       const user = topUsers[i];
       const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-      const userLine = `${medal} <@${user.userId}>: **${user.tax.toLocaleString()}** ${CURRENCY}\n   Wealth: ${user.wealth.total.toLocaleString()} (💵${user.wealth.cash.toLocaleString()} + 📈${user.wealth.stocks.toLocaleString()} + 🏠${user.wealth.properties.toLocaleString()})\n`;
+      const userLine = `${medal} <@${user.userId}>: **${user.tax.toLocaleString()}** ${getCurrency(guildId)}\n   Wealth: ${user.wealth.total.toLocaleString()} (💵${user.wealth.cash.toLocaleString()} + 📈${user.wealth.stocks.toLocaleString()} + 🏠${user.wealth.properties.toLocaleString()})\n`;
       
       // If adding this user would exceed limit, start a new field
       if ((topText + userLine).length > 900) {
@@ -676,7 +676,7 @@ async function showLastCollectionPanel(interaction, guildId) {
     .setTitle('📜 Last Wealth Tax Collection')
     .setDescription(`Collection ran on ${lastDate.toLocaleDateString()} at ${lastDate.toLocaleTimeString()}`)
     .addFields(
-      { name: '💰 Total Collected', value: `${settings.lastCollectionAmount.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💰 Total Collected', value: `${settings.lastCollectionAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '👥 Users Taxed', value: `${details.usersAffected} / ${details.totalUsers}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true }
     );
@@ -684,7 +684,7 @@ async function showLastCollectionPanel(interaction, guildId) {
   // Show top taxpayers
   if (details.topPayers && details.topPayers.length > 0) {
     const topText = details.topPayers.map((p, i) => 
-      `${i + 1}. <@${p.userId}>: ${p.amount.toLocaleString()} ${CURRENCY}`
+      `${i + 1}. <@${p.userId}>: ${p.amount.toLocaleString()} ${getCurrency(guildId)}`
     ).join('\n');
     embed.addFields({ name: '🏆 Top Taxpayers', value: topText });
   }
@@ -724,8 +724,8 @@ async function showLastCollectionPanel(interaction, guildId) {
     
     if (liquidationUsers.length > 0) {
       const liquidationText = liquidationUsers.map(u => 
-        `<@${u.userId}>: Owed ${u.taxAmount.toLocaleString()} ${CURRENCY}, had ${u.cashWealth.toLocaleString()} ${CURRENCY} cash\n` +
-        `└─ Deficit: ${u.deficit.toLocaleString()} ${CURRENCY} (likely liquidated stocks)`
+        `<@${u.userId}>: Owed ${u.taxAmount.toLocaleString()} ${getCurrency(guildId)}, had ${u.cashWealth.toLocaleString()} ${getCurrency(guildId)} cash\n` +
+        `└─ Deficit: ${u.deficit.toLocaleString()} ${getCurrency(guildId)} (likely liquidated stocks)`
       ).join('\n\n');
       
       embed.addFields({ 

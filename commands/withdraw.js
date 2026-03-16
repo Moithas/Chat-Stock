@@ -1,7 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getBalance, removeFromBank, addMoney } = require('../economy');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -45,7 +46,7 @@ module.exports = {
         embeds: [new EmbedBuilder()
           .setColor(0xe74c3c)
           .setTitle('❌ Insufficient Funds')
-          .setDescription(`You only have **${balance.bank.toLocaleString()}** ${CURRENCY} in your bank.`)],
+          .setDescription(`You only have **${balance.bank.toLocaleString()}** ${getCurrency(guildId)} in your bank.`)],
         ephemeral: true
       });
     }
@@ -69,11 +70,11 @@ module.exports = {
     const embed = new EmbedBuilder()
       .setColor(0x2ecc71)
       .setTitle('✅ Withdrawal Successful')
-      .setDescription(`You withdrew **${amount.toLocaleString()}** ${CURRENCY} from your bank.`)
+      .setDescription(`You withdrew **${amount.toLocaleString()}** ${getCurrency(guildId)} from your bank.`)
       .addFields(
-        { name: '💵 Cash', value: `${newBalance.cash.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: '🏦 Bank', value: `${newBalance.bank.toLocaleString()} ${CURRENCY}`, inline: true },
-        { name: '💎 Total', value: `${newBalance.total.toLocaleString()} ${CURRENCY}`, inline: true }
+        { name: '💵 Cash', value: `${newBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+        { name: '🏦 Bank', value: `${newBalance.bank.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+        { name: '💎 Total', value: `${newBalance.total.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
       )
       .setTimestamp();
 

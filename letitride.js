@@ -272,12 +272,12 @@ function evaluateHand(cards) {
 
 // ============ GAME FUNCTIONS ============
 
-function hasActiveGame(userId) {
-  return activeGames.has(userId);
+function hasActiveGame(guildId, userId) {
+  return activeGames.has(`${guildId}_${userId}`);
 }
 
-function getActiveGame(userId) {
-  return activeGames.get(userId);
+function getActiveGame(guildId, userId) {
+  return activeGames.get(`${guildId}_${userId}`);
 }
 
 function startGame(guildId, userId, username, betAmount) {
@@ -309,12 +309,12 @@ function startGame(guildId, userId, username, betAmount) {
     timer: null
   };
   
-  activeGames.set(userId, game);
+  activeGames.set(`${guildId}_${userId}`, game);
   return game;
 }
 
-function pullBackBet(userId, betNumber) {
-  const game = activeGames.get(userId);
+function pullBackBet(guildId, userId, betNumber) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (!game) return null;
   
   if (betNumber === 1 && game.status === 'decision_1' && game.bet1) {
@@ -337,8 +337,8 @@ function pullBackBet(userId, betNumber) {
   return null;
 }
 
-function letItRide(userId) {
-  const game = activeGames.get(userId);
+function letItRide(guildId, userId) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (!game) return null;
   
   if (game.status === 'decision_1') {
@@ -380,8 +380,8 @@ function resolveGame(game) {
   return game;
 }
 
-function endGame(userId) {
-  const game = activeGames.get(userId);
+function endGame(guildId, userId) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (!game) return null;
   
   console.log(`[Let It Ride] endGame: userId=${userId}, guildId=${game.guildId}, status=${game.status}`);
@@ -398,13 +398,13 @@ function endGame(userId) {
   updateStats(game);
   
   // Remove from active games
-  activeGames.delete(userId);
+  activeGames.delete(`${guildId}_${userId}`);
   
   return game;
 }
 
-function forceEndGame(userId, reason = 'timeout') {
-  const game = activeGames.get(userId);
+function forceEndGame(guildId, userId, reason = 'timeout') {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (!game) return null;
   
   // Clear timer
@@ -415,7 +415,7 @@ function forceEndGame(userId, reason = 'timeout') {
   // If not resolved, auto pull-back remaining bets (conservative, player-friendly)
   while (game.status !== 'resolved') {
     const betNum = game.status === 'decision_1' ? 1 : 2;
-    pullBackBet(userId, betNum);
+    pullBackBet(guildId, userId, betNum);
   }
   
   game.timeoutReason = reason;
@@ -423,21 +423,21 @@ function forceEndGame(userId, reason = 'timeout') {
   // Record and cleanup
   recordHistory(game);
   updateStats(game);
-  activeGames.delete(userId);
+  activeGames.delete(`${guildId}_${userId}`);
   
   return game;
 }
 
-function setGameMessage(userId, messageId, channelId) {
-  const game = activeGames.get(userId);
+function setGameMessage(guildId, userId, messageId, channelId) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (game) {
     game.messageId = messageId;
     game.channelId = channelId;
   }
 }
 
-function setGameTimer(userId, callback, timeoutMs) {
-  const game = activeGames.get(userId);
+function setGameTimer(guildId, userId, callback, timeoutMs) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (game) {
     if (game.timer) {
       clearTimeout(game.timer);

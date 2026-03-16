@@ -21,8 +21,9 @@ const {
   resolveSplitGame
 } = require('../gambling');
 const { generateBlackjackImage } = require('../cardImages');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 const DEALER_CARD_DELAY = 1200; // milliseconds between dealer cards
 
 // Prevent double-click processing on buttons
@@ -47,7 +48,7 @@ module.exports = {
     await interaction.deferReply();
 
     // Check for existing game
-    const existingGame = getBlackjackGame(userId);
+    const existingGame = getBlackjackGame(guildId, userId);
     if (existingGame) {
       return interaction.editReply({
         content: '❌ You already have an active blackjack game! Finish it first.'
@@ -58,13 +59,13 @@ module.exports = {
     const balanceData = await getBalance(guildId, userId);
     if (balanceData.total < bet) {
       return interaction.editReply({
-        content: `❌ You don't have enough! Your balance: **${balanceData.total.toLocaleString()}** ${CURRENCY}`
+        content: `❌ You don't have enough! Your balance: **${balanceData.total.toLocaleString()}** ${getCurrency(guildId)}`
       });
     }
 
     // Deduct bet from total balance (cash first, then bank) and start game
     await removeFromTotal(guildId, userId, bet, 'Blackjack bet');
-    const game = startBlackjackGame(userId, bet, guildId);
+    const game = startBlackjackGame(guildId, userId, bet);
 
     try {
       // Check for immediate win/push (natural blackjack)
@@ -72,24 +73,24 @@ module.exports = {
         const winnings = Math.floor(bet * 2.5); // Blackjack pays 3:2
         await addMoney(guildId, userId, winnings, 'Blackjack win');
         updateBlackjackStats(userId, 'blackjack', winnings - bet);
-        endBlackjackGame(userId);
+        endBlackjackGame(guildId, userId);
 
-        const { embed, attachment } = await createGameEmbed(game, interaction.user, true, winnings - bet);
+        const { embed, attachment } = await createGameEmbed(game, interaction.user, true, winnings - bet, guildId);
         return interaction.editReply({ embeds: [embed], files: [attachment] });
       }
 
       if (game.status === 'push') {
         await addMoney(guildId, userId, bet, 'Blackjack push'); // Return bet
         updateBlackjackStats(userId, 'push', 0);
-        endBlackjackGame(userId);
+        endBlackjackGame(guildId, userId);
 
-        const { embed, attachment } = await createGameEmbed(game, interaction.user, true, 0);
+        const { embed, attachment } = await createGameEmbed(game, interaction.user, true, 0, guildId);
         return interaction.editReply({ embeds: [embed], files: [attachment] });
       }
 
       // Check if insurance is being offered
       if (game.status === 'insurance') {
-        const { embed, attachment } = await createInsuranceEmbed(game, interaction.user);
+        const { embed, attachment } = await createInsuranceEmbed(game, interaction.user, guildId);
         const maxInsurance = Math.floor(bet / 2);
         const balance = balanceData.total; // Use total balance for button check
         const buttons = createInsuranceButtons(maxInsurance, balance >= maxInsurance);
@@ -97,7 +98,7 @@ module.exports = {
       }
 
       // Normal game - show buttons
-      const { embed, attachment } = await createGameEmbed(game, interaction.user, false);
+      const { embed, attachment } = await createGameEmbed(game, interaction.user, false, 0, guildId);
       const canDouble = balanceData.total >= bet;
       const canSplit = balanceData.total >= bet && canSplitHand(game.playerHand);
       const buttons = createGameButtons(game, canDouble, canSplit);
@@ -107,15 +108,15 @@ module.exports = {
       // If anything fails (like image loading), refund the bet and clean up
       console.error('Blackjack game error, refunding bet:', error);
       await addMoney(guildId, userId, bet, 'Blackjack refund (error)');
-      endBlackjackGame(userId);
+      endBlackjackGame(guildId, userId);
       return interaction.editReply({
-        content: `❌ Something went wrong starting the game. Your bet of **${bet.toLocaleString()}** ${CURRENCY} has been refunded.`
+        content: `❌ Something went wrong starting the game. Your bet of **${bet.toLocaleString()}** ${getCurrency(guildId)} has been refunded.`
       });
     }
   }
 };
 
-async function createGameEmbed(game, user, gameOver, winnings = 0) {
+async function createGameEmbed(game, user, gameOver, winnings = 0, guildId) {
   const playerValue = calculateHandValue(game.playerHand);
   const dealerValue = calculateHandValue(game.dealerHand);
   
@@ -128,23 +129,23 @@ async function createGameEmbed(game, user, gameOver, winnings = 0) {
       case 'blackjack':
         color = 0xf1c40f; // Gold
         title = '🎰 BLACKJACK!';
-        description = `You got a natural blackjack! **+${winnings.toLocaleString()}** ${CURRENCY}`;
+        description = `You got a natural blackjack! **+${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
         break;
       case 'playerWin':
       case 'dealerBust':
         color = 0x2ecc71; // Green
         title = '🎉 You Win!';
         description = game.status === 'dealerBust' 
-          ? `Dealer busts! **+${winnings.toLocaleString()}** ${CURRENCY}`
-          : `You beat the dealer! **+${winnings.toLocaleString()}** ${CURRENCY}`;
+          ? `Dealer busts! **+${winnings.toLocaleString()}** ${getCurrency(guildId)}`
+          : `You beat the dealer! **+${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
         break;
       case 'dealerWin':
       case 'playerBust':
         color = 0xe74c3c; // Red
         title = '😢 You Lose';
         description = game.status === 'playerBust'
-          ? `Bust! You went over 21. **-${game.bet.toLocaleString()}** ${CURRENCY}`
-          : `Dealer wins. **-${game.bet.toLocaleString()}** ${CURRENCY}`;
+          ? `Bust! You went over 21. **-${game.bet.toLocaleString()}** ${getCurrency(guildId)}`
+          : `Dealer wins. **-${game.bet.toLocaleString()}** ${getCurrency(guildId)}`;
         break;
       case 'push':
         color = 0x95a5a6; // Gray
@@ -171,7 +172,7 @@ async function createGameEmbed(game, user, gameOver, winnings = 0) {
   const embed = new EmbedBuilder()
     .setColor(color)
     .setTitle(title)
-    .setDescription(description || `Bet: **${game.bet.toLocaleString()}** ${CURRENCY}`)
+    .setDescription(description || `Bet: **${game.bet.toLocaleString()}** ${getCurrency(guildId)}`)
     .setImage('attachment://blackjack.png')
     .setFooter({ text: footerText })
     .setTimestamp();
@@ -180,7 +181,7 @@ async function createGameEmbed(game, user, gameOver, winnings = 0) {
 }
 
 // Create insurance offer embed
-async function createInsuranceEmbed(game, user) {
+async function createInsuranceEmbed(game, user, guildId) {
   const playerValue = calculateHandValue(game.playerHand);
   const maxInsurance = Math.floor(game.bet / 2);
   
@@ -193,10 +194,10 @@ async function createInsuranceEmbed(game, user) {
     .setTitle('🛡️ Insurance?')
     .setDescription(
       `Dealer shows an **Ace**!\n\n` +
-      `Bet: **${game.bet.toLocaleString()}** ${CURRENCY}\n` +
+      `Bet: **${game.bet.toLocaleString()}** ${getCurrency(guildId)}\n` +
       `Your hand: **${playerValue}**\n\n` +
       `Would you like to take insurance?\n` +
-      `• Insurance costs up to **${maxInsurance.toLocaleString()}** ${CURRENCY} (half your bet)\n` +
+      `• Insurance costs up to **${maxInsurance.toLocaleString()}** ${getCurrency(guildId)} (half your bet)\n` +
       `• If dealer has Blackjack, insurance pays **2:1**\n` +
       `• If dealer doesn't have Blackjack, you lose the insurance bet`
     )
@@ -278,7 +279,7 @@ module.exports.handleBlackjackButton = async function(interaction) {
     return interaction.reply({ content: '⏳ Processing your last action...', flags: 64 });
   }
 
-  const game = getBlackjackGame(userId);
+  const game = getBlackjackGame(guildId, userId);
 
   if (!game) {
     return interaction.reply({
@@ -309,32 +310,32 @@ module.exports.handleBlackjackButton = async function(interaction) {
       
       if (balanceData.total < insuranceAmount) {
         return interaction.followUp({
-          content: `❌ You need **${insuranceAmount.toLocaleString()}** ${CURRENCY} for insurance!`,
+          content: `❌ You need **${insuranceAmount.toLocaleString()}** ${getCurrency(guildId)} for insurance!`,
           flags: 64
         });
       }
       
       await removeFromTotal(guildId, userId, insuranceAmount, 'Blackjack insurance');
-      blackjackTakeInsurance(userId, insuranceAmount);
+      blackjackTakeInsurance(guildId, userId, insuranceAmount);
     } else {
-      blackjackDeclineInsurance(userId);
+      blackjackDeclineInsurance(guildId, userId);
     }
 
     // Check if dealer has blackjack
-    const updatedGame = getBlackjackGame(userId);
-    if (dealerHasBlackjack(userId)) {
+    const updatedGame = getBlackjackGame(guildId, userId);
+    if (dealerHasBlackjack(guildId, userId)) {
       return handleDealerBlackjack(interaction, userId, guildId, updatedGame);
     }
 
     // Dealer doesn't have blackjack - continue game
     // If player took insurance, they lost it
-    const { embed, attachment } = await createGameEmbed(updatedGame, interaction.user, false);
+    const { embed, attachment } = await createGameEmbed(updatedGame, interaction.user, false, 0, guildId);
     const balanceData = await getBalance(guildId, userId);
     const buttons = createGameButtons(updatedGame, balanceData.total >= updatedGame.bet);
     
     let insuranceMsg = '';
     if (updatedGame.insuranceBet > 0) {
-      insuranceMsg = `\n\n*Dealer doesn't have Blackjack. Insurance lost: **-${updatedGame.insuranceBet.toLocaleString()}** ${CURRENCY}*`;
+      insuranceMsg = `\n\n*Dealer doesn't have Blackjack. Insurance lost: **-${updatedGame.insuranceBet.toLocaleString()}** ${getCurrency(guildId)}*`;
     }
     
     const modifiedEmbed = EmbedBuilder.from(embed)
@@ -358,7 +359,7 @@ module.exports.handleBlackjackButton = async function(interaction) {
   if (action === 'bj_hit') {
     // Check if playing split hand
     if (game.hasSplit && game.currentHand === 'main') {
-      updatedGame = blackjackHit(userId);
+      updatedGame = blackjackHit(guildId, userId);
       
       // Check if main hand busted or got 21
       if (updatedGame.status === 'playerBust' || calculateHandValue(updatedGame.playerHand) === 21) {
@@ -377,7 +378,7 @@ module.exports.handleBlackjackButton = async function(interaction) {
       return interaction.editReply({ embeds: [embed], files: [attachment], components: [buttons] });
     }
     
-    updatedGame = blackjackHit(userId);
+    updatedGame = blackjackHit(guildId, userId);
     // If player busted or got 21, no dealer turn needed
     if (updatedGame.status === 'playerBust') {
       // Player busted - game over (no split)
@@ -401,12 +402,12 @@ module.exports.handleBlackjackButton = async function(interaction) {
     const balanceData = await getBalance(guildId, userId);
     if (balanceData.total < game.bet) {
       return interaction.followUp({
-        content: `❌ You need **${game.bet.toLocaleString()}** more ${CURRENCY} to double down!`,
+        content: `❌ You need **${game.bet.toLocaleString()}** more ${getCurrency(guildId)} to double down!`,
         flags: 64
       });
     }
     await removeFromTotal(guildId, userId, game.bet, 'Blackjack double down');
-    updatedGame = blackjackDoubleDown(userId);
+    updatedGame = blackjackDoubleDown(guildId, userId);
     // Double down always triggers dealer turn (unless player busted)
     if (updatedGame.status !== 'playerBust') {
       triggerDealerTurn = true;
@@ -416,7 +417,7 @@ module.exports.handleBlackjackButton = async function(interaction) {
     const balanceData = await getBalance(guildId, userId);
     if (balanceData.total < game.bet) {
       return interaction.followUp({
-        content: `❌ You need **${game.bet.toLocaleString()}** more ${CURRENCY} to split!`,
+        content: `❌ You need **${game.bet.toLocaleString()}** more ${getCurrency(guildId)} to split!`,
         flags: 64
       });
     }
@@ -427,7 +428,7 @@ module.exports.handleBlackjackButton = async function(interaction) {
       });
     }
     await removeFromTotal(guildId, userId, game.bet, 'Blackjack split');
-    updatedGame = blackjackSplit(userId);
+    updatedGame = blackjackSplit(guildId, userId);
     
     // Show split game with both hands
     const { embed, attachment } = await createSplitGameEmbed(updatedGame, interaction.user, false);
@@ -438,7 +439,7 @@ module.exports.handleBlackjackButton = async function(interaction) {
     if (!game.hasSplit || game.currentHand !== 'split') {
       return interaction.followUp({ content: '❌ Invalid action.', flags: 64 });
     }
-    updatedGame = blackjackHitSplit(userId);
+    updatedGame = blackjackHitSplit(guildId, userId);
     
     if (updatedGame.splitStatus === 'bust' || updatedGame.splitStatus === 'stand') {
       // Split hand is done, resolve the game
@@ -453,7 +454,7 @@ module.exports.handleBlackjackButton = async function(interaction) {
     if (!game.hasSplit || game.currentHand !== 'split') {
       return interaction.followUp({ content: '❌ Invalid action.', flags: 64 });
     }
-    updatedGame = blackjackStandSplit(userId);
+    updatedGame = blackjackStandSplit(guildId, userId);
     return await resolveSplitAndShow(interaction, userId, guildId, updatedGame);
   }
 
@@ -466,7 +467,7 @@ module.exports.handleBlackjackButton = async function(interaction) {
 
   // If player is still playing (didn't bust), show their current hand
   if (updatedGame.status === 'playing' && !triggerDealerTurn) {
-    const { embed, attachment } = await createGameEmbed(updatedGame, interaction.user, false, 0);
+    const { embed, attachment } = await createGameEmbed(updatedGame, interaction.user, false, 0, guildId);
     const components = [createGameButtons(updatedGame, false)];
     return interaction.editReply({ embeds: [embed], files: [attachment], components });
   }
@@ -474,8 +475,8 @@ module.exports.handleBlackjackButton = async function(interaction) {
   // If player busted, show result immediately
   if (updatedGame.status === 'playerBust') {
     updateBlackjackStats(userId, 'loss', updatedGame.bet);
-    endBlackjackGame(userId);
-    const { embed, attachment } = await createGameEmbed(updatedGame, interaction.user, true, 0);
+    endBlackjackGame(guildId, userId);
+    const { embed, attachment } = await createGameEmbed(updatedGame, interaction.user, true, 0, guildId);
     return interaction.editReply({ embeds: [embed], files: [attachment], components: [] });
   }
 
@@ -489,27 +490,27 @@ module.exports.handleBlackjackButton = async function(interaction) {
 // Animate dealer's turn - reveal cards one at a time
 async function playDealerTurnAnimated(interaction, userId, guildId, game) {
   // First, show the dealer's hidden card (reveal the hole card)
-  const { embed: revealEmbed, attachment: revealAttachment } = await createDealerTurnEmbed(game, interaction.user, 'Dealer reveals hole card...');
+  const { embed: revealEmbed, attachment: revealAttachment } = await createDealerTurnEmbed(game, interaction.user, 'Dealer reveals hole card...', guildId);
   await interaction.editReply({ embeds: [revealEmbed], files: [revealAttachment], components: [] });
   
   await sleep(DEALER_CARD_DELAY);
   
   // Dealer draws cards one at a time
-  while (dealerNeedsCard(userId)) {
-    dealerHit(userId);
-    const updatedGame = getBlackjackGame(userId);
+  while (dealerNeedsCard(guildId, userId)) {
+    dealerHit(guildId, userId);
+    const updatedGame = getBlackjackGame(guildId, userId);
     
     const dealerValue = calculateHandValue(updatedGame.dealerHand);
     const statusMsg = dealerValue > 21 ? 'Dealer busts!' : `Dealer draws... (${dealerValue})`;
     
-    const { embed, attachment } = await createDealerTurnEmbed(updatedGame, interaction.user, statusMsg);
+    const { embed, attachment } = await createDealerTurnEmbed(updatedGame, interaction.user, statusMsg, guildId);
     await interaction.editReply({ embeds: [embed], files: [attachment], components: [] });
     
     await sleep(DEALER_CARD_DELAY);
   }
   
   // Finalize the game
-  const finalGame = finalizeDealerTurn(userId);
+  const finalGame = finalizeDealerTurn(guildId, userId);
   
   // Determine winnings and update stats
   let winnings = 0;
@@ -524,22 +525,22 @@ async function playDealerTurnAnimated(interaction, userId, guildId, game) {
     updateBlackjackStats(userId, 'loss', finalGame.bet);
   }
   
-  endBlackjackGame(userId);
+  endBlackjackGame(guildId, userId);
   
   // Show final result
-  const { embed: finalEmbed, attachment: finalAttachment } = await createGameEmbed(finalGame, interaction.user, true, winnings);
+  const { embed: finalEmbed, attachment: finalAttachment } = await createGameEmbed(finalGame, interaction.user, true, winnings, guildId);
   await interaction.editReply({ embeds: [finalEmbed], files: [finalAttachment], components: [] });
 }
 
 // Create embed for dealer's turn (showing status message)
-async function createDealerTurnEmbed(game, user, statusMessage) {
+async function createDealerTurnEmbed(game, user, statusMessage, guildId) {
   const imageBuffer = await generateBlackjackImage(game.playerHand, game.dealerHand, false);
   const attachment = new AttachmentBuilder(imageBuffer, { name: 'blackjack.png' });
   
   const embed = new EmbedBuilder()
     .setColor(0xf39c12) // Orange for dealer's turn
     .setTitle('🃏 Dealer\'s Turn')
-    .setDescription(`Bet: **${game.bet.toLocaleString()}** ${CURRENCY}\n\n⏳ ${statusMessage}`)
+    .setDescription(`Bet: **${game.bet.toLocaleString()}** ${getCurrency(guildId)}\n\n⏳ ${statusMessage}`)
     .setImage('attachment://blackjack.png')
     .setFooter({ text: `Player: ${user.username}` })
     .setTimestamp();
@@ -576,16 +577,16 @@ async function handleDealerBlackjack(interaction, userId, guildId, game) {
       color = 0x95a5a6; // Gray for break even
       title = '🛡️ Insurance Saved You!';
       description = `Dealer has Blackjack!\n\n` +
-        `Main bet lost: **-${game.bet.toLocaleString()}** ${CURRENCY}\n` +
-        `Insurance payout (2:1): **+${insuranceWin.toLocaleString()}** ${CURRENCY}\n\n` +
+        `Main bet lost: **-${game.bet.toLocaleString()}** ${getCurrency(guildId)}\n` +
+        `Insurance payout (2:1): **+${insuranceWin.toLocaleString()}** ${getCurrency(guildId)}\n\n` +
         `**You broke even!**`;
     } else {
       color = 0x2ecc71; // Green if net positive
       title = '🛡️ Insurance Pays Off!';
       description = `Dealer has Blackjack!\n\n` +
-        `Main bet lost: **-${game.bet.toLocaleString()}** ${CURRENCY}\n` +
-        `Insurance payout (2:1): **+${insuranceWin.toLocaleString()}** ${CURRENCY}\n\n` +
-        `**Net: +${netResult.toLocaleString()}** ${CURRENCY}`;
+        `Main bet lost: **-${game.bet.toLocaleString()}** ${getCurrency(guildId)}\n` +
+        `Insurance payout (2:1): **+${insuranceWin.toLocaleString()}** ${getCurrency(guildId)}\n\n` +
+        `**Net: +${netResult.toLocaleString()}** ${getCurrency(guildId)}`;
     }
     
     updateBlackjackStats(userId, 'loss', -netResult); // Net result for stats
@@ -594,12 +595,12 @@ async function handleDealerBlackjack(interaction, userId, guildId, game) {
     netResult = -game.bet;
     description = `Dealer has Blackjack!\n\n` +
       `You declined insurance.\n` +
-      `**Lost: -${game.bet.toLocaleString()}** ${CURRENCY}`;
+      `**Lost: -${game.bet.toLocaleString()}** ${getCurrency(guildId)}`;
     
     updateBlackjackStats(userId, 'loss', game.bet);
   }
   
-  endBlackjackGame(userId);
+  endBlackjackGame(guildId, userId);
   
   const embed = new EmbedBuilder()
     .setColor(color)
@@ -622,7 +623,7 @@ async function createSplitGameEmbed(game, user, gameOver) {
   const mainStatus = mainValue > 21 ? '💥 Bust' : (game.status === 'stand' || currentHand === 'split' ? '✋ Stand' : '🎯 Playing');
   const splitStatus = game.splitStatus === 'bust' ? '💥 Bust' : (game.splitStatus === 'stand' ? '✋ Stand' : '🎯 Playing');
   
-  let description = `**Total Bet:** ${(game.bet + game.splitBet).toLocaleString()} ${CURRENCY}\n\n`;
+  let description = `**Total Bet:** ${(game.bet + game.splitBet).toLocaleString()} ${getCurrency(game.guildId)}\n\n`;
   description += `**Hand 1** ${currentHand === 'main' ? '👈' : ''}: ${mainValue} ${mainStatus}\n`;
   description += `**Hand 2** ${currentHand === 'split' ? '👈' : ''}: ${splitValue} ${splitStatus}\n`;
   
@@ -680,7 +681,7 @@ function createSplitGameButtons(game) {
 // Resolve split game and show results
 async function resolveSplitAndShow(interaction, userId, guildId, game) {
   // Dealer plays
-  const finalGame = resolveSplitGame(userId);
+  const finalGame = resolveSplitGame(guildId, userId);
   
   const dealerValue = calculateHandValue(finalGame.dealerHand);
   const mainValue = calculateHandValue(finalGame.playerHand);
@@ -719,7 +720,7 @@ async function resolveSplitAndShow(interaction, userId, guildId, game) {
     updateBlackjackStats(userId, 'push', 0);
   }
   
-  endBlackjackGame(userId);
+  endBlackjackGame(guildId, userId);
   
   // Create final embed
   const imageBuffer = await generateBlackjackImage(finalGame.playerHand, finalGame.dealerHand, false);
@@ -740,9 +741,9 @@ async function resolveSplitAndShow(interaction, userId, guildId, game) {
   description += `**Hand 2:** ${splitValue} - ${resultIcon(finalGame.splitResult)}\n\n`;
   
   if (netResult > 0) {
-    description += `**Net Win: +${netResult.toLocaleString()}** ${CURRENCY}`;
+    description += `**Net Win: +${netResult.toLocaleString()}** ${getCurrency(guildId)}`;
   } else if (netResult < 0) {
-    description += `**Net Loss: ${netResult.toLocaleString()}** ${CURRENCY}`;
+    description += `**Net Loss: ${netResult.toLocaleString()}** ${getCurrency(guildId)}`;
   } else {
     description += `**Break Even!**`;
   }

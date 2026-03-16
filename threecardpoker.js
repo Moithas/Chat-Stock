@@ -211,12 +211,12 @@ function shuffleDeck(deck) {
 
 // ============ GAME STATE MANAGEMENT ============
 
-function hasActiveGame(userId) {
-  return activeGames.has(userId);
+function hasActiveGame(guildId, userId) {
+  return activeGames.has(`${guildId}_${userId}`);
 }
 
-function getActiveGame(userId) {
-  return activeGames.get(userId);
+function getActiveGame(guildId, userId) {
+  return activeGames.get(`${guildId}_${userId}`);
 }
 
 function startGame(guildId, userId, anteBet) {
@@ -226,7 +226,7 @@ function startGame(guildId, userId, anteBet) {
     return { success: false, error: 'Three Card Poker is currently disabled.' };
   }
   
-  if (hasActiveGame(userId)) {
+  if (hasActiveGame(guildId, userId)) {
     return { success: false, error: 'You already have an active game.' };
   }
   
@@ -251,13 +251,13 @@ function startGame(guildId, userId, anteBet) {
     startTime: Date.now()
   };
   
-  activeGames.set(userId, game);
+  activeGames.set(`${guildId}_${userId}`, game);
   
   return { success: true, game };
 }
 
-function setSideBets(userId, pairPlusBet, sixCardBet) {
-  const game = activeGames.get(userId);
+function setSideBets(guildId, userId, pairPlusBet, sixCardBet) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (!game || game.phase !== 'betting') {
     return { success: false, error: 'No active game in betting phase.' };
   }
@@ -279,8 +279,8 @@ function setSideBets(userId, pairPlusBet, sixCardBet) {
   return { success: true, game };
 }
 
-function dealCards(userId) {
-  const game = activeGames.get(userId);
+function dealCards(guildId, userId) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (!game || game.phase !== 'betting') {
     return { success: false, error: 'No active game in betting phase.' };
   }
@@ -293,8 +293,8 @@ function dealCards(userId) {
   return { success: true, game };
 }
 
-function playHand(userId) {
-  const game = activeGames.get(userId);
+function playHand(guildId, userId) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (!game || game.phase !== 'playing') {
     return { success: false, error: 'No active game in playing phase.' };
   }
@@ -303,8 +303,8 @@ function playHand(userId) {
   return resolveGame(game);
 }
 
-function foldHand(userId) {
-  const game = activeGames.get(userId);
+function foldHand(guildId, userId) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (!game || game.phase !== 'playing') {
     return { success: false, error: 'No active game in playing phase.' };
   }
@@ -444,35 +444,35 @@ function resolveGame(game) {
   return { success: true, game, results };
 }
 
-function endGame(userId) {
-  const game = activeGames.get(userId);
+function endGame(guildId, userId) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (game) {
     if (game.timer) {
       clearTimeout(game.timer);
     }
-    activeGames.delete(userId);
+    activeGames.delete(`${guildId}_${userId}`);
   }
 }
 
-function forceEndGame(userId, reason = 'timeout') {
-  const game = activeGames.get(userId);
+function forceEndGame(guildId, userId, reason = 'timeout') {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (!game) return null;
   
   // If in playing phase, auto-fold
   if (game.phase === 'playing') {
     game.folded = true;
     const result = resolveGame(game);
-    endGame(userId);
+    endGame(guildId, userId);
     return { ...result, reason };
   }
   
   // If in betting phase, just cancel (no cards dealt, refund ante)
   if (game.phase === 'betting') {
-    endGame(userId);
+    endGame(guildId, userId);
     return { cancelled: true, refund: game.anteBet + game.pairPlusBet + game.sixCardBet, reason };
   }
   
-  endGame(userId);
+  endGame(guildId, userId);
   return { cancelled: true, reason };
 }
 
@@ -711,16 +711,16 @@ function compare5CardHands(hand1, hand2) {
 
 // ============ UTILITY ============
 
-function setGameMessage(userId, messageId, channelId) {
-  const game = activeGames.get(userId);
+function setGameMessage(guildId, userId, messageId, channelId) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (game) {
     game.messageId = messageId;
     game.channelId = channelId;
   }
 }
 
-function setGameTimer(userId, callback, timeoutMs) {
-  const game = activeGames.get(userId);
+function setGameTimer(guildId, userId, callback, timeoutMs) {
+  const game = activeGames.get(`${guildId}_${userId}`);
   if (game) {
     if (game.timer) {
       clearTimeout(game.timer);

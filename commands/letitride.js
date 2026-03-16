@@ -17,8 +17,9 @@ const {
   PAYOUT_TABLE
 } = require('../letitride');
 const { generateLetItRideImage } = require('../cardImages');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -44,14 +45,14 @@ module.exports = {
     }
     
     // Check if player already has an active game
-    if (hasActiveGame(userId)) {
+    if (hasActiveGame(guildId, userId)) {
       return interaction.editReply({ content: '❌ You already have an active Let It Ride game!' });
     }
     
     // Validate bet amount
     if (betAmount < settings.minBet || betAmount > settings.maxBet) {
       return interaction.editReply({ 
-        content: `❌ Bet must be between **${settings.minBet.toLocaleString()}** and **${settings.maxBet.toLocaleString()}** ${CURRENCY} per spot.` 
+        content: `❌ Bet must be between **${settings.minBet.toLocaleString()}** and **${settings.maxBet.toLocaleString()}** ${getCurrency(guildId)} per spot.` 
       });
     }
     
@@ -60,7 +61,7 @@ module.exports = {
     const balance = await getBalance(guildId, userId);
     if (balance.total < totalRequired) {
       return interaction.editReply({ 
-        content: `❌ You need **${totalRequired.toLocaleString()}** ${CURRENCY} for 3 bets of **${betAmount.toLocaleString()}** each.\nYour balance: **${balance.total.toLocaleString()}** ${CURRENCY}` 
+        content: `❌ You need **${totalRequired.toLocaleString()}** ${getCurrency(guildId)} for 3 bets of **${betAmount.toLocaleString()}** each.\nYour balance: **${balance.total.toLocaleString()}** ${getCurrency(guildId)}` 
       });
     }
     
@@ -80,11 +81,11 @@ module.exports = {
     });
     
     // Store message info for timeout handling
-    setGameMessage(userId, reply.id, interaction.channelId);
+    setGameMessage(guildId, userId, reply.id, interaction.channelId);
     
     // Set decision timer
-    setGameTimer(userId, async () => {
-      await handleTimeout(interaction.client, userId);
+    setGameTimer(guildId, userId, async () => {
+      await handleTimeout(interaction.client, guildId, userId);
     }, settings.timerSeconds * 1000);
   }
 };
@@ -137,8 +138,8 @@ function buildDecision1Embed(game, user, attachment) {
     .setDescription(`You've been dealt 3 cards. Review your hand and decide:\n\n**Pull Back** your first bet, or **Let It Ride**!`)
     .addFields(
       { name: '🃏 Your Cards', value: game.playerCards.map(c => `**${formatCard(c)}**`).join('  '), inline: true },
-      { name: '💰 Per Bet', value: `**${game.betAmount.toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '📊 Total at Risk', value: `**${totalBet.toLocaleString()}** ${CURRENCY}`, inline: true }
+      { name: '💰 Per Bet', value: `**${game.betAmount.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true },
+      { name: '📊 Total at Risk', value: `**${totalBet.toLocaleString()}** ${getCurrency(game.guildId)}`, inline: true }
     )
     .setFooter({ text: `${user.displayName} • Make your decision!` })
     .setTimestamp();
@@ -161,7 +162,7 @@ function buildDecision2Embed(game, user, attachment) {
     .addFields(
       { name: '🃏 Your Cards', value: game.playerCards.map(c => `**${formatCard(c)}**`).join('  '), inline: false },
       { name: '🎴 Community', value: `**${formatCard(game.communityCards[0])}**  🂠`, inline: true },
-      { name: '💰 Bets Remaining', value: `**${activeBets}** (${totalAtRisk.toLocaleString()} ${CURRENCY})`, inline: true }
+      { name: '💰 Bets Remaining', value: `**${activeBets}** (${totalAtRisk.toLocaleString()} ${getCurrency(game.guildId)})`, inline: true }
     )
     .setFooter({ text: `${user.displayName} • Second decision!` })
     .setTimestamp();
@@ -186,13 +187,13 @@ function buildResultEmbed(game, user, attachment) {
     title = `🎉 ${handRank}!`;
     const multiplier = PAYOUT_TABLE[handRank];
     description = `**${handRank}** pays **${multiplier}:1**!\n\n` +
-      `Bets remaining: **${activeBets}** × ${game.betAmount.toLocaleString()} = **${totalWagered.toLocaleString()}** ${CURRENCY}\n` +
-      `Payout: **${multiplier}x** × ${totalWagered.toLocaleString()} = **+${payout.toLocaleString()}** ${CURRENCY}!`;
+      `Bets remaining: **${activeBets}** × ${game.betAmount.toLocaleString()} = **${totalWagered.toLocaleString()}** ${getCurrency(game.guildId)}\n` +
+      `Payout: **${multiplier}x** × ${totalWagered.toLocaleString()} = **+${payout.toLocaleString()}** ${getCurrency(game.guildId)}!`;
   } else {
     color = 0xF44336;
     title = '😔 No Winning Hand';
     description = `Your hand: **${handRank}**\n\n` +
-      `Bets lost: **${activeBets}** × ${game.betAmount.toLocaleString()} = **-${Math.abs(payout).toLocaleString()}** ${CURRENCY}`;
+      `Bets lost: **${activeBets}** × ${game.betAmount.toLocaleString()} = **-${Math.abs(payout).toLocaleString()}** ${getCurrency(game.guildId)}`;
   }
   
   const finalHand = [...game.playerCards, ...game.communityCards];
@@ -312,7 +313,7 @@ async function handleButton(interaction) {
     return interaction.reply({ content: '⏳ Processing your last action...', flags: 64 });
   }
   
-  const game = getActiveGame(userId);
+  const game = getActiveGame(guildId, userId);
   
   if (!game) {
     return interaction.reply({ content: '❌ No active game found.', flags: 64 });
@@ -337,9 +338,9 @@ async function handleButton(interaction) {
   try {
     // Handle first decision
     if (customId === 'lir_ride_1') {
-      updatedGame = letItRide(userId);
+      updatedGame = letItRide(guildId, userId);
     } else if (customId === 'lir_pull_1') {
-      updatedGame = pullBackBet(userId, 1);
+      updatedGame = pullBackBet(guildId, userId, 1);
       // Refund the pulled bet
       if (updatedGame) {
         await addMoney(guildId, userId, game.betAmount, 'Let It Ride bet 1 refund');
@@ -347,9 +348,9 @@ async function handleButton(interaction) {
     }
     // Handle second decision
     else if (customId === 'lir_ride_2') {
-      updatedGame = letItRide(userId);
+      updatedGame = letItRide(guildId, userId);
     } else if (customId === 'lir_pull_2') {
-      updatedGame = pullBackBet(userId, 2);
+      updatedGame = pullBackBet(guildId, userId, 2);
       // Refund the pulled bet
       if (updatedGame) {
         await addMoney(guildId, userId, game.betAmount, 'Let It Ride bet 2 refund');
@@ -367,13 +368,13 @@ async function handleButton(interaction) {
     // If game is resolved, process payouts and end
     if (updatedGame.status === 'resolved') {
       await processResult(interaction, updatedGame);
-      endGame(userId);
+      endGame(guildId, userId);
       return;
     }
     
     // Reset timer for next decision
-    setGameTimer(userId, async () => {
-      await handleTimeout(interaction.client, userId);
+    setGameTimer(guildId, userId, async () => {
+      await handleTimeout(interaction.client, guildId, userId);
     }, settings.timerSeconds * 1000);
   } catch (err) {
     console.error('Error handling Let It Ride button:', err);
@@ -398,15 +399,15 @@ async function processResult(interaction, game) {
   // If payout <= 0, bets were already deducted at start
 }
 
-async function handleTimeout(client, userId) {
-  const game = getActiveGame(userId);
+async function handleTimeout(client, guildId, userId) {
+  const game = getActiveGame(guildId, userId);
   if (!game) return;
   
   // Remember how many bets were active before force-end
   const betsBeforeEnd = (game.bet1 ? 1 : 0) + (game.bet2 ? 1 : 0) + 1;
   
   // Force end the game (auto pull-back remaining bets)
-  const result = forceEndGame(userId, 'timeout');
+  const result = forceEndGame(guildId, userId, 'timeout');
   if (!result) return;
   
   // Refund pulled-back bets (bets that were active before but got pulled by forceEndGame)
@@ -453,8 +454,8 @@ async function handlePlayAgain(interaction, betAmount) {
   }
   
   // Clean up any existing game
-  if (hasActiveGame(userId)) {
-    forceEndGame(userId);
+  if (hasActiveGame(guildId, userId)) {
+    forceEndGame(guildId, userId);
   }
   
   // Check balance
@@ -464,7 +465,7 @@ async function handlePlayAgain(interaction, betAmount) {
     const embed = new EmbedBuilder()
       .setColor(0xFF0000)
       .setTitle('💸 Insufficient Funds')
-      .setDescription(`You need **${totalRequired.toLocaleString()}** ${CURRENCY} to play again with the same bet.\nYou have **${balance.total.toLocaleString()}** ${CURRENCY}.`);
+      .setDescription(`You need **${totalRequired.toLocaleString()}** ${getCurrency(guildId)} to play again with the same bet.\nYou have **${balance.total.toLocaleString()}** ${getCurrency(guildId)}.`);
     return interaction.update({ embeds: [embed], components: [] });
   }
   
@@ -484,11 +485,11 @@ async function handlePlayAgain(interaction, betAmount) {
   
   const reply = await interaction.update({ ...replyOptions, fetchReply: true });
   
-  setGameMessage(userId, reply.id, interaction.channelId);
+  setGameMessage(guildId, userId, reply.id, interaction.channelId);
   
   // Set timer
-  setGameTimer(userId, async () => {
-    await handleTimeout(interaction.client, userId);
+  setGameTimer(guildId, userId, async () => {
+    await handleTimeout(interaction.client, guildId, userId);
   }, settings.timerSeconds * 1000);
 }
 

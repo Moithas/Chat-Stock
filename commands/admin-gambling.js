@@ -1,8 +1,8 @@
 // Admin Gambling Panel - Fully Modular
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, ChannelSelectMenuBuilder } = require('discord.js');
-const { logAdminAction } = require('../admin');
+const { logAdminAction, getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // IDs this module handles
 const BUTTON_IDS = [
@@ -333,7 +333,7 @@ async function handleInteraction(interaction, guildId) {
         
         updateGamblingSettings(guildId, { lottery_prize_2match: prize2, lottery_prize_3match: prize3 });
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set lottery prizes: 2-match=${prize2}, 3-match=${prize3}`);
-        await interaction.reply({ content: `✅ Lottery prizes updated!\n🥈 2-Match: ${prize2.toLocaleString()} ${CURRENCY}\n🥉 3-Match: ${prize3.toLocaleString()} ${CURRENCY}`, flags: 64 });
+        await interaction.reply({ content: `✅ Lottery prizes updated!\n🥈 2-Match: ${prize2.toLocaleString()} ${getCurrency(guildId)}\n🥉 3-Match: ${prize3.toLocaleString()} ${getCurrency(guildId)}`, flags: 64 });
       }
       // Lottery ticket price modal
       else if (customId === 'modal_lottery_ticket_price') {
@@ -347,7 +347,7 @@ async function handleInteraction(interaction, guildId) {
         
         updateGamblingSettings(guildId, { lottery_ticket_price: price });
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set lottery ticket price to ${price}`);
-        await interaction.reply({ content: `✅ Lottery ticket price set to **${price.toLocaleString()}** ${CURRENCY}!`, flags: 64 });
+        await interaction.reply({ content: `✅ Lottery ticket price set to **${price.toLocaleString()}** ${getCurrency(guildId)}!`, flags: 64 });
       }
       // Vault spawn modal (message trigger range)
       else if (customId === 'modal_vault_spawn') {
@@ -421,7 +421,7 @@ async function handleInteraction(interaction, guildId) {
         
         updateSettings(guildId, { anteAmount: ante, potFloor: floor, cooldownSeconds: cooldown, playTimerSeconds: playTimer });
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated In Between settings: Ante=${ante}, Floor=${floor}, Cooldown=${cooldown}s, Timer=${playTimer}s`);
-        await interaction.reply({ content: `✅ In Between settings updated!\n• Ante: **${ante.toLocaleString()}** ${CURRENCY}\n• Pot Floor: **${floor.toLocaleString()}** ${CURRENCY}\n• Cooldown: **${cooldown}s**\n• Play Timer: **${playTimer}s**`, flags: 64 });
+        await interaction.reply({ content: `✅ In Between settings updated!\n• Ante: **${ante.toLocaleString()}** ${getCurrency(guildId)}\n• Pot Floor: **${floor.toLocaleString()}** ${getCurrency(guildId)}\n• Cooldown: **${cooldown}s**\n• Play Timer: **${playTimer}s**`, flags: 64 });
       }
       // In Between reset pot modal
       else if (customId === 'modal_inbetween_reset_pot') {
@@ -436,7 +436,7 @@ async function handleInteraction(interaction, guildId) {
         
         setPot(guildId, newPot);
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Reset In Between pot to ${newPot}`);
-        await interaction.reply({ content: `✅ In Between pot set to **${newPot.toLocaleString()}** ${CURRENCY}!`, flags: 64 });
+        await interaction.reply({ content: `✅ In Between pot set to **${newPot.toLocaleString()}** ${getCurrency(guildId)}!`, flags: 64 });
       }
       // Let It Ride settings modal
       else if (customId === 'modal_letitride_settings') {
@@ -452,7 +452,7 @@ async function handleInteraction(interaction, guildId) {
         
         updateSettings(guildId, { minBet, maxBet, timerSeconds: timer });
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated Let It Ride settings: Min=${minBet}, Max=${maxBet}, Timer=${timer}s`);
-        await interaction.reply({ content: `✅ Let It Ride settings updated!\n• Min Bet: **${minBet.toLocaleString()}** ${CURRENCY}\n• Max Bet: **${maxBet.toLocaleString()}** ${CURRENCY}\n• Decision Timer: **${timer}s**`, flags: 64 });
+        await interaction.reply({ content: `✅ Let It Ride settings updated!\n• Min Bet: **${minBet.toLocaleString()}** ${getCurrency(guildId)}\n• Max Bet: **${maxBet.toLocaleString()}** ${getCurrency(guildId)}\n• Decision Timer: **${timer}s**`, flags: 64 });
       }
       // Three Card Poker settings modal
       else if (customId === 'modal_threecardpoker_settings') {
@@ -469,7 +469,7 @@ async function handleInteraction(interaction, guildId) {
         const currentSettings = getSettings(guildId);
         updateSettings(guildId, { ...currentSettings, minBet, maxBet, timerSeconds: timer });
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated Three Card Poker settings: Min=${minBet}, Max=${maxBet}, Timer=${timer}s`);
-        await interaction.reply({ content: `✅ Three Card Poker settings updated!\n• Min Bet: **${minBet.toLocaleString()}** ${CURRENCY}\n• Max Bet: **${maxBet.toLocaleString()}** ${CURRENCY}\n• Decision Timer: **${timer}s**`, flags: 64 });
+        await interaction.reply({ content: `✅ Three Card Poker settings updated!\n• Min Bet: **${minBet.toLocaleString()}** ${getCurrency(guildId)}\n• Max Bet: **${maxBet.toLocaleString()}** ${getCurrency(guildId)}\n• Decision Timer: **${timer}s**`, flags: 64 });
       }
       return true;
     } catch (err) {
@@ -594,15 +594,15 @@ async function showLotteryPanel(interaction, guildId) {
     .setTitle('🎟️ Lottery Settings')
     .setDescription('Configure automatic lottery draws and prizes')
     .addFields(
-      { name: '🏆 Current Jackpot', value: `${CURRENCY} ${lotteryInfo.jackpot?.toLocaleString() || 10000}`, inline: true },
+      { name: '🏆 Current Jackpot', value: `${getCurrency(guildId)} ${lotteryInfo.jackpot?.toLocaleString() || 10000}`, inline: true },
       { name: '🎫 Tickets Sold', value: String(lotteryInfo.total_tickets_sold || 0), inline: true },
-      { name: '💵 Ticket Price', value: `${CURRENCY} ${(settings.lottery_ticket_price || 1000).toLocaleString()}`, inline: true },
+      { name: '💵 Ticket Price', value: `${getCurrency(guildId)} ${(settings.lottery_ticket_price || 1000).toLocaleString()}`, inline: true },
       { name: '🔄 Auto-Draw', value: settings.lottery_auto_draw ? '✅ Enabled' : '❌ Disabled', inline: true },
       { name: '📅 Draw Day', value: drawDay, inline: true },
       { name: '⏰ Draw Time', value: drawTime, inline: true },
       { name: '📢 Draw Channel', value: settings.lottery_channel_id ? `<#${settings.lottery_channel_id}>` : 'Not Set', inline: true },
-      { name: '🥈 2-Match Prize', value: `${CURRENCY} ${settings.lottery_prize_2match?.toLocaleString() || 1000}`, inline: true },
-      { name: '🥉 3-Match Prize', value: `${CURRENCY} ${settings.lottery_prize_3match?.toLocaleString() || 5000}`, inline: true }
+      { name: '🥈 2-Match Prize', value: `${getCurrency(guildId)} ${settings.lottery_prize_2match?.toLocaleString() || 1000}`, inline: true },
+      { name: '🥉 3-Match Prize', value: `${getCurrency(guildId)} ${settings.lottery_prize_3match?.toLocaleString() || 5000}`, inline: true }
     );
 
   const toggleAutoBtn = new ButtonBuilder()
@@ -1074,9 +1074,9 @@ async function showInBetweenPanel(interaction, guildId) {
     .setDescription('Configure the In Between (Acey Deucey) card game')
     .addFields(
       { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-      { name: '💰 Current Pot', value: `**${currentPot.toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '🏦 Pot Floor', value: `**${settings.potFloor.toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '🎫 Ante Amount', value: `**${settings.anteAmount.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '💰 Current Pot', value: `**${currentPot.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+      { name: '🏦 Pot Floor', value: `**${settings.potFloor.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+      { name: '🎫 Ante Amount', value: `**${settings.anteAmount.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '⏱️ Cooldown', value: `**${settings.cooldownSeconds}** seconds`, inline: true },
       { name: '⏰ Play Timer', value: `**${settings.playTimerSeconds}** seconds`, inline: true }
     )
@@ -1192,8 +1192,8 @@ async function showLetItRidePanel(interaction, guildId) {
     .setDescription('Configure the Let It Ride poker card game')
     .addFields(
       { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-      { name: '💰 Min Bet', value: `**${(settings.minBet || 1000).toLocaleString()}** ${CURRENCY}`, inline: true },
-      { name: '💎 Max Bet', value: `**${(settings.maxBet || 100000).toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '💰 Min Bet', value: `**${(settings.minBet || 1000).toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+      { name: '💎 Max Bet', value: `**${(settings.maxBet || 100000).toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '⏱️ Decision Timer', value: `**${settings.timerSeconds || 15}** seconds`, inline: true }
     )
     .setFooter({ text: 'Players need 10s or Better to win • 3 equal bets per game' });
@@ -1263,8 +1263,8 @@ async function showThreeCardPokerPanel(interaction, guildId) {
     .setTitle('🃏 Three Card Poker Settings')
     .setDescription(settings.enabled ? '✅ **ENABLED**' : '❌ **DISABLED**')
     .addFields(
-      { name: '💵 Minimum Bet', value: `${settings.minBet.toLocaleString()} ${CURRENCY}`, inline: true },
-      { name: '💰 Maximum Bet', value: `${settings.maxBet.toLocaleString()} ${CURRENCY}`, inline: true },
+      { name: '💵 Minimum Bet', value: `${settings.minBet.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Maximum Bet', value: `${settings.maxBet.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '⏱️ Decision Timer', value: `${settings.timerSeconds} seconds`, inline: true }
     )
     .addFields(

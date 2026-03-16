@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getBalance, removeFromBank, addMoney, applyFine } = require('../economy');
+const { getBalance, removeFromBank, addMoney, applyFine, getPlayerCreatedAt } = require('../economy');
 const { 
   getHackSettings, 
   canHack, 
@@ -11,6 +11,7 @@ const {
   recordTargetHacked,
   clearTargetCooldown,
   clearHackerCooldown,
+  applyAttemptPenalty,
   calculateSuccessRate,
   calculateStealAmount,
   calculateFine,
@@ -25,8 +26,11 @@ const {
 } = require('../skills');
 const { hasActiveEffect, getEffectValue, EFFECT_TYPES } = require('../items');
 const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
+const { getInfamySettings, getTierEffects, addInfamy, rollBountyCheck, createBounty, getActiveBounty, claimBounty, startProbation, announceBountyPosted, announceBountyClaimed } = require('../infamy');
+const { addMoney: addMoneyForBounty } = require('../economy');
+const { getCurrency, getAdminSettings } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Progress bar characters
 const PROGRESS_FILLED = '█';
@@ -98,7 +102,7 @@ function getStageInfo(progress) {
   return HACK_STAGES[0];
 }
 
-function createHackEmbed(hackerId, targetUser, progress, settings, targetBank, maxStealBonus = 0, hackerLevel = 0) {
+function createHackEmbed(guildId, hackerId, targetUser, progress, settings, targetBank, maxStealBonus = 0, hackerLevel = 0) {
   const stage = getStageInfo(progress);
   const defenseChance = getDefenseChance(progress);
   const potentialSteal = calculateStealAmount(targetBank, progress, settings, maxStealBonus);
@@ -110,7 +114,7 @@ function createHackEmbed(hackerId, targetUser, progress, settings, targetBank, m
     .addFields(
       { name: 'Progress', value: `[${createProgressBar(progress)}] ${progress}%`, inline: false },
       { name: 'Status', value: stage.message, inline: true },
-      { name: 'Potential Theft', value: `${potentialSteal.toLocaleString()} ${CURRENCY}`, inline: true }
+      { name: 'Potential Theft', value: `${potentialSteal.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     )
     .setTimestamp();
   
@@ -206,6 +210,21 @@ module.exports = {
         });
       }
     }
+
+    // Check new player immunity
+    const adminSettings = getAdminSettings(guildId);
+    if (adminSettings.newPlayerImmunityDays > 0) {
+      const targetCreatedAt = getPlayerCreatedAt(guildId, targetId);
+      if (targetCreatedAt > 0) {
+        const immunityMs = adminSettings.newPlayerImmunityDays * 24 * 60 * 60 * 1000;
+        const immunityEnds = targetCreatedAt + immunityMs;
+        if (Date.now() < immunityEnds) {
+          return interaction.editReply({
+            content: `❌ **${targetUser.username}** is a new player and has hack immunity until <t:${Math.floor(immunityEnds / 1000)}:R>.`
+          });
+        }
+      }
+    }
     
     // Check if target has item-based hack protection (100% = full immunity)
     const hackProtectionValue = getEffectValue(guildId, targetId, EFFECT_TYPES.HACK_PROTECTION);
@@ -218,8 +237,16 @@ module.exports = {
     // Check if target can be hacked (cooldown + not currently being hacked)
     const targetCooldownCheck = canBeHacked(guildId, targetId);
     if (!targetCooldownCheck.canBeHacked) {
+      // Apply attempt penalty if target is protected (has timeRemaining = recently hacked)
+      let penaltyMsg = '';
+      if (targetCooldownCheck.timeRemaining) {
+        const penalty = applyAttemptPenalty(guildId, hackerId);
+        if (penalty.applied) {
+          penaltyMsg = `\n\n🚨 **Security Alert!** Your hack attempt was flagged by authorities. You've been locked out for **${penalty.penaltyMinutes} minutes**.`;
+        }
+      }
       return interaction.editReply({
-        content: `❌ ${targetCooldownCheck.reason}`
+        content: `❌ ${targetCooldownCheck.reason}${penaltyMsg}`
       });
     }
 
@@ -286,9 +313,16 @@ module.exports = {
     console.log(`   Target Balance: cash=${targetBalance.cash}, bank=${targetBalance.bank}, total=${targetTotal}`);
     console.log(`   hackBonuses object:`, JSON.stringify(hackBonuses));
     console.log(`   Skill Bonus: ${hackBonuses.successRateBonus}% (level ${hackBonuses.level}), Item Boost: ${itemSuccessBoost}%`);
+    console.log(`   LP Hack Success: ${lpHackSuccess}%, Target Hack Defense: ${targetHackDefense}%`);
     console.log(`   Total Success Bonus: ${totalSuccessBonus}%`);
+    // Apply infamy tier success buff
+    const hackerTierEffects = getTierEffects(guildId, hackerId);
+    const infamySuccessBuff = hackerTierEffects.successBuff || 0;
+    const adjustedSuccessRate = Math.min(95, successRate + infamySuccessBuff);
+
     console.log(`   Base Rate: ${((targetTotal / 2.5) / (hackerTotal + targetTotal) * 100).toFixed(2)}%`);
-    console.log(`   Final Success Rate: ${successRate.toFixed(2)}%`);
+    console.log(`   Infamy Tier: ${hackerTierEffects.tier} (${hackerTierEffects.name}), Success Buff: +${infamySuccessBuff}%`);
+    console.log(`   Final Success Rate: ${adjustedSuccessRate.toFixed(2)}%`);
 
     // Start tracking this hack
     startActiveHack(guildId, targetId, hackerId);
@@ -303,7 +337,7 @@ module.exports = {
     }
 
     // Send initial hack embed (with skill bonus)
-    const initialEmbed = createHackEmbed(hackerId, targetUser, 0, settings, targetBalance.bank, hackBonuses.maxStealBonus, hackBonuses.level);
+    const initialEmbed = createHackEmbed(guildId, hackerId, targetUser, 0, settings, targetBalance.bank, hackBonuses.maxStealBonus, hackBonuses.level);
     const defenseRow = createDefenseButton(hackerId);
     
     await interaction.editReply({ content: `${trainingNotification}💻 Initiating hack on ${targetUser.username}...` });
@@ -359,7 +393,9 @@ module.exports = {
         const lpHackFine = getLuckyPennyEffect(guildId, hackerId, LP_EFFECT_TYPES.HACK_FINES);
         const fineReduction = (hackBonuses.level * 3) + itemFineReduction + (-lpHackFine); // 3% per level + item + LP
         const baseFine = calculateFine(potentialSteal, settings);
-        const fine = Math.floor(baseFine * (1 - fineReduction / 100));
+        // Apply infamy fine modifier
+        const defInfamyFineModifier = hackerTierEffects.fineModifier || 0;
+        const fine = Math.floor(baseFine * (1 - fineReduction / 100) * (1 + defInfamyFineModifier / 100));
         
         // Fine the hacker
         await applyFine(guildId, hackerId, fine, `Failed hack attempt on ${targetUser.username} (defended)`);
@@ -383,7 +419,7 @@ module.exports = {
           .setDescription(flavorText)
           .addFields(
             { name: '🎯 Defense Roll', value: `${defenseRoll.toFixed(1)}% (needed < ${defenseChance}%)`, inline: true },
-            { name: '💸 Hacker Fined', value: `${fine.toLocaleString()} ${CURRENCY}`, inline: true },
+            { name: '💸 Hacker Fined', value: `${fine.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
             { name: '📊 Hack Progress', value: `${progress}%`, inline: true }
           )
           .setFooter({ text: xpFooter })
@@ -439,7 +475,7 @@ module.exports = {
               .setTitle('🔍 TRACE SUCCESSFUL!')
               .setDescription(traceFlavorText)
               .addFields(
-                { name: '💰 Recovered', value: `${recoveryAmount.toLocaleString()} ${CURRENCY}`, inline: true },
+                { name: '💰 Recovered', value: `${recoveryAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
                 { name: '📊 Trace Roll', value: `${traceRoll.toFixed(1)}% (needed < ${traceChance.toFixed(1)}%)`, inline: true }
               )
               .setTimestamp();
@@ -510,7 +546,7 @@ module.exports = {
         
         // Determine success
         const hackRoll = Math.random() * 100;
-        const hackSuccess = hackRoll < successRate;
+        const hackSuccess = hackRoll < adjustedSuccessRate;
         
         if (hackSuccess) {
           // Successful hack
@@ -521,8 +557,48 @@ module.exports = {
             stolenAmount = Math.floor(stolenAmount * (1 - hackProtectionValue / 100));
           }
           
+          // Apply infamy earnings cut
+          const earningsCut = hackerTierEffects.earningsCut || 0;
+          if (earningsCut > 0) {
+            stolenAmount = Math.floor(stolenAmount * (1 - earningsCut / 100));
+          }
+          
           await removeFromBank(guildId, targetId, stolenAmount, `Hacked by ${interaction.user.username}`);
           await addMoney(guildId, hackerId, stolenAmount, `Hacked ${targetUser.username}`);
+          
+          // Add infamy for successful hack
+          const infamySettings = getInfamySettings(guildId);
+          if (infamySettings.enabled) {
+            const infamyGained = Math.round(stolenAmount * infamySettings.hack_rate);
+            if (infamyGained > 0) addInfamy(guildId, hackerId, infamyGained, 'hack');
+            
+            // Check if target has a bounty — claim it!
+            const targetBounty = getActiveBounty(guildId, targetId);
+            if (targetBounty) {
+              const claimed = claimBounty(guildId, targetId, hackerId, 'hack');
+              if (claimed) {
+                await addMoneyForBounty(guildId, hackerId, claimed.bounty_amount, `Bounty claimed on ${targetUser.username}`);
+                startProbation(guildId, targetId);
+                announceBountyClaimed(guildId, targetId, hackerId, claimed.bounty_amount, 'hack');
+                
+                // Public notification in channel
+                try {
+                  const { EmbedBuilder: EB } = require('discord.js');
+                  await interaction.followUp({ embeds: [new EB()
+                    .setColor(0xffd700)
+                    .setTitle('🏆 Bounty Claimed!')
+                    .setDescription(`<@${hackerId}> claimed the bounty on <@${targetId}>!\n\n💰 **Reward:** ${claimed.bounty_amount.toLocaleString()} ${getCurrency(guildId)}\n⚔️ **Method:** 💻 Hack\n\n⚖️ <@${targetId}> is now on **probation** — infamy reset to 0 but tier penalties remain.`)
+                    .setTimestamp()] });
+                } catch (e) {}
+              }
+            }
+            
+            // Roll for bounty posting
+            if (rollBountyCheck(guildId, hackerId)) {
+              const bounty = createBounty(guildId, hackerId);
+              if (bounty) announceBountyPosted(guildId, hackerId, bounty.bountyAmount);
+            }
+          }
           
           // Keep target on cooldown (successful hack)
           recordTargetHacked(guildId, targetId);
@@ -544,13 +620,15 @@ module.exports = {
             ? ` (🔥 ${hackProtectionValue}% protected)`
             : '';
           
+          const tierIndicator = hackerTierEffects.tier >= 1 ? ` ${hackerTierEffects.emoji}` : '';
+          
           const successEmbed = new EmbedBuilder()
             .setColor(0x9b59b6)
-            .setTitle('💻 HACK SUCCESSFUL!')
+            .setTitle(`💻 HACK SUCCESSFUL!${tierIndicator}`)
             .setDescription(flavorText)
             .addFields(
-              { name: '💰 Stolen', value: `${stolenAmount.toLocaleString()} ${CURRENCY}${protectionNote}`, inline: true },
-              { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
+              { name: '💰 Stolen', value: `${stolenAmount.toLocaleString()} ${getCurrency(guildId)}${protectionNote}${earningsCut > 0 ? ` (−${earningsCut}% cut)` : ''}`, inline: true },
+              { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}%)` : ''}`, inline: true },
               { name: '🎲 Roll', value: `${hackRoll.toFixed(1)}%`, inline: true }
             )
             .setFooter({ text: xpFooter })
@@ -569,7 +647,9 @@ module.exports = {
           const itemFineReduction = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_FINE_REDUCTION);
           const lpHackFine2 = getLuckyPennyEffect(guildId, hackerId, LP_EFFECT_TYPES.HACK_FINES);
           const fineReduction = hackBonuses.traceReduction + itemFineReduction + (-lpHackFine2); // trace + item + LP
-          const fine = Math.floor(baseFine * (1 - fineReduction / 100));
+          // Apply infamy fine modifier (higher fines at higher tiers)
+          const infamyFineModifier = hackerTierEffects.fineModifier || 0;
+          const fine = Math.floor(baseFine * (1 - fineReduction / 100) * (1 + infamyFineModifier / 100));
           
           await applyFine(guildId, hackerId, fine, `Failed hack attempt on ${targetUser.username}`);
           
@@ -594,8 +674,8 @@ module.exports = {
             .setTitle('🚫 HACK FAILED!')
             .setDescription(flavorText)
             .addFields(
-              { name: '💸 Fine', value: `${fine.toLocaleString()} ${CURRENCY}`, inline: true },
-              { name: '📊 Success Rate', value: `${successRate.toFixed(1)}%`, inline: true },
+              { name: '💸 Fine', value: `${fine.toLocaleString()} ${getCurrency(guildId)}${infamyFineModifier > 0 ? ` (+${infamyFineModifier}%)` : ''}`, inline: true },
+              { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
               { name: '🎲 Roll', value: `${hackRoll.toFixed(1)}%`, inline: true }
             )
             .setFooter({ text: xpFooter })
@@ -651,7 +731,7 @@ module.exports = {
                 .setTitle('🔍 TRACE SUCCESSFUL!')
                 .setDescription(traceFlavorText)
                 .addFields(
-                  { name: '💰 Recovered', value: `${recoveryAmount.toLocaleString()} ${CURRENCY}`, inline: true },
+                  { name: '💰 Recovered', value: `${recoveryAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
                   { name: '📊 Trace Roll', value: `${traceRoll.toFixed(1)}% (needed < ${traceChance.toFixed(1)}%)`, inline: true }
                 )
                 .setTimestamp();
@@ -708,7 +788,7 @@ module.exports = {
       }
       
       // Update progress embed (with skill bonus)
-      const progressEmbed = createHackEmbed(hackerId, targetUser, progress, settings, targetBalance.bank, hackBonuses.maxStealBonus, hackBonuses.level);
+      const progressEmbed = createHackEmbed(guildId, hackerId, targetUser, progress, settings, targetBalance.bank, hackBonuses.maxStealBonus, hackBonuses.level);
       const newDefenseRow = createDefenseButton(hackerId, progress >= 80);
       
       try {

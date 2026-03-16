@@ -22,21 +22,22 @@ const {
 } = require('../threecardpoker');
 const { isEnabled, getBalance, removeFromBank, addMoney } = require('../economy');
 const { generateThreeCardPokerImage } = require('../cardImages');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 // Prevent double-click processing
 const processingUsers = new Set();
 
 // Generate bet options based on settings
-function generateBetOptions(minBet, maxBet, includeNone = false) {
+function generateBetOptions(guildId, minBet, maxBet, includeNone = false) {
   const standardAmounts = [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
   const options = standardAmounts.filter(amount => amount >= minBet && amount <= maxBet);
   
   const selectOptions = options.map(amount => ({
     label: amount.toLocaleString(),
     value: amount.toString(),
-    description: `Bet ${amount.toLocaleString()} ${CURRENCY.replace(/<:[^:]+:(\d+)>/, '')}`
+    description: `Bet ${amount.toLocaleString()} ${getCurrency(guildId).replace(/<:[^:]+:(\d+)>/, '')}`
   }));
   
   if (includeNone) {
@@ -57,21 +58,21 @@ function createBettingEmbed(game, balance) {
   const embed = new EmbedBuilder()
     .setColor(0x2E8B57)
     .setTitle('🃏 Three Card Poker')
-    .setDescription(`**Ante:** ${game.anteBet.toLocaleString()} ${CURRENCY}\n\nSelect your optional side bets, then click **Deal Cards** to begin!`)
+    .setDescription(`**Ante:** ${game.anteBet.toLocaleString()} ${getCurrency(game.guildId)}\n\nSelect your optional side bets, then click **Deal Cards** to begin!`)
     .addFields(
       { 
         name: '💰 Your Balance', 
-        value: `${balance.toLocaleString()} ${CURRENCY}`, 
+        value: `${balance.toLocaleString()} ${getCurrency(game.guildId)}`, 
         inline: true 
       },
       { 
         name: '🎲 Pair Plus', 
-        value: game.pairPlusBet > 0 ? `${game.pairPlusBet.toLocaleString()} ${CURRENCY}` : 'None', 
+        value: game.pairPlusBet > 0 ? `${game.pairPlusBet.toLocaleString()} ${getCurrency(game.guildId)}` : 'None', 
         inline: true 
       },
       { 
         name: '🎯 6-Card Bonus', 
-        value: game.sixCardBet > 0 ? `${game.sixCardBet.toLocaleString()} ${CURRENCY}` : 'None', 
+        value: game.sixCardBet > 0 ? `${game.sixCardBet.toLocaleString()} ${getCurrency(game.guildId)}` : 'None', 
         inline: true 
       }
     )
@@ -90,7 +91,7 @@ function createBettingEmbed(game, balance) {
 // Create betting phase components
 function createBettingComponents(guildId, userId) {
   const settings = getSettings(guildId);
-  const betOptions = generateBetOptions(settings.minBet, settings.maxBet, true);
+  const betOptions = generateBetOptions(guildId, settings.minBet, settings.maxBet, true);
   
   const pairPlusSelect = new StringSelectMenuBuilder()
     .setCustomId(`tcp_pairplus_${userId}`)
@@ -130,7 +131,7 @@ async function createPlayingEmbed(game, playerName) {
   const embed = new EmbedBuilder()
     .setColor(0x2E8B57)
     .setTitle('🃏 Three Card Poker')
-    .setDescription(`Your hand: **${formatHand(game.playerHand)}**\n\nChoose to **Play** (bet another ${game.anteBet.toLocaleString()} ${CURRENCY}) or **Fold** (forfeit ante).`)
+    .setDescription(`Your hand: **${formatHand(game.playerHand)}**\n\nChoose to **Play** (bet another ${game.anteBet.toLocaleString()} ${getCurrency(game.guildId)}) or **Fold** (forfeit ante).`)
     .addFields(
       { name: '💵 Ante', value: `${game.anteBet.toLocaleString()}`, inline: true },
       { name: '🎲 Pair Plus', value: game.pairPlusBet > 0 ? game.pairPlusBet.toLocaleString() : 'None', inline: true },
@@ -203,12 +204,12 @@ async function createResultEmbed(game, results, playerName) {
     .setTitle(title)
     .setDescription(`**Your Hand:** ${formatHand(game.playerHand)} (${results.playerHand.rank})\n**Dealer's Hand:** ${formatHand(game.dealerHand)} (${results.dealerHand.rank})${!results.dealerQualifies ? ' - **DNQ**' : ''}`)
     .addFields(
-      { name: '💵 Ante', value: formatResult(results.anteResult, results.anteOutcome), inline: true },
-      { name: '▶️ Play', value: formatResult(results.playResult, results.playOutcome), inline: true },
-      { name: '⭐ Ante Bonus', value: formatResult(results.anteBonusResult, results.anteBonusOutcome), inline: true },
-      { name: '🎲 Pair Plus', value: formatResult(results.pairPlusResult, results.pairPlusOutcome), inline: true },
-      { name: '🎯 6-Card', value: formatResult(results.sixCardResult, results.sixCardOutcome), inline: true },
-      { name: '💰 Total', value: formatTotal(results.totalResult), inline: true }
+      { name: '💵 Ante', value: formatResult(game.guildId, results.anteResult, results.anteOutcome), inline: true },
+      { name: '▶️ Play', value: formatResult(game.guildId, results.playResult, results.playOutcome), inline: true },
+      { name: '⭐ Ante Bonus', value: formatResult(game.guildId, results.anteBonusResult, results.anteBonusOutcome), inline: true },
+      { name: '🎲 Pair Plus', value: formatResult(game.guildId, results.pairPlusResult, results.pairPlusOutcome), inline: true },
+      { name: '🎯 6-Card', value: formatResult(game.guildId, results.sixCardResult, results.sixCardOutcome), inline: true },
+      { name: '💰 Total', value: formatTotal(game.guildId, results.totalResult), inline: true }
     );
   
   if (results.sixCardHand) {
@@ -237,19 +238,19 @@ async function createResultEmbed(game, results, playerName) {
   }
 }
 
-function formatResult(amount, outcome) {
+function formatResult(guildId, amount, outcome) {
   if (outcome === 'No bet' || outcome === 'N/A') {
     return outcome;
   }
   
   const prefix = amount > 0 ? '+' : '';
-  return `${prefix}${amount.toLocaleString()} ${CURRENCY}\n(${outcome})`;
+  return `${prefix}${amount.toLocaleString()} ${getCurrency(guildId)}\n(${outcome})`;
 }
 
-function formatTotal(amount) {
+function formatTotal(guildId, amount) {
   const prefix = amount > 0 ? '+' : '';
   const emoji = amount > 0 ? '🟢' : amount < 0 ? '🔴' : '🟡';
-  return `${emoji} ${prefix}${amount.toLocaleString()} ${CURRENCY}`;
+  return `${emoji} ${prefix}${amount.toLocaleString()} ${getCurrency(guildId)}`;
 }
 
 // Create result components
@@ -294,14 +295,14 @@ module.exports = {
     }
     
     // Check for active game
-    if (hasActiveGame(userId)) {
+    if (hasActiveGame(guildId, userId)) {
       return interaction.reply({ content: '❌ You already have an active Three Card Poker game!', flags: 64 });
     }
     
     // Validate bet
     if (anteBet < settings.minBet || anteBet > settings.maxBet) {
       return interaction.reply({ 
-        content: `❌ Ante must be between ${settings.minBet.toLocaleString()} and ${settings.maxBet.toLocaleString()} ${CURRENCY}.`, 
+        content: `❌ Ante must be between ${settings.minBet.toLocaleString()} and ${settings.maxBet.toLocaleString()} ${getCurrency(guildId)}.`, 
         flags: 64 
       });
     }
@@ -314,7 +315,7 @@ module.exports = {
     const balanceData = await getBalance(guildId, userId);
     if (balanceData.bank < anteBet) {
       return interaction.reply({ 
-        content: `❌ Insufficient funds! You have ${balanceData.bank.toLocaleString()} ${CURRENCY} in your bank.`, 
+        content: `❌ Insufficient funds! You have ${balanceData.bank.toLocaleString()} ${getCurrency(guildId)} in your bank.`, 
         flags: 64 
       });
     }
@@ -333,7 +334,7 @@ module.exports = {
     const components = createBettingComponents(guildId, userId);
     
     const reply = await interaction.reply({ embeds: [embed], components, fetchReply: true });
-    setGameMessage(userId, reply.id, interaction.channelId);
+    setGameMessage(guildId, userId, reply.id, interaction.channelId);
   },
   
   // Button and select menu handlers
@@ -347,7 +348,7 @@ module.exports = {
     
     // Allow non-money actions without processing guard
     if (action === 'cancel' || action === 'done') {
-      const game = getActiveGame(userId);
+      const game = getActiveGame(guildId, userId);
       if (action === 'cancel') return handleCancel(interaction, game);
       if (action === 'done') return handleDone(interaction);
     }
@@ -358,7 +359,7 @@ module.exports = {
     processingUsers.add(userId);
     try {
     
-    const game = getActiveGame(userId);
+    const game = getActiveGame(guildId, userId);
     
     switch (action) {
       case 'deal':
@@ -388,18 +389,18 @@ module.exports = {
   
   async handleSelectMenu(interaction, menuType, targetUserId) {
     const userId = interaction.user.id;
+    const guildId = interaction.guildId;
     
     if (userId !== targetUserId) {
       return interaction.reply({ content: '❌ This is not your game!', flags: 64 });
     }
     
-    const game = getActiveGame(userId);
+    const game = getActiveGame(guildId, userId);
     if (!game || game.phase !== 'betting') {
       return interaction.reply({ content: '❌ No active game in betting phase.', flags: 64 });
     }
     
     const value = parseInt(interaction.values[0]);
-    const guildId = interaction.guildId;
     
     // Check balance for side bet
     if (value > 0) {
@@ -410,7 +411,7 @@ module.exports = {
       
       if (balanceData.bank < (newTotal - game.anteBet)) { // Ante already deducted
         return interaction.reply({ 
-          content: `❌ Insufficient funds for this side bet! You have ${balanceData.bank.toLocaleString()} ${CURRENCY} remaining.`, 
+          content: `❌ Insufficient funds for this side bet! You have ${balanceData.bank.toLocaleString()} ${getCurrency(guildId)} remaining.`, 
           flags: 64 
         });
       }
@@ -446,7 +447,7 @@ async function handleDeal(interaction, game) {
     const balanceData = await getBalance(guildId, userId);
     if (balanceData.bank < sideBetTotal) {
       return interaction.reply({ 
-        content: `❌ Insufficient funds for side bets! You need ${sideBetTotal.toLocaleString()} ${CURRENCY} more.`, 
+        content: `❌ Insufficient funds for side bets! You need ${sideBetTotal.toLocaleString()} ${getCurrency(guildId)} more.`, 
         flags: 64 
       });
     }
@@ -454,7 +455,7 @@ async function handleDeal(interaction, game) {
   }
   
   // Deal cards
-  const result = dealCards(userId);
+  const result = dealCards(guildId, userId);
   if (!result.success) {
     return interaction.reply({ content: `❌ ${result.error}`, flags: 64 });
   }
@@ -476,10 +477,10 @@ async function handleDeal(interaction, game) {
   
   // Set timer for auto-fold
   const settings = getSettings(guildId);
-  setGameTimer(userId, async () => {
-    const currentGame = getActiveGame(userId);
+  setGameTimer(guildId, userId, async () => {
+    const currentGame = getActiveGame(guildId, userId);
     if (currentGame && currentGame.phase === 'playing') {
-      const timeoutResult = forceEndGame(userId, 'timeout');
+      const timeoutResult = forceEndGame(guildId, userId, 'timeout');
       if (timeoutResult && !timeoutResult.cancelled) {
         // Pay out using same logic as handleFold
         const sideBetWins = Math.max(0, timeoutResult.results.pairPlusResult) + Math.max(0, timeoutResult.results.sixCardResult);
@@ -510,7 +511,7 @@ async function handleDeal(interaction, game) {
           console.error('Error updating timeout message:', err);
         }
       }
-      endGame(userId);
+      endGame(guildId, userId);
     }
   }, settings.timerSeconds * 1000);
 }
@@ -526,12 +527,12 @@ async function handleCancel(interaction, game) {
   // Refund ante (side bets not yet deducted in betting phase)
   await addMoney(guildId, userId, game.anteBet);
   
-  endGame(userId);
+  endGame(guildId, userId);
   
   const embed = new EmbedBuilder()
     .setColor(0x95A5A6)
     .setTitle('🃏 Game Cancelled')
-    .setDescription(`Your ante of ${game.anteBet.toLocaleString()} ${CURRENCY} has been refunded.`);
+    .setDescription(`Your ante of ${game.anteBet.toLocaleString()} ${getCurrency(guildId)} has been refunded.`);
   
   await interaction.update({ embeds: [embed], components: [] });
 }
@@ -548,7 +549,7 @@ async function handlePlay(interaction, game) {
   const balanceData = await getBalance(guildId, userId);
   if (balanceData.bank < game.anteBet) {
     return interaction.reply({ 
-      content: `❌ Insufficient funds for Play bet! You need ${game.anteBet.toLocaleString()} ${CURRENCY}.`, 
+      content: `❌ Insufficient funds for Play bet! You need ${game.anteBet.toLocaleString()} ${getCurrency(guildId)}.`, 
       flags: 64 
     });
   }
@@ -556,7 +557,7 @@ async function handlePlay(interaction, game) {
   await removeFromBank(guildId, userId, game.anteBet);
   
   // Resolve game
-  const result = playHand(userId);
+  const result = playHand(guildId, userId);
   if (!result.success) {
     return interaction.reply({ content: `❌ ${result.error}`, flags: 64 });
   }
@@ -589,7 +590,7 @@ async function handlePlay(interaction, game) {
   }
   
   await interaction.update(replyOptions);
-  endGame(userId);
+  endGame(guildId, userId);
 }
 
 async function handleFold(interaction, game) {
@@ -601,7 +602,7 @@ async function handleFold(interaction, game) {
   const guildId = interaction.guildId;
   
   // Resolve game (fold)
-  const result = foldHand(userId);
+  const result = foldHand(guildId, userId);
   if (!result.success) {
     return interaction.reply({ content: `❌ ${result.error}`, flags: 64 });
   }
@@ -630,7 +631,7 @@ async function handleFold(interaction, game) {
   }
   
   await interaction.update(replyOptions);
-  endGame(userId);
+  endGame(guildId, userId);
 }
 
 async function handlePlayAgain(interaction, bets) {
@@ -659,13 +660,13 @@ async function handlePlayAgain(interaction, bets) {
     const embed = new EmbedBuilder()
       .setColor(0xFF0000)
       .setTitle('💸 Insufficient Funds')
-      .setDescription(`You need **${totalRequired.toLocaleString()} ${CURRENCY}** to play again with the same bets.\nYou have **${balanceData.bank.toLocaleString()} ${CURRENCY}** in your bank.`);
+      .setDescription(`You need **${totalRequired.toLocaleString()} ${getCurrency(guildId)}** to play again with the same bets.\nYou have **${balanceData.bank.toLocaleString()} ${getCurrency(guildId)}** in your bank.`);
     return interaction.update({ embeds: [embed], components: [] });
   }
   
   // Clean up old game if exists
-  if (hasActiveGame(userId)) {
-    forceEndGame(userId);
+  if (hasActiveGame(guildId, userId)) {
+    forceEndGame(guildId, userId);
   }
   
   // Start new game with same ante
@@ -683,7 +684,7 @@ async function handlePlayAgain(interaction, bets) {
   
   // Set side bets if any
   if (previousPairPlus > 0 || previousSixCard > 0) {
-    const sideResult = setSideBets(userId, previousPairPlus, previousSixCard);
+    const sideResult = setSideBets(guildId, userId, previousPairPlus, previousSixCard);
     if (sideResult.success) {
       // Deduct side bets
       if (previousPairPlus > 0) {
@@ -696,10 +697,10 @@ async function handlePlayAgain(interaction, bets) {
   }
   
   // Get updated game state
-  const newGame = getActiveGame(userId);
+  const newGame = getActiveGame(guildId, userId);
   
   // Deal cards immediately (skip betting phase since bets are already set)
-  const dealResult = dealCards(userId);
+  const dealResult = dealCards(guildId, userId);
   if (!dealResult.success) {
     const embed = new EmbedBuilder()
       .setColor(0xFF0000)
@@ -726,13 +727,13 @@ async function handlePlayAgain(interaction, bets) {
     ...replyOptions,
     fetchReply: true 
   });
-  setGameMessage(userId, reply.id, interaction.channelId);
+  setGameMessage(guildId, userId, reply.id, interaction.channelId);
   
   // Set timer for auto-fold (reuse settings from earlier in function)
-  setGameTimer(userId, async () => {
-    const currentGame = getActiveGame(userId);
+  setGameTimer(guildId, userId, async () => {
+    const currentGame = getActiveGame(guildId, userId);
     if (currentGame && currentGame.phase === 'playing') {
-      const timeoutResult = forceEndGame(userId, 'timeout');
+      const timeoutResult = forceEndGame(guildId, userId, 'timeout');
       try {
         const channel = await interaction.client.channels.fetch(interaction.channelId);
         const message = await channel.messages.fetch(reply.id);

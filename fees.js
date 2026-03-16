@@ -84,32 +84,70 @@ function saveGuildSettings(guildId, settings) {
   guildSettings.set(guildId, settings);
 }
 
-function calculateBuyFee(guildId, totalCost) {
+function calculateBuyFee(guildId, totalCost, userId = null) {
   const settings = getGuildSettings(guildId);
   
   if (!settings.feesEnabled) {
     return 0;
   }
   
+  let fee;
   if (settings.buyFeeType === 'percent') {
-    return Math.round(totalCost * (settings.buyFeeValue / 100));
+    fee = Math.round(totalCost * (settings.buyFeeValue / 100));
   } else {
-    return Math.round(settings.buyFeeValue);
+    fee = Math.round(settings.buyFeeValue);
   }
+  
+  // Apply infamy fee modifier if userId provided
+  if (userId) {
+    try {
+      const { getTierEffects, getInfamySettings } = require('./infamy');
+      const infSettings = getInfamySettings(guildId);
+      if (infSettings.enabled) {
+        const tierEffects = getTierEffects(guildId, userId);
+        if (tierEffects.feeModifier > 0) {
+          fee = Math.round(fee * (1 + tierEffects.feeModifier / 100));
+        }
+      }
+    } catch (e) {
+      // Infamy not loaded
+    }
+  }
+  
+  return fee;
 }
 
-function calculateSellFee(guildId, totalValue) {
+function calculateSellFee(guildId, totalValue, userId = null) {
   const settings = getGuildSettings(guildId);
   
   if (!settings.feesEnabled) {
     return 0;
   }
   
+  let fee;
   if (settings.sellFeeType === 'percent') {
-    return Math.round(totalValue * (settings.sellFeeValue / 100));
+    fee = Math.round(totalValue * (settings.sellFeeValue / 100));
   } else {
-    return Math.round(settings.sellFeeValue);
+    fee = Math.round(settings.sellFeeValue);
   }
+  
+  // Apply infamy fee modifier if userId provided
+  if (userId) {
+    try {
+      const { getTierEffects, getInfamySettings } = require('./infamy');
+      const infSettings = getInfamySettings(guildId);
+      if (infSettings.enabled) {
+        const tierEffects = getTierEffects(guildId, userId);
+        if (tierEffects.feeModifier > 0) {
+          fee = Math.round(fee * (1 + tierEffects.feeModifier / 100));
+        }
+      }
+    } catch (e) {
+      // Infamy not loaded
+    }
+  }
+  
+  return fee;
 }
 
 function formatFee(type, value) {

@@ -21,8 +21,9 @@ const {
   getCardTypes,
   CARD_CONFIGS
 } = require('../scratchcard');
+const { getCurrency } = require('../admin');
 
-const CURRENCY = '<:babybel:1418824333664452608>';
+
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -88,7 +89,7 @@ async function showMainPanel(interaction, guildId, userId, isUpdate = false) {
   const embed = new EmbedBuilder()
     .setColor(0x9b59b6)
     .setTitle('🎰 Scratch Card Shop')
-    .setDescription(`Welcome to the scratch card shop! Buy a card and scratch to win!\n\n💰 **Your Balance:** ${balanceData.total.toLocaleString()} ${CURRENCY}\n🎟️ **Active Cards:** ${activeTickets.length}`)
+    .setDescription(`Welcome to the scratch card shop! Buy a card and scratch to win!\n\n💰 **Your Balance:** ${balanceData.total.toLocaleString()} ${getCurrency(guildId)}\n🎟️ **Active Cards:** ${activeTickets.length}`)
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .setTimestamp();
 
@@ -102,9 +103,9 @@ async function showMainPanel(interaction, guildId, userId, isUpdate = false) {
     embed.addFields({
       name: `${config.emoji} ${config.name}`,
       value: [
-        `💵 **${settings.price.toLocaleString()}** ${CURRENCY}`,
+        `💵 **${settings.price.toLocaleString()}** ${getCurrency(guildId)}`,
         `📊 ${config.grid.rows}x${config.grid.cols} grid`,
-        `💎 Jackpot: **${jackpotPrize}** ${CURRENCY}`
+        `💎 Jackpot: **${jackpotPrize}** ${getCurrency(guildId)}`
       ].join('\n'),
       inline: true
     });
@@ -196,7 +197,7 @@ async function handleBuyCard(interaction, guildId, userId, cardType) {
   const balanceData = await getBalance(guildId, userId);
   if (balanceData.total < price) {
     return interaction.reply({
-      content: `❌ You need **${price.toLocaleString()}** ${CURRENCY} to buy a ${config.name} card! You have **${balanceData.total.toLocaleString()}** ${CURRENCY}`,
+      content: `❌ You need **${price.toLocaleString()}** ${getCurrency(guildId)} to buy a ${config.name} card! You have **${balanceData.total.toLocaleString()}** ${getCurrency(guildId)}`,
       flags: 64
     });
   }
@@ -217,7 +218,7 @@ async function handleBuyCard(interaction, guildId, userId, cardType) {
     .setTitle(`${config.emoji} ${config.name} Purchased!`)
     .setDescription(`${interaction.user} bought a scratch card!\n\nTicket #${ticket.id} - Good luck!`)
     .addFields(
-      { name: '💰 Cost', value: `**${price.toLocaleString()}** ${CURRENCY}`, inline: true },
+      { name: '💰 Cost', value: `**${price.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '📊 Grid', value: `${config.grid.rows}x${config.grid.cols} (${config.grid.rows * config.grid.cols} boxes)`, inline: true }
     )
     .setImage(`attachment://scratch-${ticket.id}.png`)
@@ -238,7 +239,7 @@ async function handleBuyCard(interaction, guildId, userId, cardType) {
 
   // Update ephemeral panel to confirm purchase
   await interaction.update({
-    content: `✅ Purchased **${config.name}** for **${price.toLocaleString()}** ${CURRENCY}! Your card is in the channel below.`,
+    content: `✅ Purchased **${config.name}** for **${price.toLocaleString()}** ${getCurrency(guildId)}! Your card is in the channel below.`,
     embeds: [],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -271,17 +272,17 @@ async function handleInfo(interaction, guildId) {
     const settings = allSettings[cardType];
     const totalBoxes = config.grid.rows * config.grid.cols;
     
-    let prizesText = `Match 3: **${settings.match3}x** (${(settings.price * settings.match3).toLocaleString()} ${CURRENCY})`;
+    let prizesText = `Match 3: **${settings.match3}x** (${(settings.price * settings.match3).toLocaleString()} ${getCurrency(guildId)})`;
     if (settings.match4) {
-      prizesText += `\nMatch 4: **${settings.match4}x** (${(settings.price * settings.match4).toLocaleString()} ${CURRENCY})`;
+      prizesText += `\nMatch 4: **${settings.match4}x** (${(settings.price * settings.match4).toLocaleString()} ${getCurrency(guildId)})`;
     }
-    prizesText += `\nJackpot (💎): **${settings.jackpot}x** (${(settings.price * settings.jackpot).toLocaleString()} ${CURRENCY})`;
+    prizesText += `\nJackpot (💎): **${settings.jackpot}x** (${(settings.price * settings.jackpot).toLocaleString()} ${getCurrency(guildId)})`;
     prizesText += `\nFree Ticket (🎟️): Win another card!`;
     
     embed.addFields({
       name: `${config.emoji} ${config.name}`,
       value: [
-        `**Price:** ${settings.price.toLocaleString()} ${CURRENCY}`,
+        `**Price:** ${settings.price.toLocaleString()} ${getCurrency(guildId)}`,
         `**Grid:** ${config.grid.rows}x${config.grid.cols} (${totalBoxes} boxes)`,
         `**Prizes:**`,
         prizesText
@@ -336,9 +337,9 @@ async function handleStats(interaction, guildId, userId) {
       name: `${config.emoji} ${config.name}`,
       value: [
         `Cards: **${stat.total_purchased}**`,
-        `Spent: **${stat.total_spent.toLocaleString()}** ${CURRENCY}`,
-        `Won: **${stat.total_won.toLocaleString()}** ${CURRENCY}`,
-        `Net: **${(stat.total_won - stat.total_spent).toLocaleString()}** ${CURRENCY}`,
+        `Spent: **${stat.total_spent.toLocaleString()}** ${getCurrency(guildId)}`,
+        `Won: **${stat.total_won.toLocaleString()}** ${getCurrency(guildId)}`,
+        `Net: **${(stat.total_won - stat.total_spent).toLocaleString()}** ${getCurrency(guildId)}`,
         `Jackpots: **${stat.jackpots_won}** 💎`
       ].join('\n'),
       inline: true
@@ -347,9 +348,9 @@ async function handleStats(interaction, guildId, userId) {
 
   embed.setDescription([
     `**Total Cards:** ${totalPurchased}`,
-    `**Total Spent:** ${totalSpent.toLocaleString()} ${CURRENCY}`,
-    `**Total Won:** ${totalWon.toLocaleString()} ${CURRENCY}`,
-    `**Net Profit:** ${(totalWon - totalSpent).toLocaleString()} ${CURRENCY}`,
+    `**Total Spent:** ${totalSpent.toLocaleString()} ${getCurrency(guildId)}`,
+    `**Total Won:** ${totalWon.toLocaleString()} ${getCurrency(guildId)}`,
+    `**Net Profit:** ${(totalWon - totalSpent).toLocaleString()} ${getCurrency(guildId)}`,
     `**Jackpots:** ${totalJackpots} 💎`
   ].join('\n'));
 
@@ -719,15 +720,15 @@ async function finishCard(interaction, ticket, guildId, userId, isEphemeral = fa
   if (winType === 'JACKPOT' || winType === 'MEGA JACKPOT') {
     resultColor = 0xFFD700;
     resultTitle = `🎉 ${winType}! ${config.emoji} ${config.name}`;
-    resultDesc = `${interaction.user} hit the **${winType}**!\n\n💎 **Won: ${winnings.toLocaleString()}** ${CURRENCY}`;
+    resultDesc = `${interaction.user} hit the **${winType}**!\n\n💎 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
   } else if (winType === 'MEGA WIN') {
     resultColor = 0xE91E63;
     resultTitle = `🎊 MEGA WIN! ${config.emoji} ${config.name}`;
-    resultDesc = `${interaction.user} got a **MEGA WIN**!\n\n🏆 **Won: ${winnings.toLocaleString()}** ${CURRENCY}`;
+    resultDesc = `${interaction.user} got a **MEGA WIN**!\n\n🏆 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
   } else if (winType === 'WIN') {
     resultColor = 0x4CAF50;
     resultTitle = `✨ Winner! ${config.emoji} ${config.name}`;
-    resultDesc = `${interaction.user} matched 3!\n\n💰 **Won: ${winnings.toLocaleString()}** ${CURRENCY}`;
+    resultDesc = `${interaction.user} matched 3!\n\n💰 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
   } else if (winType === 'FREE_TICKET') {
     resultColor = 0x9C27B0;
     resultTitle = `🎟️ Free Ticket! ${config.emoji} ${config.name}`;
