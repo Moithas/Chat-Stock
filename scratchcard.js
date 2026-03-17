@@ -5,6 +5,13 @@
 
 const { createCanvas, registerFont } = require('canvas');
 const path = require('path');
+const fs = require('fs');
+
+// Register Segoe UI Emoji if available (for Linux/droplet)
+const segoeEmojiPath = '/usr/share/fonts/truetype/seguiemj.ttf';
+if (fs.existsSync(segoeEmojiPath)) {
+  registerFont(segoeEmojiPath, { family: 'Segoe UI Emoji' });
+}
 
 // Card configurations
 const CARD_CONFIGS = {
