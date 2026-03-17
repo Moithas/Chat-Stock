@@ -1,6 +1,6 @@
 // Admin Settings Panel — Admin Role, Currency Symbol, Logs, Reset Game
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, RoleSelectMenuBuilder } = require('discord.js');
-const { getAdminSettings, getAdminRole, setAdminRole, logAdminAction, getAdminLogs, getCurrency, setCurrency, getSupportServerUrl, setSupportServerUrl } = require('../admin');
+const { getAdminSettings, saveAdminSettings, getAdminRole, setAdminRole, logAdminAction, getAdminLogs, getCurrency, setCurrency, getSupportServerUrl, setSupportServerUrl } = require('../admin');
 const { getDb, saveDatabase } = require('../database');
 
 const BUTTON_IDS = [
@@ -505,7 +505,6 @@ async function handleStartingBalanceModal(interaction, guildId) {
   }
 
   const settings = getAdminSettings(guildId);
-  const { saveAdminSettings } = require('../admin');
   settings.startingBalance = amount;
   saveAdminSettings(guildId, settings);
   logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set starting balance to ${amount.toLocaleString()}`);
@@ -542,7 +541,6 @@ async function handleImmunityModal(interaction, guildId) {
   }
 
   const settings = getAdminSettings(guildId);
-  const { saveAdminSettings } = require('../admin');
   settings.newPlayerImmunityDays = days;
   saveAdminSettings(guildId, settings);
   logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set new player immunity to ${days} day(s)`);

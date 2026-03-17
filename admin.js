@@ -210,6 +210,7 @@ function isAdmin(guildId, userId, member) {
 module.exports = {
   initAdmin,
   getAdminSettings,
+  saveAdminSettings,
   getAdminRole,
   setAdminRole,
   setLogChannel,
