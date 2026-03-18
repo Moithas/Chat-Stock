@@ -9,6 +9,10 @@ const backupDir = './backups';
 const MAX_BACKUPS = 5;
 const BACKUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
+// Price cache — avoids recalculating the same stock price hundreds of times during leaderboard builds
+const priceCache = new Map();
+const PRICE_CACHE_TTL = 10_000; // 10 seconds
+
 // Initialize database
 async function initDatabase() {
   const SQL = await initSqlJs();
@@ -546,6 +550,13 @@ function calculateDailyContribution(messageCount, settings) {
 
 // Calculate stock price (guildId optional - for price impact delay and market events)
 function calculateStockPrice(userId, guildId = null) {
+  // Check price cache first
+  const cacheKey = `${userId}:${guildId || 'null'}`;
+  const cached = priceCache.get(cacheKey);
+  if (cached && Date.now() - cached.time < PRICE_CACHE_TTL) {
+    return cached.price;
+  }
+
   const user = getUser(userId);
   if (!user) return 100.0;
 
@@ -653,7 +664,9 @@ function calculateStockPrice(userId, guildId = null) {
     }
   }
 
-  return Math.round(price * 100) / 100;
+  const finalPrice = Math.round(price * 100) / 100;
+  priceCache.set(cacheKey, { price: finalPrice, time: Date.now() });
+  return finalPrice;
 }
 
 // Get top stocks by value
@@ -667,20 +680,23 @@ function getLeaderboard(limit = 10, guildId = null) {
     return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
   });
 
-  // Calculate prices and get share counts for all users
+  // Batch-fetch all share counts in one query
+  const allSharesResult = db.exec('SELECT stock_user_id, SUM(shares) as total FROM stocks WHERE shares > 0 GROUP BY stock_user_id');
+  const sharesMap = new Map();
+  if (allSharesResult.length > 0) {
+    for (const row of allSharesResult[0].values) {
+      sharesMap.set(row[0], row[1] || 0);
+    }
+  }
+
+  // Calculate prices (price cache prevents redundant computation)
   const usersWithPrices = users.map(user => {
     const currentPrice = calculateStockPrice(user.user_id, guildId);
-    
-    // Get total shares owned by others (only count shares > 0)
-    const sharesResult = db.exec('SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ? AND shares > 0', [user.user_id]);
-    const totalShares = sharesResult.length > 0 && sharesResult[0].values.length > 0 && sharesResult[0].values[0][0] 
-      ? sharesResult[0].values[0][0] 
-      : 0;
     
     return {
       ...user,
       currentPrice: parseFloat(currentPrice),
-      totalShares: totalShares || 0
+      totalShares: sharesMap.get(user.user_id) || 0
     };
   });
 
@@ -721,28 +737,30 @@ function getStockRank(userId, guildId = null) {
 }
 
 // Get a user's rank on the portfolio value leaderboard
-function getPortfolioRank(userId) {
-  const allUsers = getAllUsers();
-  
-  if (allUsers.length === 0) return null;
+function getPortfolioRank(userId, guildId = null) {
+  // Batch-fetch all holdings in one query
+  const allStocksResult = db.exec('SELECT owner_id, stock_user_id, shares FROM stocks WHERE shares > 0');
+  if (!allStocksResult.length || !allStocksResult[0].values.length) return null;
+
+  // Group by owner
+  const ownerMap = new Map();
+  for (const row of allStocksResult[0].values) {
+    const ownerId = row[0];
+    if (!ownerMap.has(ownerId)) ownerMap.set(ownerId, []);
+    ownerMap.get(ownerId).push({ stock_user_id: row[1], shares: row[2] });
+  }
 
   const portfolioValues = [];
 
-  for (const user of allUsers) {
-    const portfolio = getPortfolio(user.user_id);
-    
+  for (const [ownerId, holdings] of ownerMap) {
     let totalValue = 0;
-    for (const stock of portfolio) {
-      const currentPrice = calculateStockPrice(stock.stock_user_id);
+    for (const stock of holdings) {
+      const currentPrice = calculateStockPrice(stock.stock_user_id, guildId);
       totalValue += currentPrice * stock.shares;
     }
 
-    // Only include users who have invested
     if (totalValue > 0) {
-      portfolioValues.push({
-        userId: user.user_id,
-        totalValue: totalValue
-      });
+      portfolioValues.push({ userId: ownerId, totalValue });
     }
   }
 

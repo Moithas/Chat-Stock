@@ -36,16 +36,29 @@ function getOverviewData(guildId, userId, user) {
   // Net worth rank
   let netWorthRank = null;
   try {
-    // Quick rank by total wealth across all users
-    const allUsers = db.exec('SELECT DISTINCT user_id FROM balances WHERE guild_id = ?', [guildId]);
-    if (allUsers.length > 0 && allUsers[0].values.length > 0) {
+    // Batch-fetch all balances and stock holdings for ranking
+    const allBalances = db.exec('SELECT user_id, cash, bank FROM balances WHERE guild_id = ?', [guildId]);
+    if (allBalances.length > 0 && allBalances[0].values.length > 0) {
+      const balanceMap = new Map();
+      for (const row of allBalances[0].values) {
+        balanceMap.set(row[0], { cash: row[1] || 0, bank: row[2] || 0 });
+      }
+
+      // Batch-fetch all stock holdings in one query
+      const allStocks = db.exec('SELECT owner_id, stock_user_id, shares FROM stocks WHERE shares > 0');
+      const ownerHoldings = new Map();
+      if (allStocks.length > 0) {
+        for (const row of allStocks[0].values) {
+          if (!ownerHoldings.has(row[0])) ownerHoldings.set(row[0], []);
+          ownerHoldings.get(row[0]).push({ stock_user_id: row[1], shares: row[2] });
+        }
+      }
+
       const wealthList = [];
-      for (const row of allUsers[0].values) {
-        const uid = row[0];
-        const bal = getBalance(guildId, uid);
-        const port = getPortfolio(uid);
+      for (const [uid, bal] of balanceMap) {
         let pv = 0;
-        for (const s of port) {
+        const holdings = ownerHoldings.get(uid) || [];
+        for (const s of holdings) {
           pv += calculateStockPrice(s.stock_user_id, guildId) * s.shares;
         }
         const pVal = getTotalPropertyValue(guildId, uid) || 0;

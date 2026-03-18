@@ -429,8 +429,8 @@ async function showStockPanel(interaction, guildId, userId, isUpdate = false, is
   const profitPercentage = totalInvested > 0 ? ((totalProfit / totalInvested) * 100).toFixed(2) : '0.00';
   
   // Get ranks
-  const stockRank = getStockRank(userId);
-  const portfolioRank = getPortfolioRank(userId);
+  const stockRank = getStockRank(userId, guildId);
+  const portfolioRank = getPortfolioRank(userId, guildId);
   
   const stockRankText = stockRank ? `${getRankEmoji(stockRank.rank)} of ${stockRank.total}` : 'Unranked';
   const portfolioRankText = portfolioRank ? `${getRankEmoji(portfolioRank.rank)} of ${portfolioRank.total}` : 'Unranked';
@@ -649,7 +649,7 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
   
   const stockPrice = calculateStockPrice(targetUserId, guildId);
   const shareholders = getAllStockHolders(targetUserId);
-  const stockRank = getStockRank(targetUserId);
+  const stockRank = getStockRank(targetUserId, guildId);
   const streakInfo = calculateStreakInfo(targetUserId);
   
   let totalShares = 0;

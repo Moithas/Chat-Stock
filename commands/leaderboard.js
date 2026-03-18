@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getLeaderboard, getAllUsers, getPortfolio, calculateStockPrice } = require('../database');
+const { getLeaderboard, getAllUsers, getPortfolio, calculateStockPrice, getDb } = require('../database');
 const { getAllBalances } = require('../economy');
 const { getTopFighters } = require('../fight');
 const { getDungeonLeaderboard } = require('../dungeon');
@@ -152,7 +152,7 @@ async function buildStockLeaderboard(guildId, page = 0) {
 }
 
 async function buildPortfolioLeaderboard(guildId, page = 0) {
-  const allUsers = getAllUsers();
+  const db = getDb();
   
   const embed = new EmbedBuilder()
     .setColor(0x9b59b6)
@@ -160,20 +160,37 @@ async function buildPortfolioLeaderboard(guildId, page = 0) {
     .setDescription('Investors by total portfolio value')
     .setTimestamp();
 
-  if (allUsers.length === 0) {
-    embed.setDescription('❌ No users available yet! Start chatting and trading!');
+  // Batch-fetch all stock holdings in one query instead of per-user
+  const allStocksResult = db.exec(
+    'SELECT s.owner_id, s.stock_user_id, s.shares, s.avg_buy_price, u.username FROM stocks s JOIN users u ON s.owner_id = u.user_id WHERE s.shares > 0'
+  );
+
+  if (!allStocksResult.length || !allStocksResult[0].values.length) {
+    embed.setDescription('❌ No one has invested in any stocks yet! Use `/buy` to get started!');
     return { embed, totalPages: 1 };
+  }
+
+  const cols = allStocksResult[0].columns;
+  const allStocks = allStocksResult[0].values.map(row =>
+    cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {})
+  );
+
+  // Group holdings by owner
+  const ownerMap = new Map();
+  for (const stock of allStocks) {
+    if (!ownerMap.has(stock.owner_id)) {
+      ownerMap.set(stock.owner_id, { username: stock.username, holdings: [] });
+    }
+    ownerMap.get(stock.owner_id).holdings.push(stock);
   }
 
   const portfolioValues = [];
 
-  for (const user of allUsers) {
-    const portfolio = getPortfolio(user.user_id);
-    
+  for (const [userId, data] of ownerMap) {
     let totalValue = 0;
     let totalInvested = 0;
 
-    for (const stock of portfolio) {
+    for (const stock of data.holdings) {
       const currentPrice = calculateStockPrice(stock.stock_user_id, guildId);
       totalValue += currentPrice * stock.shares;
       totalInvested += stock.avg_buy_price * stock.shares;
@@ -184,13 +201,13 @@ async function buildPortfolioLeaderboard(guildId, page = 0) {
 
     if (totalInvested > 0) {
       portfolioValues.push({
-        userId: user.user_id,
-        username: user.username,
-        totalValue: totalValue,
-        totalInvested: totalInvested,
-        profit: profit,
-        profitPercent: profitPercent,
-        holdingsCount: portfolio.length
+        userId,
+        username: data.username,
+        totalValue,
+        totalInvested,
+        profit,
+        profitPercent,
+        holdingsCount: data.holdings.length
       });
     }
   }
