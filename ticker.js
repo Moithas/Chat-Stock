@@ -203,7 +203,7 @@ function calculateHistoricalPrice(userId, asOfTimestamp, guildId = null) {
   if (tierSettings.enabled) {
     // Get messages within the window AS OF the target timestamp
     const messagesResult = db.exec(
-      'SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type = "MESSAGE" ORDER BY timestamp ASC',
+      "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type = 'MESSAGE' ORDER BY timestamp ASC",
       [userId, windowAgo, asOfTimestamp]
     );
     
@@ -256,7 +256,7 @@ function calculateHistoricalPrice(userId, asOfTimestamp, guildId = null) {
   } else {
     // Legacy flat rate system
     const recentMessagesResult = db.exec(
-      'SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type = "MESSAGE"',
+      "SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type = 'MESSAGE'",
       [userId, windowAgo, asOfTimestamp]
     );
     

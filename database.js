@@ -279,7 +279,7 @@ function createUser(userId, username) {
     
     // If user exists with "Unknown User" or just their ID as username, update it
     if (username && username !== 'Unknown User' && username !== userId) {
-      db.run('UPDATE users SET username = ? WHERE user_id = ? AND (username = "Unknown User" OR username = user_id)', [username, userId]);
+      db.run("UPDATE users SET username = ? WHERE user_id = ? AND (username = 'Unknown User' OR username = user_id)", [username, userId]);
     }
     
     saveDatabase();
@@ -293,7 +293,7 @@ function updateMessageCount(timestamp, userId, baseValueGrowth = 0.075) {
   // Increment message count, update last message time, and grow base_value permanently
   db.run('UPDATE users SET total_messages = total_messages + 1, last_message_time = ?, base_value = base_value + ? WHERE user_id = ?', [timestamp, baseValueGrowth, userId]);
   // Also log as a transaction for 15-day window tracking
-  db.run('INSERT INTO transactions (buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, 0, 0, "MESSAGE", ?)',
+  db.run("INSERT INTO transactions (buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, 0, 0, 'MESSAGE', ?)",
     [userId, userId, timestamp]);
   saveDatabase();
 }
@@ -401,7 +401,7 @@ function calculateStreakInfo(userId) {
   
   // Get all message timestamps since cutoff
   const messagesResult = db.exec(
-    'SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = "MESSAGE" ORDER BY timestamp DESC',
+    "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = 'MESSAGE' ORDER BY timestamp DESC",
     [userId, cutoffTime]
   );
   
@@ -619,7 +619,7 @@ function calculateStockPrice(userId, guildId = null) {
   if (tierSettings.enabled) {
     // Get messages grouped by day within the window
     const messagesResult = db.exec(
-      'SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = "MESSAGE" ORDER BY timestamp ASC',
+      "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = 'MESSAGE' ORDER BY timestamp ASC",
       [userId, windowAgo]
     );
     
@@ -646,7 +646,7 @@ function calculateStockPrice(userId, guildId = null) {
   } else {
     // Legacy flat rate system (disabled diminishing returns)
     const recentMessagesResult = db.exec(
-      'SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = "MESSAGE"',
+      "SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = 'MESSAGE'",
       [userId, windowAgo]
     );
     
