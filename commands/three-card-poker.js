@@ -340,6 +340,7 @@ module.exports = {
   // Button and select menu handlers
   async handleButton(interaction, action, targetUserId, extraData = []) {
     const userId = interaction.user.id;
+    const guildId = interaction.guildId;
     
     // Verify it's the right user
     if (userId !== targetUserId) {
