@@ -42,8 +42,49 @@ class SqlJsCompat {
     }
   }
 
+  // Mimics sql.js db.prepare(sql) → returns a statement compatibility object
+  prepare(sql) {
+    const betterStmt = this.db.prepare(sql);
+    return new SqlJsStmtCompat(betterStmt);
+  }
+
   close() {
     this.db.close();
+  }
+}
+
+// Compatibility wrapper for sql.js statement API (bind/step/getAsObject/free)
+class SqlJsStmtCompat {
+  constructor(betterStmt) {
+    this.stmt = betterStmt;
+    this.rows = null;
+    this.rowIndex = -1;
+  }
+
+  bind(params = []) {
+    this.rows = this.stmt.all(...params);
+    this.rowIndex = -1;
+  }
+
+  step() {
+    if (this.rows === null) {
+      // Called without bind() — run with no params
+      this.rows = this.stmt.all();
+      this.rowIndex = -1;
+    }
+    this.rowIndex++;
+    return this.rowIndex < this.rows.length;
+  }
+
+  getAsObject() {
+    if (this.rows && this.rowIndex >= 0 && this.rowIndex < this.rows.length) {
+      return this.rows[this.rowIndex];
+    }
+    return {};
+  }
+
+  free() {
+    // No-op — better-sqlite3 handles cleanup automatically
   }
 }
 
