@@ -1,7 +1,51 @@
-const initSqlJs = require('sql.js');
+const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 const log = require('./logger');
+
+// Compatibility wrapper: makes better-sqlite3 look like sql.js to the rest of the codebase
+class SqlJsCompat {
+  constructor(filePath) {
+    this.db = new Database(filePath);
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('busy_timeout = 5000');
+  }
+
+  // Mimics sql.js db.exec(sql, params) → returns [{ columns, values }] or []
+  exec(sql, params = []) {
+    const trimmed = sql.trimStart().toUpperCase();
+    const isQuery = trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA') || trimmed.startsWith('WITH');
+
+    if (isQuery) {
+      const stmt = this.db.prepare(sql);
+      const rows = params.length > 0 ? stmt.all(...params) : stmt.all();
+      if (rows.length === 0) return [];
+      const columns = Object.keys(rows[0]);
+      const values = rows.map(row => columns.map(col => row[col]));
+      return [{ columns, values }];
+    } else {
+      if (params.length > 0) {
+        this.db.prepare(sql).run(...params);
+      } else {
+        this.db.exec(sql);
+      }
+      return [];
+    }
+  }
+
+  // Mimics sql.js db.run(sql, params) — executes without returning results
+  run(sql, params = []) {
+    if (params.length > 0) {
+      return this.db.prepare(sql).run(...params);
+    } else {
+      this.db.exec(sql);
+    }
+  }
+
+  close() {
+    this.db.close();
+  }
+}
 
 let db;
 const dbPath = './chatstock.db';
@@ -15,15 +59,7 @@ const PRICE_CACHE_TTL = 10_000; // 10 seconds
 
 // Initialize database
 async function initDatabase() {
-  const SQL = await initSqlJs();
-  
-  // Load existing database or create new one
-  if (fs.existsSync(dbPath)) {
-    const buffer = fs.readFileSync(dbPath);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
+  db = new SqlJsCompat(dbPath);
 
   // Create tables
   db.run(`
@@ -146,21 +182,32 @@ async function initDatabase() {
   log.info('Database initialized');
 }
 
-// Save database to file
+// Checkpoint WAL to main database file (better-sqlite3 auto-saves, but this ensures recoverability)
 function saveDatabase() {
   if (db) {
-    const data = db.export();
-    fs.writeFileSync(dbPath, data);
+    try {
+      db.db.pragma('wal_checkpoint(PASSIVE)');
+    } catch (e) {
+      // Ignore checkpoint errors
+    }
   }
 }
 
-// Save every 10 seconds
-setInterval(saveDatabase, 10000);
+// Checkpoint periodically
+setInterval(saveDatabase, 60000);
 
-// Save on exit
-process.on('exit', saveDatabase);
+// Clean shutdown
+process.on('exit', () => {
+  if (db) {
+    try { db.db.pragma('wal_checkpoint(TRUNCATE)'); } catch (e) {}
+    try { db.close(); } catch (e) {}
+  }
+});
 process.on('SIGINT', () => {
-  saveDatabase();
+  if (db) {
+    try { db.db.pragma('wal_checkpoint(TRUNCATE)'); } catch (e) {}
+    try { db.close(); } catch (e) {}
+  }
   process.exit();
 });
 
@@ -173,10 +220,12 @@ function createBackup() {
       fs.mkdirSync(backupDir, { recursive: true });
     }
 
+    // Checkpoint WAL before backup so the main file is complete
+    db.db.pragma('wal_checkpoint(TRUNCATE)');
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = path.join(backupDir, `chatstock-${timestamp}.db`);
-    const data = db.export();
-    fs.writeFileSync(backupPath, data);
+    fs.copyFileSync(dbPath, backupPath);
 
     // Prune old backups — keep only the most recent MAX_BACKUPS
     const files = fs.readdirSync(backupDir)
@@ -188,7 +237,7 @@ function createBackup() {
       fs.unlinkSync(path.join(backupDir, files[i]));
     }
 
-    const sizeMB = (data.length / 1024 / 1024).toFixed(2);
+    const sizeMB = (fs.statSync(backupPath).size / 1024 / 1024).toFixed(2);
     log.info(`Database backup created: ${backupPath} (${sizeMB} MB) — ${files.length > MAX_BACKUPS ? files.length - MAX_BACKUPS : 0} old backup(s) pruned`);
   } catch (error) {
     log.error(`Database backup failed: ${error.message}`);
