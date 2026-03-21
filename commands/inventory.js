@@ -19,7 +19,9 @@ const {
   getFulfillmentRequest,
   completeFulfillment,
   cancelFulfillment,
-  getItemSettings
+  getItemSettings,
+  getItemCooldown,
+  recordItemUse
 } = require('../items');
 const { getAdminRole, isAdmin, getCurrency } = require('../admin');
 
@@ -235,6 +237,22 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
   // Check if it's a service or cosmetic item
   const shopItem = getShopItem(guildId, itemId);
   if (shopItem && isServiceItem(shopItem.effect_type)) {
+    // Check cooldown for service items
+    if (shopItem.use_cooldown_hours > 0) {
+      const cooldownExpires = getItemCooldown(guildId, userId, shopItem.id);
+      if (cooldownExpires) {
+        const now = Date.now();
+        const remainingMs = cooldownExpires - now;
+        const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
+        const remainingMins = Math.ceil(remainingMs / (1000 * 60));
+        const timeStr = remainingHours > 1 ? `${remainingHours} hours` : `${remainingMins} minutes`;
+        return i.reply({ 
+          content: `❌ **${shopItem.emoji} ${shopItem.name}** is on cooldown!\n\nYou can use this item again in **${timeStr}**.`, 
+          ephemeral: true 
+        });
+      }
+    }
+    
     // Create a ticket channel for the service item
     await i.deferReply({ ephemeral: true });
     
@@ -244,6 +262,11 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
       if (ticketResult.success) {
         // Remove item from inventory since ticket is created
         removeFromInventory(guildId, userId, itemId, 1);
+        
+        // Record cooldown for this item
+        if (shopItem.use_cooldown_hours > 0) {
+          recordItemUse(guildId, userId, shopItem.id, shopItem.use_cooldown_hours);
+        }
         
         // Refresh inventory display
         state.inventory = getUserInventory(guildId, userId);
@@ -328,6 +351,22 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
   
   // Handle role grant items
   if (shopItem && isRoleGrantItem(shopItem.effect_type)) {
+    // Check cooldown for role grant items
+    if (shopItem.use_cooldown_hours > 0) {
+      const cooldownExpires = getItemCooldown(guildId, userId, shopItem.id);
+      if (cooldownExpires) {
+        const now = Date.now();
+        const remainingMs = cooldownExpires - now;
+        const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
+        const remainingMins = Math.ceil(remainingMs / (1000 * 60));
+        const timeStr = remainingHours > 1 ? `${remainingHours} hours` : `${remainingMins} minutes`;
+        return i.reply({ 
+          content: `❌ **${shopItem.emoji} ${shopItem.name}** is on cooldown!\n\nYou can use this item again in **${timeStr}**.`, 
+          ephemeral: true 
+        });
+      }
+    }
+    
     await i.deferReply({ ephemeral: true });
     
     try {
@@ -365,6 +404,11 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
       
       removeFromInventory(guildId, userId, itemId, 1);
       recordRoleGrant(guildId, userId, roleId, shopItem.id, shopItem.name, shopItem.duration_hours);
+      
+      // Record cooldown for this item
+      if (shopItem.use_cooldown_hours > 0) {
+        recordItemUse(guildId, userId, shopItem.id, shopItem.use_cooldown_hours);
+      }
       
       // Refresh inventory
       state.inventory = getUserInventory(guildId, userId);
