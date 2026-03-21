@@ -1012,7 +1012,44 @@ async function spawnVault(guildId) {
         return interaction.reply({ content: '❌ The vault is empty!', ephemeral: true });
       }
       
-      // Add user as collector
+      // Check infamy tier vault restrictions BEFORE reserving slot
+      let vaultBlocked = false;
+      let vaultDelayed = false;
+      let delaySeconds = 0;
+      try {
+        const { getTierEffects, getInfamySettings } = require('./infamy');
+        const tierEffects = getTierEffects(guildId, interaction.user.id);
+        const infSettings = getInfamySettings(guildId);
+        
+        if (infSettings.enabled) {
+          // T5 = vault locked entirely (vaultPenalty === -1)
+          if (tierEffects.vaultPenalty === -1) {
+            vaultBlocked = true;
+            return interaction.reply({ 
+              content: `☠️ **${interaction.user.username}** is **Blacklisted** and cannot claim vaults!`, 
+              ephemeral: false 
+            });
+          }
+          
+          // T4 = delay before claiming (slot NOT reserved during delay - others can steal!)
+          if (tierEffects.vaultPenalty > 0) {
+            vaultDelayed = true;
+            delaySeconds = tierEffects.vaultPenalty;
+            await interaction.deferReply();
+            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+            
+            // Re-check if vault is still available (someone else may have taken the slot!)
+            if (vaultData.collectors.size >= 3) {
+              vaultData.lateClickers.push({ userId: interaction.user.id, username: interaction.user.username, reactionMs, reactionDisplay });
+              return interaction.editReply({ content: `⏳ Your infamy delayed you **${delaySeconds}s** and someone else claimed it first! ⏱️ You clicked at **${reactionDisplay}**` });
+            }
+          }
+        }
+      } catch (e) {
+        // Infamy not loaded, proceed normally
+      }
+      
+      // NOW add user as collector (after any delay)
       vaultData.collectors.add(interaction.user.id);
       const currentSlot = vaultData.collectors.size; // 1, 2, or 3
       
@@ -1032,47 +1069,17 @@ async function spawnVault(guildId) {
           console.error('Failed to remove vault penalty:', e);
         }
         
-        await interaction.reply({ 
-          content: `💥 **BOOBY TRAP!** ${interaction.user.username} triggered a security system and lost **${penalty.toLocaleString()}** ${getCurrency(guildId)}! 🚨 ⏱️ **${reactionDisplay}**`
-        });
+        if (vaultDelayed) {
+          await interaction.editReply({ 
+            content: `💥 **BOOBY TRAP!** ${interaction.user.username} triggered a security system and lost **${penalty.toLocaleString()}** ${getCurrency(guildId)}! 🚨 ⏱️ **${reactionDisplay}** *(delayed ${delaySeconds}s by infamy)*`
+          });
+        } else {
+          await interaction.reply({ 
+            content: `💥 **BOOBY TRAP!** ${interaction.user.username} triggered a security system and lost **${penalty.toLocaleString()}** ${getCurrency(guildId)}! 🚨 ⏱️ **${reactionDisplay}**`
+          });
+        }
       } else {
         // Normal reward
-        
-        // Check infamy tier vault restrictions
-        let vaultBlocked = false;
-        let vaultDelayed = false;
-        try {
-          const { getTierEffects, addInfamy, getInfamySettings } = require('./infamy');
-          const tierEffects = getTierEffects(guildId, interaction.user.id);
-          const infSettings = getInfamySettings(guildId);
-          
-          if (infSettings.enabled) {
-            // T5 = vault locked entirely (vaultPenalty === -1)
-            if (tierEffects.vaultPenalty === -1) {
-              vaultBlocked = true;
-              vaultData.collectors.delete(interaction.user.id);
-              return interaction.reply({ 
-                content: `☠️ **${interaction.user.username}** is **Blacklisted** and cannot claim vaults!`, 
-                ephemeral: false 
-              });
-            }
-            
-            // T4 = 2 second delay before claiming
-            if (tierEffects.vaultPenalty > 0) {
-              vaultDelayed = true;
-              await interaction.deferReply();
-              await new Promise(resolve => setTimeout(resolve, tierEffects.vaultPenalty * 1000));
-              
-              // Re-check if vault is still available (someone else may have taken it)
-              if (vaultData.collectors.size > 3) {
-                return interaction.editReply({ content: `⏳ Your infamy delayed you and someone else claimed it first!` });
-              }
-            }
-          }
-        } catch (e) {
-          // Infamy not loaded, proceed normally
-        }
-        
         const reward = Math.floor(Math.random() * (vaultData.maxReward - vaultData.minReward + 1)) + vaultData.minReward;
         vaultData.rewards.push({ userId: interaction.user.id, username: interaction.user.username, reward, reactionMs, reactionDisplay });
         
@@ -1098,7 +1105,7 @@ async function spawnVault(guildId) {
         
         if (vaultDelayed) {
           await interaction.editReply({ 
-            content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${getCurrency(guildId)} from the vault! ⏱️ **${reactionDisplay}** *(delayed by infamy)*`
+            content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${getCurrency(guildId)} from the vault! ⏱️ **${reactionDisplay}** *(delayed ${delaySeconds}s by infamy)*`
           });
         } else {
           await interaction.reply({ 
