@@ -47,6 +47,29 @@ const TIME_RANGES = {
   '1w': { ms: 7 * 24 * 60 * 60 * 1000, label: '1 Week' }
 };
 
+// Calculate the actual total cost for a given number of shares
+// Uses the same rounding and fee logic as the actual purchase to avoid mismatches
+function calculateActualCost(guildId, userId, price, shares) {
+  const subtotal = Math.round(price * shares);
+  const fee = calculateBuyFee(guildId, subtotal, userId);
+  return subtotal + fee;
+}
+
+// Calculate max affordable shares by verifying the estimate actually fits the budget
+function calculateMaxAffordableShares(guildId, userId, balance, price, feePercent, fixedFee) {
+  // Initial estimate using simple formula
+  let maxShares = Math.floor((balance - fixedFee) / (price * (1 + feePercent)));
+  
+  if (maxShares < 1) return 0;
+  
+  // Verify and adjust - the actual cost with rounding may exceed balance
+  while (maxShares > 0 && calculateActualCost(guildId, userId, price, maxShares) > balance) {
+    maxShares--;
+  }
+  
+  return maxShares;
+}
+
 // Generate price chart
 async function generatePriceChart(userId, username, timeRange, currentPrice) {
   const range = TIME_RANGES[timeRange];
@@ -842,8 +865,8 @@ async function showBuyAmountButtons(interaction, guildId, userId, targetUserId, 
   const feePercent = settings.buyFeeType === 'percent' ? settings.buyFeeValue / 100 : 0;
   const fixedFee = settings.buyFeeType === 'fixed' ? settings.buyFeeValue : 0;
   
-  // Max shares = (balance - fixedFee) / (price * (1 + feePercent))
-  const maxShares = Math.floor((balance - fixedFee) / (currentPrice * (1 + feePercent)));
+  // Use helper that accounts for rounding and infamy fee modifiers
+  const maxShares = calculateMaxAffordableShares(guildId, userId, balance, currentPrice, feePercent, fixedFee);
   
   const lpNote = lpBuyMod !== 0 ? ` (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}% LP)` : '';
   const embed = new EmbedBuilder()
@@ -975,7 +998,7 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
   const settings = getGuildSettings(guildId);
   const feePercent = settings.buyFeeType === 'percent' ? settings.buyFeeValue / 100 : 0;
   const fixedFee = settings.buyFeeType === 'fixed' ? settings.buyFeeValue : 0;
-  const maxShares = Math.floor((balance - fixedFee) / (currentPrice * (1 + feePercent)));
+  const maxShares = calculateMaxAffordableShares(guildId, userId, balance, currentPrice, feePercent, fixedFee);
   
   const shares = amount === 'max' ? maxShares : parseInt(amount);
   
@@ -1070,7 +1093,7 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
   const settings = getGuildSettings(guildId);
   const feePercent = settings.buyFeeType === 'percent' ? settings.buyFeeValue / 100 : 0;
   const fixedFee = settings.buyFeeType === 'fixed' ? settings.buyFeeValue : 0;
-  const maxShares = Math.floor((balance - fixedFee) / (currentPrice * (1 + feePercent)));
+  const maxShares = calculateMaxAffordableShares(guildId, userId, balance, currentPrice, feePercent, fixedFee);
   
   const shares = parseInt(amount);
   
@@ -1306,7 +1329,7 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
   const settings = getGuildSettings(guildId);
   const feePercent = settings.buyFeeType === 'percent' ? settings.buyFeeValue / 100 : 0;
   const fixedFee = settings.buyFeeType === 'fixed' ? settings.buyFeeValue : 0;
-  const maxShares = Math.floor((balance - fixedFee) / (currentPrice * (1 + feePercent)));
+  const maxShares = calculateMaxAffordableShares(guildId, userId, balance, currentPrice, feePercent, fixedFee);
   
   const shares = amount === 'max' ? maxShares : parseInt(amount);
   
