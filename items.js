@@ -384,6 +384,20 @@ function initItems(database) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_temp_roles_guild ON temporary_role_grants(guild_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_temp_roles_expires ON temporary_role_grants(expires_at)`);
   
+  // Create item-specific use cooldowns table (tracks when users last used each specific item)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS item_use_cooldowns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      item_id INTEGER NOT NULL,
+      last_used_at INTEGER NOT NULL,
+      cooldown_expires_at INTEGER NOT NULL,
+      UNIQUE(guild_id, user_id, item_id)
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_item_cooldowns_guild_user ON item_use_cooldowns(guild_id, user_id)`);
+  
   console.log('🛒 Item shop system initialized');
 }
 
@@ -951,6 +965,77 @@ function getUserEffectCooldowns(guildId, userId) {
   }));
 }
 
+// ===== ITEM-SPECIFIC COOLDOWN FUNCTIONS =====
+
+// Check if user is on cooldown for a specific item
+function getItemCooldown(guildId, userId, itemId) {
+  if (!db) return null;
+  
+  const now = Date.now();
+  
+  const result = db.exec(
+    'SELECT cooldown_expires_at FROM item_use_cooldowns WHERE guild_id = ? AND user_id = ? AND item_id = ? AND cooldown_expires_at > ?',
+    [guildId, userId, itemId, now]
+  );
+  
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  
+  return result[0].values[0][0]; // Returns the expiration timestamp
+}
+
+// Record that a user used a specific item (sets cooldown)
+function recordItemUse(guildId, userId, itemId, cooldownHours) {
+  if (!db || !cooldownHours || cooldownHours <= 0) return;
+  
+  const now = Date.now();
+  const expiresAt = now + (cooldownHours * 60 * 60 * 1000);
+  
+  try {
+    db.run(`
+      INSERT OR REPLACE INTO item_use_cooldowns 
+      (guild_id, user_id, item_id, last_used_at, cooldown_expires_at)
+      VALUES (?, ?, ?, ?, ?)
+    `, [guildId, userId, itemId, now, expiresAt]);
+  } catch (error) {
+    console.error('Error recording item cooldown:', error);
+  }
+}
+
+// Clear a user's item cooldown (admin function)
+function clearItemCooldown(guildId, userId, itemId) {
+  if (!db) return false;
+  
+  try {
+    db.run(
+      'DELETE FROM item_use_cooldowns WHERE guild_id = ? AND user_id = ? AND item_id = ?',
+      [guildId, userId, itemId]
+    );
+    return true;
+  } catch (error) {
+    console.error('Error clearing item cooldown:', error);
+    return false;
+  }
+}
+
+// Get all active item cooldowns for a user
+function getUserItemCooldowns(guildId, userId) {
+  if (!db) return [];
+  
+  const now = Date.now();
+  
+  const result = db.exec(
+    'SELECT item_id, cooldown_expires_at FROM item_use_cooldowns WHERE guild_id = ? AND user_id = ? AND cooldown_expires_at > ?',
+    [guildId, userId, now]
+  );
+  
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  
+  return result[0].values.map(row => ({
+    itemId: row[0],
+    expiresAt: row[1]
+  }));
+}
+
 // Activate an effect (use an item)
 function activateEffect(guildId, userId, item) {
   if (!db) return { success: false, error: 'Database not available' };
@@ -1020,18 +1105,25 @@ function useItem(guildId, userId, itemId) {
     return { success: false, error: 'This item has been disabled and cannot be used right now.' };
   }
   
-  // Check effect cooldown (if item has a use_cooldown_hours and effect_type)
-  if (item.effect_type && item.use_cooldown_hours > 0) {
-    const cooldownExpires = getEffectCooldown(guildId, userId, item.effect_type);
-    if (cooldownExpires) {
-      const timeLeft = cooldownExpires - Date.now();
-      const hoursLeft = Math.floor(timeLeft / (1000 * 60 * 60));
+  // Check item-specific cooldown (if item has a use_cooldown_hours)
+  if (item.use_cooldown_hours > 0) {
+    const itemCooldownExpires = getItemCooldown(guildId, userId, item.id);
+    if (itemCooldownExpires) {
+      const timeLeft = itemCooldownExpires - Date.now();
+      const daysLeft = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+      const hoursLeft = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       const minsLeft = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+      
+      let timeString = '';
+      if (daysLeft > 0) timeString += `${daysLeft}d `;
+      if (hoursLeft > 0 || daysLeft > 0) timeString += `${hoursLeft}h `;
+      timeString += `${minsLeft}m`;
+      
       return { 
         success: false, 
-        error: `You recently used a **${EFFECT_TYPE_NAMES[item.effect_type] || item.effect_type}** item! Cooldown expires in **${hoursLeft}h ${minsLeft}m**.`,
+        error: `You recently used **${item.name}**! Cooldown expires in **${timeString.trim()}**.`,
         cooldown: true,
-        cooldownExpires
+        cooldownExpires: itemCooldownExpires
       };
     }
   }
@@ -1042,9 +1134,9 @@ function useItem(guildId, userId, itemId) {
     return activateResult;
   }
   
-  // Record the effect use cooldown (if applicable)
-  if (item.effect_type && item.use_cooldown_hours > 0) {
-    recordEffectUse(guildId, userId, item.effect_type, item.use_cooldown_hours);
+  // Record the item-specific cooldown (if applicable)
+  if (item.use_cooldown_hours > 0) {
+    recordItemUse(guildId, userId, item.id, item.use_cooldown_hours);
   }
   
   // Remove item from inventory
@@ -1467,11 +1559,17 @@ module.exports = {
   activateEffect,
   useItem,
   
-  // Effect Cooldowns
+  // Effect Cooldowns (legacy - still available but item-specific preferred)
   getEffectCooldown,
   recordEffectUse,
   clearEffectCooldown,
   getUserEffectCooldowns,
+  
+  // Item-Specific Cooldowns
+  getItemCooldown,
+  recordItemUse,
+  clearItemCooldown,
+  getUserItemCooldowns,
   
   // Purchases
   recordPurchase,

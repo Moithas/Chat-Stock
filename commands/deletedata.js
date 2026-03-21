@@ -159,6 +159,7 @@ function deleteAllUserData(db, guildId, userId) {
   del('DELETE FROM item_purchase_history WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   del('DELETE FROM item_fulfillment_requests WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   del('DELETE FROM effect_use_cooldowns WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+  del('DELETE FROM item_use_cooldowns WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   del('DELETE FROM temporary_role_grants WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   del('DELETE FROM passive_income_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   del('DELETE FROM passive_income_history WHERE guild_id = ? AND user_id = ?', [guildId, userId]);

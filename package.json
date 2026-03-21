@@ -1,7 +1,7 @@
 {
-  "name": "chat-stock",
-  "version": "1.0.0",
-  "description": "Discord stock market bot based on user chat activity",
+  "name": "black-ledger",
+  "version": "2.0.0",
+  "description": "Black Ledger - Discord economy and gambling bot",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
@@ -9,9 +9,10 @@
   "keywords": [
     "discord",
     "bot",
-    "stock-market"
+    "economy",
+    "gambling"
   ],
-  "author": "",
+  "author": "Team Black",
   "license": "MIT",
   "dependencies": {
     "@napi-rs/canvas": "^0.1.95",

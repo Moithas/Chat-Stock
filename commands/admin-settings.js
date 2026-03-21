@@ -426,7 +426,7 @@ async function handleResetGameConfirm(interaction, guildId) {
       'hack_tracker', 'hack_target_tracker', 'hack_history',
       'work_tracker', 'work_history', 'slut_tracker', 'slut_history',
       'gambling_stats', 'lottery_tickets', 'lottery_history', 'scratch_tickets', 'scratch_stats',
-      'user_inventory', 'active_effects', 'item_purchase_history', 'item_fulfillment_requests', 'effect_use_cooldowns', 'temporary_role_grants',
+      'user_inventory', 'active_effects', 'item_purchase_history', 'item_fulfillment_requests', 'effect_use_cooldowns', 'item_use_cooldowns', 'temporary_role_grants',
       'dividend_history', 'split_history', 'dividend_tracker', 'passive_income_tracker', 'self_dividend_history', 'passive_income_history', 'role_income_tracker', 'role_income_history',
       'wealth_tax_history',
       'message_counters', 'event_history', 'cheese_truck_history', 'active_market_events',
