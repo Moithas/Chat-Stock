@@ -1534,8 +1534,9 @@ client.on('interactionCreate', async (interaction) => {
                            interaction.customId.startsWith('items_complete_') ||
                            interaction.customId.startsWith('items_cancel_') ||
                            interaction.customId.startsWith('items_refund_');
+    const isDynamicSettings = interaction.customId.startsWith('settings_logs_page_');
     
-    if (adminCustomIds.includes(interaction.customId) || isDynamicCardId || isDynamicPropId || isDynamicGiveCard || isDynamicMsgPage || isDynamicRoleIncome || isDynamicBank || isDynamicRob || isDynamicWealthTax || isDynamicScratch || isDynamicItems || isDynamicHunt) {
+    if (adminCustomIds.includes(interaction.customId) || isDynamicCardId || isDynamicPropId || isDynamicGiveCard || isDynamicMsgPage || isDynamicRoleIncome || isDynamicBank || isDynamicRob || isDynamicWealthTax || isDynamicScratch || isDynamicItems || isDynamicHunt || isDynamicSettings) {
       try {
         const { handleAdminInteraction } = require('./commands/admin');
         await handleAdminInteraction(interaction);
