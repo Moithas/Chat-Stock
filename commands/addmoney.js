@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { addMoney, addToBank, forceRemoveMoney, removeFromBank, getBalance } = require('../economy');
-const { getCurrency } = require('../admin');
+const { getCurrency, logAdminAction } = require('../admin');
 
 
 
@@ -78,6 +78,15 @@ module.exports = {
 
     const action = amount >= 0 ? 'Added' : 'Removed';
     const absAmount = Math.abs(amount);
+
+    // Log the admin action with full details
+    logAdminAction(
+      guildId, 
+      interaction.user.id, 
+      interaction.user.username, 
+      `💰 ${action} ${absAmount.toLocaleString()} ${type} ${amount >= 0 ? 'to' : 'from'} ${targetUser.username}`,
+      `User: <@${userId}> | Before: ${before.total.toLocaleString()} → After: ${after.total.toLocaleString()} | Reason: ${reason}`
+    );
 
     const embed = new EmbedBuilder()
       .setColor(amount >= 0 ? 0x2ecc71 : 0xe74c3c)

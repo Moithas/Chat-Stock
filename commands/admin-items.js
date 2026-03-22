@@ -1490,8 +1490,9 @@ async function handleGiveItemQtyModal(interaction, guildId) {
   }
   
   // Log the action
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'ITEM_GIVE',
-    `Gave ${quantity}x ${state.itemName} to ${state.userName}`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `🎁 Gave ${quantity}x ${state.itemEmoji} ${state.itemName}`,
+    `Recipient: <@${state.userId}> (${state.userName})`);
   
   // Send ephemeral confirmation to admin
   await interaction.reply({
@@ -1794,8 +1795,9 @@ async function handleTakeItemQtyModal(interaction, guildId) {
   }
   
   // Log the action
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'ITEM_TAKE',
-    `Took ${quantity}x ${state.itemName} from ${state.userName}`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `📤 Took ${quantity}x ${state.itemEmoji} ${state.itemName}`,
+    `From: <@${state.userId}> (${state.userName})`);
   
   await interaction.reply({
     content: `✅ Successfully took **${quantity}x ${state.itemEmoji} ${state.itemName}** from <@${state.userId}>!`,

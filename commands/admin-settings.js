@@ -285,7 +285,7 @@ async function handleResetCurrency(interaction, guildId) {
 
 // ==================== ADMIN LOGS ====================
 async function showLogsPanel(interaction, guildId) {
-  const logs = getAdminLogs(guildId, 15);
+  const logs = getAdminLogs(guildId, 10);
   await interaction.deferUpdate();
 
   let logText = '';
@@ -294,8 +294,12 @@ async function showLogsPanel(interaction, guildId) {
   } else {
     logText = logs.map(log => {
       const time = `<t:${Math.floor(log.timestamp / 1000)}:R>`;
-      return `${time} — <@${log.user_id}> — ${log.action}`;
-    }).join('\n');
+      let entry = `${time} — <@${log.user_id}>\n┗ **${log.action}**`;
+      if (log.details) {
+        entry += `\n┗ _${log.details}_`;
+      }
+      return entry;
+    }).join('\n\n');
   }
 
   // Truncate if too long for embed

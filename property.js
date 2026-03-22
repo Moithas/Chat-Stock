@@ -761,6 +761,17 @@ function useCard(userCardId) {
   db.run('UPDATE user_cards SET used = 1 WHERE id = ?', [userCardId]);
 }
 
+function getUserCardById(userCardId) {
+  if (!db) return null;
+  
+  const result = db.exec('SELECT * FROM user_cards WHERE id = ?', [userCardId]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  
+  const row = result[0].values[0];
+  const cols = result[0].columns;
+  return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
+}
+
 function removeCard(userCardId) {
   if (!db) return;
   
@@ -1391,6 +1402,7 @@ module.exports = {
   createCard,
   deleteCard,
   getUserCards,
+  getUserCardById,
   getUsersWithCards,
   grantCard,
   useCard,

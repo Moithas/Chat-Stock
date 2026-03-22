@@ -326,7 +326,10 @@ async function handleButton(interaction, guildId, customId) {
     const loan = loans.find(l => l.id === loanId);
     if (loan) {
       forgiveLoan(loanId);
-      logAdminAction(guildId, interaction.user.id, interaction.user.username, `Forgave loan #${loanId} for user ${loan.user_id}`);
+      const remainingDebt = loan.amount_owed - loan.amount_paid;
+      logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+        `🏦 Forgave loan #${loanId}`,
+        `User: <@${loan.user_id}> | Original: ${loan.original_amount.toLocaleString()} | Forgiven: ${remainingDebt.toLocaleString()}`);
     }
     await interaction.deferUpdate();
     await showActiveLoansPanel(interaction, guildId, 0);

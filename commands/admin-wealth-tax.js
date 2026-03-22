@@ -523,10 +523,13 @@ async function handleEditTierModal(interaction, guildId, tierIndex) {
   }
   
   const settings = getWealthTaxSettings(guildId);
+  const oldTier = { ...settings.tiers[tierIndex] };
   settings.tiers[tierIndex] = { threshold, rate };
   settings.tiers.sort((a, b) => a.threshold - b.threshold);
   updateWealthTaxSettings(guildId, { tiers: settings.tiers });
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Edited wealth tax tier ${tierIndex + 1}`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `📊 Edited wealth tax tier`,
+    `Threshold: ${oldTier.threshold.toLocaleString()} → ${threshold.toLocaleString()} | Rate: ${oldTier.rate}% → ${rate}%`);
   await interaction.reply({ content: `✅ Tier ${tierIndex + 1} updated!`, flags: 64 });
   await showWealthTaxTiersPanel(interaction, guildId, null);
 }
@@ -571,7 +574,9 @@ async function handleAddTierModal(interaction, guildId) {
   settings.tiers.push({ threshold, rate });
   settings.tiers.sort((a, b) => a.threshold - b.threshold);
   updateWealthTaxSettings(guildId, { tiers: settings.tiers });
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Added wealth tax tier`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `➕ Added wealth tax tier`,
+    `Threshold: ${threshold.toLocaleString()}+ | Rate: ${rate}%`);
   await interaction.reply({ content: `✅ New tier added!`, flags: 64 });
   await showWealthTaxTiersPanel(interaction, guildId, null);
 }
@@ -584,9 +589,12 @@ async function handleRemoveTier(interaction, guildId, tierIndex) {
     return;
   }
   
+  const removedTier = settings.tiers[tierIndex];
   settings.tiers.splice(tierIndex, 1);
   updateWealthTaxSettings(guildId, { tiers: settings.tiers });
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Removed wealth tax tier ${tierIndex + 1}`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+    `➖ Removed wealth tax tier`,
+    `Was: ${removedTier.threshold.toLocaleString()}+ @ ${removedTier.rate}%`);
   await interaction.deferUpdate();
   await showWealthTaxTiersPanel(interaction, guildId, null);
 }

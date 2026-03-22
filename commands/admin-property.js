@@ -139,9 +139,17 @@ async function handleInteraction(interaction, guildId) {
       // Dynamic remove card from user button
       else if (customId.startsWith('takecard_remove_')) {
         const userCardId = parseInt(customId.replace('takecard_remove_', ''));
-        const { removeCard } = require('../property');
+        const { removeCard, getUserCardById, getCards } = require('../property');
+        
+        // Get card details before removing
+        const userCard = getUserCardById(userCardId);
+        const allCards = getCards(guildId);
+        const cardInfo = allCards.find(c => c.id === userCard?.card_id);
+        
         removeCard(userCardId);
-        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Removed card (user_card_id: ${userCardId}) from user`);
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+          `🃏 Took property card`,
+          `Card: ${cardInfo?.name || 'Unknown'} | From: <@${userCard?.user_id || 'Unknown'}>`);
         await interaction.deferUpdate();
         await showTakeCardPanel(interaction, guildId);
       }
@@ -221,7 +229,9 @@ async function handleInteraction(interaction, guildId) {
       const card = cards.find(c => c.id === cardId);
       
       grantCard(guildId, userId, cardId);
-      logAdminAction(guildId, interaction.user.id, interaction.user.username, `Gave card "${card?.name || cardId}" to <@${userId}>`);
+      logAdminAction(guildId, interaction.user.id, interaction.user.username, 
+        `🎁 Gave property card`,
+        `Card: ${card?.name || 'Unknown'} (${card?.type || 'unknown'}) | To: <@${userId}>`);
       
       await interaction.reply({ content: `✅ Gave **${card?.name || 'Card'}** to <@${userId}>!`, flags: 64 });
       return true;
