@@ -528,9 +528,13 @@ async function processBumpReward(message) {
     if (!isDisboardBump(message)) return;
     
     const msgId = message.id;
+    console.log(`[BumpReward] Processing bump message ${msgId}, embeds: ${message.embeds?.length || 0}`);
     
     // Already rewarded or currently processing this exact message
-    if (processedBumpMessages.has(msgId) || processingBumpMessages.has(msgId)) return;
+    if (processedBumpMessages.has(msgId) || processingBumpMessages.has(msgId)) {
+      console.log(`[BumpReward] Message ${msgId} already processed/processing, skipping`);
+      return;
+    }
     processingBumpMessages.add(msgId);
     
     try {
@@ -583,6 +587,13 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
       return;
     }
   }
+  
+  // Only process recent messages (within last 5 minutes) to avoid rewarding old bumps on restart
+  const messageAge = Date.now() - newMessage.createdTimestamp;
+  if (messageAge > 5 * 60 * 1000) {
+    return;
+  }
+  
   await processBumpReward(newMessage);
 });
 

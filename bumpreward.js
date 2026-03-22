@@ -110,22 +110,30 @@ function isDisboardBump(message) {
 
 /**
  * Extract the user ID from a Disboard bump message.
- * Primary: message.interaction.user.id (slash command response metadata)
- * Fallback: <@USER_ID> mention in embed description
+ * Only uses message.interaction.user.id for reliable identification.
+ * The fallback embed regex was unreliable as Disboard's format can vary.
  */
 function extractBumperUserId(message) {
   // Disboard's /bump response includes the interaction user who triggered it
+  // This is the only reliable way to identify who actually used /bump
   if (message.interaction?.user?.id) {
+    console.log(`[BumpReward] Extracted bumper from interaction: ${message.interaction.user.id}`);
     return message.interaction.user.id;
   }
   
-  // Fallback: check embed description for user mention
-  if (message.embeds?.length > 0) {
-    const desc = message.embeds[0].description || '';
-    const match = desc.match(/<@!?(\d+)>/);
-    if (match) return match[1];
+  // For message updates, interaction data may be present on interactionMetadata
+  if (message.interactionMetadata?.user?.id) {
+    console.log(`[BumpReward] Extracted bumper from interactionMetadata: ${message.interactionMetadata.user.id}`);
+    return message.interactionMetadata.user.id;
   }
   
+  // Log what we found for debugging but don't use fallback parsing
+  if (message.embeds?.length > 0) {
+    const desc = message.embeds[0].description || '';
+    console.log(`[BumpReward] No interaction data found. Embed description: "${desc.substring(0, 150)}"`);
+  }
+  
+  console.log(`[BumpReward] Could not extract bumper - no interaction data available`);
   return null;
 }
 
