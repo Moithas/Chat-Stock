@@ -13,6 +13,8 @@ const BUTTON_IDS = [
   'settings_back_main'
 ];
 
+const BUTTON_PREFIXES = ['settings_logs_page_'];
+
 const MODAL_IDS = [
   'modal_settings_currency',
   'modal_settings_starting_bal',
@@ -30,7 +32,17 @@ async function handleInteraction(interaction, guildId) {
 
   // Handle button interactions
   if (interaction.isButton()) {
-    if (!BUTTON_IDS.includes(customId)) return false;
+    const isStaticButton = BUTTON_IDS.includes(customId);
+    const isDynamicButton = BUTTON_PREFIXES.some(prefix => customId.startsWith(prefix));
+    
+    if (!isStaticButton && !isDynamicButton) return false;
+
+    // Handle dynamic log page buttons
+    if (customId.startsWith('settings_logs_page_')) {
+      const page = parseInt(customId.replace('settings_logs_page_', ''));
+      await showLogsPanel(interaction, guildId, page);
+      return true;
+    }
 
     switch (customId) {
       case 'settings_set_role':
@@ -55,7 +67,7 @@ async function handleInteraction(interaction, guildId) {
         await showSupportUrlModal(interaction, guildId);
         return true;
       case 'settings_view_logs':
-        await showLogsPanel(interaction, guildId);
+        await showLogsPanel(interaction, guildId, 0);
         return true;
       case 'settings_back_main':
         await interaction.deferUpdate();
@@ -284,12 +296,20 @@ async function handleResetCurrency(interaction, guildId) {
 }
 
 // ==================== ADMIN LOGS ====================
-async function showLogsPanel(interaction, guildId) {
-  const logs = getAdminLogs(guildId, 10);
+const LOGS_PER_PAGE = 10;
+
+async function showLogsPanel(interaction, guildId, page = 0) {
+  const allLogs = getAdminLogs(guildId, 50);
   await interaction.deferUpdate();
 
+  const totalPages = Math.max(1, Math.ceil(allLogs.length / LOGS_PER_PAGE));
+  page = Math.max(0, Math.min(page, totalPages - 1));
+  
+  const startIdx = page * LOGS_PER_PAGE;
+  const logs = allLogs.slice(startIdx, startIdx + LOGS_PER_PAGE);
+
   let logText = '';
-  if (logs.length === 0) {
+  if (allLogs.length === 0) {
     logText = '*No admin actions recorded yet.*';
   } else {
     logText = logs.map(log => {
@@ -311,14 +331,27 @@ async function showLogsPanel(interaction, guildId) {
     .setColor(0x3498db)
     .setTitle('📋 Admin Action Log')
     .setDescription(logText)
-    .setFooter({ text: `Showing last ${logs.length} actions (max 50 stored)` });
+    .setFooter({ text: `Page ${page + 1}/${totalPages} • ${allLogs.length} total actions stored` });
+
+  // Navigation buttons
+  const prevBtn = new ButtonBuilder()
+    .setCustomId(`settings_logs_page_${page - 1}`)
+    .setLabel('◀️ Prev')
+    .setStyle(ButtonStyle.Primary)
+    .setDisabled(page === 0);
+
+  const nextBtn = new ButtonBuilder()
+    .setCustomId(`settings_logs_page_${page + 1}`)
+    .setLabel('Next ▶️')
+    .setStyle(ButtonStyle.Primary)
+    .setDisabled(page >= totalPages - 1);
 
   const backBtn = new ButtonBuilder()
     .setCustomId('settings_back_main')
     .setLabel('◀️ Back to Settings')
     .setStyle(ButtonStyle.Secondary);
 
-  const row = new ActionRowBuilder().addComponents(backBtn);
+  const row = new ActionRowBuilder().addComponents(prevBtn, nextBtn, backBtn);
   await interaction.editReply({ embeds: [embed], components: [row] });
 }
 
