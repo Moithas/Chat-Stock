@@ -141,21 +141,16 @@ function setSupportServerUrl(guildId, url) {
 function hasAdminPermission(member, guildId) {
   // Server administrators always have permission
   if (member.permissions.has('Administrator')) {
-    console.log(`[Admin Check] User ${member.user?.username} has Administrator permission`);
     return true;
   }
   
   // Check for Stock Admin role
   const settings = getAdminSettings(guildId);
   const adminRoleId = settings.adminRoleId ? String(settings.adminRoleId) : null;
-  console.log(`[Admin Check] User ${member.user?.username} checking for role ${adminRoleId}`);
-  console.log(`[Admin Check] User roles:`, [...member.roles.cache.keys()]);
   if (adminRoleId && member.roles.cache.has(adminRoleId)) {
-    console.log(`[Admin Check] User ${member.user?.username} has admin role`);
     return true;
   }
   
-  console.log(`[Admin Check] User ${member.user?.username} DENIED - no admin permission`);
   return false;
 }
 

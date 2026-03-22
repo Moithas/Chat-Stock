@@ -463,11 +463,26 @@ client.once('clientReady', async () => {
   
   try {
     log.info('Registering slash commands...');
+    
+    // Register globally (takes up to 1 hour to propagate)
     await rest.put(
       Routes.applicationCommands(client.user.id),
       { body: commands }
     );
     log.info('Slash commands registered globally');
+    
+    // Also register per-guild for instant availability
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        await rest.put(
+          Routes.applicationGuildCommands(client.user.id, guild.id),
+          { body: commands }
+        );
+        log.info(`Slash commands registered for guild: ${guild.name}`);
+      } catch (guildError) {
+        console.error(`Error registering commands for guild ${guild.name}:`, guildError.message);
+      }
+    }
   } catch (error) {
     console.error('Error registering commands:', error);
   }
