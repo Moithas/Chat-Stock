@@ -100,7 +100,8 @@ function saveAdminSettings(guildId, settings) {
 
 function setAdminRole(guildId, roleId) {
   const settings = getAdminSettings(guildId);
-  settings.adminRoleId = roleId;
+  // Ensure role ID is stored as string for consistent comparison
+  settings.adminRoleId = roleId ? String(roleId) : null;
   saveAdminSettings(guildId, settings);
 }
 
@@ -145,7 +146,8 @@ function hasAdminPermission(member, guildId) {
   
   // Check for Stock Admin role
   const settings = getAdminSettings(guildId);
-  if (settings.adminRoleId && member.roles.cache.has(settings.adminRoleId)) {
+  const adminRoleId = settings.adminRoleId ? String(settings.adminRoleId) : null;
+  if (adminRoleId && member.roles.cache.has(adminRoleId)) {
     return true;
   }
   
@@ -198,7 +200,8 @@ function visibleUserId(userId) {
 // Get the admin role ID for a guild
 function getAdminRole(guildId) {
   const settings = getAdminSettings(guildId);
-  return settings.adminRoleId || null;
+  // Ensure we return a string for consistent comparison
+  return settings.adminRoleId ? String(settings.adminRoleId) : null;
 }
 
 // Convenience function to check if a user is an admin
