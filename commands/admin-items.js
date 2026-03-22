@@ -2438,7 +2438,7 @@ async function handleCompleteFulfillment(interaction, guildId, requestId) {
   
   completeFulfillment(requestId, interaction.user.id, 'Fulfilled by admin');
   
-  await logAdminAction(interaction, guildId, 'Fulfilled Service Item', `Completed request #${requestId} for <@${request.user_id}>: ${request.item_name}`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'Fulfilled Service Item', `Completed request #${requestId} for <@${request.user_id}>: ${request.item_name}`);
   
   await interaction.deferUpdate();
   await showFulfillmentsPanel(interaction, guildId, 0);
@@ -2466,7 +2466,7 @@ async function handleCancelFulfillment(interaction, guildId, requestId, refund =
   cancelFulfillment(requestId, interaction.user.id, refund ? 'Cancelled with refund' : 'Cancelled by admin');
   
   const action = refund ? 'Refunded Service Item' : 'Cancelled Service Item';
-  await logAdminAction(interaction, guildId, action, `${refund ? 'Refunded and cancelled' : 'Cancelled'} request #${requestId} for <@${request.user_id}>: ${request.item_name}`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, action, `${refund ? 'Refunded and cancelled' : 'Cancelled'} request #${requestId} for <@${request.user_id}>: ${request.item_name}`);
   
   await interaction.deferUpdate();
   await showFulfillmentsPanel(interaction, guildId, 0);
@@ -2566,7 +2566,7 @@ async function handleTicketCategorySelect(interaction, guildId) {
     ? interaction.guild.channels.cache.get(categoryId)?.name || 'Unknown'
     : 'None';
   
-  await logAdminAction(interaction, guildId, 'Updated Ticket Category', `Set ticket category to: ${categoryName}`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'Updated Ticket Category', `Set ticket category to: ${categoryName}`);
   
   await showTicketSettingsPanel(interaction, guildId);
 }
@@ -2583,7 +2583,7 @@ async function handleTicketLogSelect(interaction, guildId) {
     ? `#${interaction.guild.channels.cache.get(channelId)?.name || 'Unknown'}`
     : 'Disabled';
   
-  await logAdminAction(interaction, guildId, 'Updated Ticket Log Channel', `Set ticket log to: ${channelName}`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'Updated Ticket Log Channel', `Set ticket log to: ${channelName}`);
   
   await showTicketSettingsPanel(interaction, guildId);
 }
