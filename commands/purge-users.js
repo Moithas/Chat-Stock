@@ -1,16 +1,16 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { getDb, saveDatabase } = require('../database');
+const { hasAdminPermission } = require('../admin');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('purge-users')
-    .setDescription('Remove users who are no longer in the server from the database (Admin only)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    .setDescription('Remove users who are no longer in the server from the database (Admin only)'),
 
   async execute(interaction) {
-    // Double-check admin permissions
-    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-      return interaction.reply({ content: '❌ You need Administrator permissions to use this command.', ephemeral: true });
+    // Check admin permissions (Server Admin OR Stock Admin role)
+    if (!hasAdminPermission(interaction.member, interaction.guildId)) {
+      return interaction.reply({ content: '❌ You need admin permissions to use this command.', ephemeral: true });
     }
 
     await interaction.deferReply({ ephemeral: true });

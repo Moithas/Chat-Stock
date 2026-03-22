@@ -629,17 +629,12 @@ async function createServiceTicket(guild, user, item, guildId) {
       {
         id: guild.client.user.id, // Bot
         allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages]
+      },
+      {
+        id: adminRoleId, // Admin role - always include so admins can see tickets
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages]
       }
     ];
-    
-    // Only add admin role permissions if bot's role is higher than admin role
-    const botMember = guild.members.cache.get(guild.client.user.id);
-    if (botMember && botMember.roles.highest.position > adminRole.position) {
-      permissionOverwrites.push({
-        id: adminRoleId, // Admin role
-        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages]
-      });
-    }
     
     // Build channel creation options
     const channelOptions = {

@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { addMoney, addToBank, forceRemoveMoney, removeFromBank, getBalance } = require('../economy');
-const { getCurrency, logAdminAction } = require('../admin');
+const { getCurrency, logAdminAction, hasAdminPermission } = require('../admin');
 
 
 
@@ -27,13 +27,12 @@ module.exports = {
     .addStringOption(opt =>
       opt.setName('reason')
         .setDescription('Reason for adjustment')
-        .setRequired(false))
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        .setRequired(false)),
 
   async execute(interaction) {
-    // Double-check admin permissions
-    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-      return interaction.reply({ content: '❌ You need Administrator permissions to use this command.', ephemeral: true });
+    // Check admin permissions (Server Admin OR Stock Admin role)
+    if (!hasAdminPermission(interaction.member, interaction.guildId)) {
+      return interaction.reply({ content: '❌ You need admin permissions to use this command.', ephemeral: true });
     }
 
     const guildId = interaction.guildId;
