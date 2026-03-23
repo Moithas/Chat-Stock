@@ -596,7 +596,20 @@ module.exports = {
             // Roll for bounty posting
             if (rollBountyCheck(guildId, hackerId)) {
               const bounty = createBounty(guildId, hackerId);
-              if (bounty) announceBountyPosted(guildId, hackerId, bounty.bountyAmount);
+              if (bounty) {
+                announceBountyPosted(guildId, hackerId, bounty.bountyAmount);
+                
+                // Public notification in channel
+                try {
+                  const { EmbedBuilder: EB2 } = require('discord.js');
+                  await interaction.followUp({ embeds: [new EB2()
+                    .setColor(0xff0000)
+                    .setTitle('🚨 BOUNTY POSTED!')
+                    .setDescription(`A bounty has been placed on <@${hackerId}>!\n\n💰 **Bounty: ${bounty.bountyAmount.toLocaleString()}** ${getCurrency(guildId)}\n\n*Successfully hack or rob this player to claim the bounty!*`)
+                    .setFooter({ text: 'Check /leaderboard → Bounty Board for all active bounties' })
+                    .setTimestamp()] });
+                } catch (e) {}
+              }
             }
           }
           

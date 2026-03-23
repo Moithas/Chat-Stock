@@ -4,6 +4,7 @@ const { getAllBalances } = require('../economy');
 const { getTopFighters } = require('../fight');
 const { getDungeonLeaderboard } = require('../dungeon');
 const { getCurrency } = require('../admin');
+const { getActiveBounties, getInfamySettings, getTierFromPoints } = require('../infamy');
 
 
 const ITEMS_PER_PAGE = 10;
@@ -50,6 +51,11 @@ async function showLeaderboardPanel(interaction, type = 'stocks', page = 0, isUp
       embed = dungeonResult.embed;
       totalPages = dungeonResult.totalPages;
       break;
+    case 'bounties':
+      const bountyResult = await buildBountyBoard(guildId, page, interaction.client);
+      embed = bountyResult.embed;
+      totalPages = bountyResult.totalPages;
+      break;
     default:
       const defaultResult = await buildStockLeaderboard(guildId, page);
       embed = defaultResult.embed;
@@ -91,6 +97,16 @@ async function showLeaderboardPanel(interaction, type = 'stocks', page = 0, isUp
         .setStyle(type === 'dungeon' ? ButtonStyle.Primary : ButtonStyle.Secondary)
     );
 
+  // Second row with Bounties
+  const typeButtons2 = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`leaderboard_bounties_${page}_${userId}`)
+        .setLabel('Bounty Board')
+        .setEmoji('🏴‍☠️')
+        .setStyle(type === 'bounties' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+    );
+
   const navButtons = new ActionRowBuilder()
     .addComponents(
       new ButtonBuilder()
@@ -108,11 +124,11 @@ async function showLeaderboardPanel(interaction, type = 'stocks', page = 0, isUp
     );
 
   if (isUpdate) {
-    await interaction.update({ embeds: [embed], components: [typeButtons, navButtons] });
+    await interaction.update({ embeds: [embed], components: [typeButtons, typeButtons2, navButtons] });
   } else if (interaction.deferred) {
-    await interaction.editReply({ embeds: [embed], components: [typeButtons, navButtons] });
+    await interaction.editReply({ embeds: [embed], components: [typeButtons, typeButtons2, navButtons] });
   } else {
-    await interaction.reply({ embeds: [embed], components: [typeButtons, navButtons] });
+    await interaction.reply({ embeds: [embed], components: [typeButtons, typeButtons2, navButtons] });
   }
 }
 
@@ -415,6 +431,52 @@ async function buildDungeonLeaderboard(guildId, page = 0, guild = null) {
       inline: false
     });
   }
+
+  return { embed, totalPages };
+}
+
+async function buildBountyBoard(guildId, page = 0, client) {
+  const settings = getInfamySettings(guildId);
+  
+  const embed = new EmbedBuilder()
+    .setColor(0xff0000)
+    .setTitle('🏴‍☠️ Bounty Board')
+    .setTimestamp();
+
+  if (!settings.enabled) {
+    embed.setDescription('The infamy system is currently disabled.');
+    return { embed, totalPages: 1 };
+  }
+  
+  const bounties = getActiveBounties(guildId);
+  const totalPages = Math.max(1, Math.ceil(bounties.length / ITEMS_PER_PAGE));
+  const startIdx = page * ITEMS_PER_PAGE;
+  const endIdx = startIdx + ITEMS_PER_PAGE;
+  const pageBounties = bounties.slice(startIdx, endIdx);
+
+  if (bounties.length === 0) {
+    embed.setDescription('No active bounties. The streets are clean... for now.\n\n*Bounties are placed on high-infamy players who commit crimes.*');
+    return { embed, totalPages: 1 };
+  }
+
+  let desc = `**${bounties.length}** active ${bounties.length === 1 ? 'bounty' : 'bounties'}:\n\n`;
+  
+  for (const bounty of pageBounties) {
+    let username = bounty.target_user_id;
+    try {
+      const user = await client.users.fetch(bounty.target_user_id);
+      username = user.username;
+    } catch (e) {}
+    
+    const tier = getTierFromPoints(bounty.posted_infamy, guildId);
+    const postedAgo = `<t:${Math.floor(bounty.posted_at / 1000)}:R>`;
+    
+    desc += `${tier.emoji} **${username}**\n`;
+    desc += `└ 💰 **${bounty.bounty_amount.toLocaleString()}** ${getCurrency(guildId)} • ${tier.name} • Posted ${postedAgo}\n\n`;
+  }
+  
+  desc += `*Successfully hack or rob a bounty target to claim their bounty!*`;
+  embed.setDescription(desc);
 
   return { embed, totalPages };
 }

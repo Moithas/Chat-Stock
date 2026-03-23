@@ -181,6 +181,17 @@ async function processRobInfamy(guildId, robberId, targetId, stolenAmount, inter
     if (newBounty) {
       bountyPosted = newBounty;
       announceBountyPosted(guildId, robberId, newBounty.bountyAmount);
+      
+      // Public notification in channel
+      try {
+        const { EmbedBuilder } = require('discord.js');
+        await interaction.followUp({ embeds: [new EmbedBuilder()
+          .setColor(0xff0000)
+          .setTitle('🚨 BOUNTY POSTED!')
+          .setDescription(`A bounty has been placed on <@${robberId}>!\n\n💰 **Bounty: ${newBounty.bountyAmount.toLocaleString()}** ${getCurrency(guildId)}\n\n*Successfully hack or rob this player to claim the bounty!*`)
+          .setFooter({ text: 'Check /leaderboard → Bounty Board for all active bounties' })
+          .setTimestamp()] });
+      } catch (e) {}
     }
   }
   
