@@ -464,14 +464,14 @@ client.once('clientReady', async () => {
   try {
     log.info('Registering slash commands...');
     
-    // Register globally (takes up to 1 hour to propagate)
+    // Clear global commands (to prevent duplicates with guild commands)
     await rest.put(
       Routes.applicationCommands(client.user.id),
-      { body: commands }
+      { body: [] }
     );
-    log.info('Slash commands registered globally');
+    log.info('Cleared global commands');
     
-    // Also register per-guild for instant availability
+    // Register per-guild for instant availability (no duplicates)
     for (const guild of client.guilds.cache.values()) {
       try {
         await rest.put(
