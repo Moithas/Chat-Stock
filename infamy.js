@@ -569,15 +569,26 @@ function checkInsiderTrading(guildId, userId, stockUserId, sellPrice, sharesSold
 
 // ==================== ANNOUNCEMENT HELPERS ====================
 async function announceBountyPosted(guildId, targetUserId, bountyAmount) {
-  if (!client) return;
+  console.log(`[Bounty Announce] Called for guild ${guildId}, user ${targetUserId}, amount ${bountyAmount}`);
+  if (!client) {
+    console.log('[Bounty Announce] No client available');
+    return;
+  }
 
   const settings = getInfamySettings(guildId);
   const channelId = settings.announce_channel_id;
-  if (!channelId) return;
+  console.log(`[Bounty Announce] Channel ID from settings: ${channelId}`);
+  if (!channelId) {
+    console.log('[Bounty Announce] No announce channel configured');
+    return;
+  }
 
   try {
     const channel = await client.channels.fetch(channelId);
-    if (!channel) return;
+    if (!channel) {
+      console.log('[Bounty Announce] Could not fetch channel');
+      return;
+    }
 
     const { EmbedBuilder } = require('discord.js');
 
@@ -602,6 +613,7 @@ async function announceBountyPosted(guildId, targetUserId, bountyAmount) {
       .setTimestamp();
 
     await channel.send({ embeds: [embed] });
+    console.log('[Bounty Announce] Successfully sent announcement');
   } catch (error) {
     console.error('Error announcing bounty:', error);
   }
