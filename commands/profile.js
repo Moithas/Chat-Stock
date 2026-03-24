@@ -121,7 +121,7 @@ function getFinanceData(guildId, userId) {
   let creditTier = null;
   try {
     const cs = getUserCreditScore(guildId, userId);
-    creditScore = cs ? cs.credit_score : 500;
+    creditScore = cs ? cs.score : 500;
     creditTier = getCreditTier(creditScore);
   } catch (e) {}
   
