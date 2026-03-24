@@ -1803,8 +1803,8 @@ async function executeStockSplit(interaction, guildId, userId, ratio) {
   const newModifier = currentModifier / result.multiplier;
   setPriceModifier(userId, newModifier);
   
-  // Get the actual new price after modifier applied
-  const newPrice = calculateStockPrice(userId, guildId);
+  // Use the calculated price from executeSplit (avoids price cache issues)
+  const newPrice = result.priceAfter;
   
   // Update ticker's lastKnownPrices to prevent false price drop alert
   await sendSplitAnnouncement(userId, interaction.user.username, ratio, result.priceBefore, newPrice, result.shareholdersAffected);
