@@ -104,6 +104,11 @@ module.exports = {
         // Remove from admin logs
         db.run('DELETE FROM admin_logs WHERE user_id = ?', [userId]);
         
+        // Remove from infamy system
+        db.run('DELETE FROM infamy_tracker WHERE user_id = ?', [userId]);
+        db.run('DELETE FROM bounty_board WHERE target_user_id = ?', [userId]);
+        db.run('DELETE FROM insider_trading_snapshots WHERE user_id = ?', [userId]);
+        
         removedCount++;
       }
     }
