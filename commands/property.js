@@ -1127,7 +1127,7 @@ async function handleRentButton(interaction, guildId, userId, settings, property
   const portfolio = getPortfolio(userId);
   let portfolioValue = 0;
   for (const stock of portfolio) {
-    const price = calculateStockPrice(stock.stock_user_id);
+    const price = calculateStockPrice(stock.stock_user_id, guildId);
     portfolioValue += price * stock.shares;
   }
   
@@ -1255,7 +1255,7 @@ async function handleRentSelect(interaction) {
   const portfolio = getPortfolio(userId);
   let portfolioValue = 0;
   for (const stock of portfolio) {
-    const price = calculateStockPrice(stock.stock_user_id);
+    const price = calculateStockPrice(stock.stock_user_id, guildId);
     portfolioValue += price * stock.shares;
   }
   
