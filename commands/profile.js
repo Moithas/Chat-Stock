@@ -497,8 +497,8 @@ function getDungeonData(guildId, userId) {
       const result = db.exec(
         `SELECT 
           COUNT(*) as total_runs,
-          SUM(CASE WHEN result = 'clear' THEN 1 ELSE 0 END) as total_clears,
-          SUM(CASE WHEN result = 'death' THEN 1 ELSE 0 END) as total_deaths,
+          SUM(CASE WHEN result = 'cleared' THEN 1 ELSE 0 END) as total_clears,
+          SUM(CASE WHEN result = 'died' THEN 1 ELSE 0 END) as total_deaths,
           SUM(gold_earned) as total_gold,
           MAX(max_floor) as best_floor
         FROM dungeon_history 
