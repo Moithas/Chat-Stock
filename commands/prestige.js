@@ -28,7 +28,7 @@ module.exports = {
     .setDescription('View your prestige status or prestige up for permanent bonuses'),
 
   async execute(interaction) {
-    await interaction.deferReply();
+    await interaction.deferReply({ flags: 64 });
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
 
