@@ -282,9 +282,9 @@ function executePrestige(guildId, userId, totalWealth) {
   db.run('DELETE FROM hunt_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM crime_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM rob_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
-  db.run('DELETE FROM rob_target_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+  db.run('DELETE FROM rob_target_tracker WHERE guild_id = ? AND target_id = ?', [guildId, userId]);
   db.run('DELETE FROM hack_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
-  db.run('DELETE FROM hack_target_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+  db.run('DELETE FROM hack_target_tracker WHERE guild_id = ? AND target_id = ?', [guildId, userId]);
   db.run('DELETE FROM luckypenny_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM slut_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM passive_income_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
