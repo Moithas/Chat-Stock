@@ -7,11 +7,11 @@ let db = null;
 
 // ============ TIER DEFINITIONS ============
 const PRESTIGE_TIERS = [
-  { level: 1, name: 'Bronze',   emoji: '🥉', color: 0xCD7F32, cost: 100_000_000,       startingBonus: 25_000 },
-  { level: 2, name: 'Silver',   emoji: '🥈', color: 0xC0C0C0, cost: 500_000_000,       startingBonus: 50_000 },
-  { level: 3, name: 'Gold',     emoji: '🥇', color: 0xFFD700, cost: 1_500_000_000,     startingBonus: 100_000 },
-  { level: 4, name: 'Platinum', emoji: '💠', color: 0xE5E4E2, cost: 5_000_000_000,     startingBonus: 250_000 },
-  { level: 5, name: 'Diamond',  emoji: '💎', color: 0xB9F2FF, cost: 150_000_000_000,   startingBonus: 500_000 }
+  { level: 1, name: 'Bronze',   emoji: '<:BronzeStar:1486777990292570205>',   color: 0xCD7F32, cost: 100_000_000,       startingBonus: 25_000 },
+  { level: 2, name: 'Silver',   emoji: '<:SilverStar:1486778060312281350>',   color: 0xC0C0C0, cost: 500_000_000,       startingBonus: 50_000 },
+  { level: 3, name: 'Gold',     emoji: '<:GoldStar:1486778119162691825>',     color: 0xFFD700, cost: 1_500_000_000,     startingBonus: 100_000 },
+  { level: 4, name: 'Platinum', emoji: '<:PlatinumStar:1486778158094221403>', color: 0xE5E4E2, cost: 5_000_000_000,     startingBonus: 250_000 },
+  { level: 5, name: 'Diamond',  emoji: '<:DiamondStar:1486778188024774866>',  color: 0xB9F2FF, cost: 150_000_000_000,   startingBonus: 500_000 }
 ];
 
 const INCOME_MULTIPLIER_PER_TIER = 0.05;  // +5% per tier
