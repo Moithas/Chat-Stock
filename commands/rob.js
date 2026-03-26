@@ -468,14 +468,16 @@ module.exports = {
 
             const tierIndicator = robberTierEffects.tier >= 1 ? ` ${robberTierEffects.emoji}` : '';
 
+            const prestigeNoteTimeout = robPrestigeAmount > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmount / actualStolen - 1) * 100)}% prestige)` : '';
+
             timeoutEmbed
               .setColor(0x2ecc71)
               .setTitle(`💰 Rob Successful!${tierIndicator}`)
               .setDescription(flavorText)
               .addFields(
-                { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)} (${stealPercent}% of their cash)${protectionNote}${robberTierEffects.earningsCut > 0 ? `\n🏴‍☠️ Earnings cut: -${robberTierEffects.earningsCut}%` : ''}`, inline: true },
+                { name: '💵 Stolen', value: `${robPrestigeAmount.toLocaleString()} ${getCurrency(guildId)} (${stealPercent}% of their cash)${protectionNote}${robberTierEffects.earningsCut > 0 ? `\n🏴‍☠️ Earnings cut: -${robberTierEffects.earningsCut}%` : ''}${prestigeNoteTimeout}`, inline: true },
                 { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}`, inline: true },
-                { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${getCurrency(guildId)}${infamyResult.bountyClaimed ? `\n🏆 +${infamyResult.bountyClaimed.bounty_amount.toLocaleString()} bounty` : ''}`, inline: false }
+                { name: '💼 Your New Balance', value: `${(robberBalance.cash + robPrestigeAmount).toLocaleString()} ${getCurrency(guildId)}${infamyResult.bountyClaimed ? `\n🏆 +${infamyResult.bountyClaimed.bounty_amount.toLocaleString()} bounty` : ''}`, inline: false }
               )
               .setFooter({ text: xpFooter });
           } else {
@@ -568,14 +570,16 @@ module.exports = {
 
       const tierIndicator = robberTierEffects.tier >= 1 ? ` ${robberTierEffects.emoji}` : '';
 
+      const prestigeNote2 = robPrestigeAmount2 > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmount2 / actualStolen - 1) * 100)}% prestige)` : '';
+
       embed
         .setColor(0x2ecc71)
         .setTitle(`💰 Rob Successful!${tierIndicator}`)
         .setDescription(flavorText)
         .addFields(
-          { name: '💵 Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)} (${stealPercent}% of their cash)${protectionNote}${robberTierEffects.earningsCut > 0 ? `\n🏴‍☠️ Earnings cut: -${robberTierEffects.earningsCut}%` : ''}`, inline: true },
+          { name: '💵 Stolen', value: `${robPrestigeAmount2.toLocaleString()} ${getCurrency(guildId)} (${stealPercent}% of their cash)${protectionNote}${robberTierEffects.earningsCut > 0 ? `\n🏴‍☠️ Earnings cut: -${robberTierEffects.earningsCut}%` : ''}${prestigeNote2}`, inline: true },
           { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}`, inline: true },
-          { name: '💼 Your New Balance', value: `${(robberBalance.cash + actualStolen).toLocaleString()} ${getCurrency(guildId)}${infamyResult.bountyClaimed ? `\n🏆 +${infamyResult.bountyClaimed.bounty_amount.toLocaleString()} bounty` : ''}`, inline: false }
+          { name: '💼 Your New Balance', value: `${(robberBalance.cash + robPrestigeAmount2).toLocaleString()} ${getCurrency(guildId)}${infamyResult.bountyClaimed ? `\n🏆 +${infamyResult.bountyClaimed.bounty_amount.toLocaleString()} bounty` : ''}`, inline: false }
         )
         .setFooter({ text: xpFooter });
 
@@ -708,12 +712,14 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           ? ` (🛡️ ${robProtectionValue}% protected)`
           : '';
 
+        const prestigeNoteHide = robPrestigeAmountHide > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmountHide / actualStolen - 1) * 100)}% prestige)` : '';
+
         embed
           .setColor(0xe74c3c)
           .setTitle('🙈 Hide Cash - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNote}`, inline: true },
+            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNote}${prestigeNoteHide}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
             { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
@@ -784,12 +790,14 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           ? ` (🛡️ ${robProtectionValue}% protected)`
           : '';
 
+        const prestigeNoteDodge = robPrestigeAmountDodge > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmountDodge / actualStolen - 1) * 100)}% prestige)` : '';
+
         embed
           .setColor(0xe74c3c)
           .setTitle('💨 Dodge - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNoteDodge}`, inline: true },
+            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNoteDodge}${prestigeNoteDodge}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
             { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
@@ -861,12 +869,14 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           ? ` (🛡️ ${robProtectionValue}% protected)`
           : '';
 
+        const prestigeNoteFight = robPrestigeAmountFight > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmountFight / actualStolen - 1) * 100)}% prestige)` : '';
+
         embed
           .setColor(0xe74c3c)
           .setTitle('🥊 Fight Back - Failed!')
           .setDescription(flavorText)
           .addFields(
-            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNoteFight}`, inline: true },
+            { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNoteFight}${prestigeNoteFight}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
             { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },

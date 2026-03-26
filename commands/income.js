@@ -352,9 +352,14 @@ async function executeWork(interaction, guildId, userId) {
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .addFields({
       name: '💰 You Earned',
-      value: boosted 
-        ? `**+${prestigeAmount.toLocaleString()}** ${getCurrency(guildId)} ⚡ (+${workBoost}% boost!)`
-        : `**+${prestigeAmount.toLocaleString()}** ${getCurrency(guildId)}`,
+      value: (() => {
+        let text = `**+${prestigeAmount.toLocaleString()}** ${getCurrency(guildId)}`;
+        const tags = [];
+        if (boosted) tags.push(`⚡ +${workBoost}% boost`);
+        if (prestigeAmount > amount) tags.push(`🎖️ +${Math.round((prestigeAmount / amount - 1) * 100)}% prestige`);
+        if (tags.length) text += ` (${tags.join(', ')})`;
+        return text;
+      })(),
       inline: true
     })
     .setFooter({ text: `Total earned: ${totalEarned.toLocaleString()} | Jobs completed: ${workCount} | ${interaction.user.displayName}` })
@@ -426,7 +431,9 @@ async function executeLuckyPenny(interaction, guildId, userId) {
       .setColor(0xf1c40f)
       .setTitle('🪙 Lucky Penny — Payday!')
       .setDescription(result.flavorText)
-      .addFields({ name: '💰 Found', value: `${lpPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true });
+      .addFields({ name: '💰 Found', value: lpPrestigeAmount > result.amount
+        ? `${lpPrestigeAmount.toLocaleString()} ${getCurrency(guildId)} (🎖️ +${Math.round((lpPrestigeAmount / result.amount - 1) * 100)}% prestige)`
+        : `${lpPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true });
     
   } else {
     const nothingCdText = settings.nothingCooldownHours < settings.cooldownHours
@@ -567,7 +574,9 @@ async function executeHunt(interaction, guildId, userId) {
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
       .addFields({
         name: '💰 You Found',
-        value: `**+${huntPrestigeAmount.toLocaleString()}** ${getCurrency(guildId)}`,
+        value: huntPrestigeAmount > amount
+          ? `**+${huntPrestigeAmount.toLocaleString()}** ${getCurrency(guildId)} (🎖️ +${Math.round((huntPrestigeAmount / amount - 1) * 100)}% prestige)`
+          : `**+${huntPrestigeAmount.toLocaleString()}** ${getCurrency(guildId)}`,
         inline: true
       })
       .setFooter({ text: `Hunts: ${stats.totalHunts + 1} | Total earned: ${(stats.totalCurrencyEarned + huntPrestigeAmount).toLocaleString()} | ${interaction.user.displayName}` })
@@ -631,7 +640,9 @@ async function executeCollect(interaction, guildId, userId) {
         // Record FIRST to set cooldown (prevents spam exploit)
         recordPassiveIncomeCollection(guildId, userId, stockPrice, stockPrestigeAmount);
         await addMoney(guildId, userId, stockPrestigeAmount, 'Stock bonus from stock value');
-        collections.push(`📈 **Stock Bonus:** +${stockPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`);
+        let stockLine = `📈 **Stock Bonus:** +${stockPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`;
+        if (stockPrestigeAmount > amount) stockLine += ` (🎖️ +${Math.round((stockPrestigeAmount / amount - 1) * 100)}% prestige)`;
+        collections.push(stockLine);
         totalAmount += stockPrestigeAmount;
       }
     }
@@ -644,7 +655,9 @@ async function executeCollect(interaction, guildId, userId) {
     // Record FIRST to set cooldown (prevents spam exploit)
     recordRoleIncomeCollection(guildId, userId, roleIncome.roleId, roleIncome.roleName, rolePrestigeAmount);
     await addMoney(guildId, userId, rolePrestigeAmount, `Role income: ${roleIncome.roleName}`);
-    collections.push(`🏷️ **${roleIncome.roleName}:** +${rolePrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`);
+    let roleLine = `🏷️ **${roleIncome.roleName}:** +${rolePrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`;
+    if (rolePrestigeAmount > roleIncome.amount) roleLine += ` (🎖️ +${Math.round((rolePrestigeAmount / roleIncome.amount - 1) * 100)}% prestige)`;
+    collections.push(roleLine);
     totalAmount += rolePrestigeAmount;
   }
   

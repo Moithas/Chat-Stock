@@ -5,10 +5,17 @@ const { getTopFighters } = require('../fight');
 const { getDungeonLeaderboard } = require('../dungeon');
 const { getCurrency } = require('../admin');
 const { getActiveBounties, getInfamySettings, getTierFromPoints } = require('../infamy');
-const { getPrestigeLeaderboard, PRESTIGE_TIERS } = require('../prestige');
+const { getPrestigeLeaderboard, getPrestigeLevel, getTierInfo, PRESTIGE_TIERS } = require('../prestige');
 
 
 const ITEMS_PER_PAGE = 10;
+
+function prestigeTag(guildId, userId) {
+  const level = getPrestigeLevel(guildId, userId);
+  if (level <= 0) return '';
+  const tier = getTierInfo(level);
+  return tier ? ` ${tier.emoji}` : '';
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -167,7 +174,7 @@ async function buildStockLeaderboard(guildId, page = 0) {
     const medal = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `**${rank + 1}.**`;
     
     embed.addFields({
-      name: `${medal} ${stock.username}`,
+      name: `${medal} ${stock.username}${prestigeTag(guildId, stock.user_id)}`,
       value: 
         `💰 **Price:** ${stock.currentPrice} ${getCurrency(guildId)}/share\n` +
         `📊 **Shares Owned:** ${stock.totalShares || 0} shares\n`,
@@ -259,7 +266,7 @@ async function buildPortfolioLeaderboard(guildId, page = 0) {
     const profitSign = investor.profit >= 0 ? '+' : '';
     
     embed.addFields({
-      name: `${medal} ${investor.username}`,
+      name: `${medal} ${investor.username}${prestigeTag(guildId, investor.userId)}`,
       value: 
         `💰 **Portfolio Value:** ${Math.round(investor.totalValue)} ${getCurrency(guildId)}\n` +
         `${profitEmoji} **Profit/Loss:** ${profitSign}${Math.round(investor.profit)} ${getCurrency(guildId)} (${investor.profitPercent.toFixed(1)}%)\n` +
@@ -314,7 +321,7 @@ async function buildCashLeaderboard(guildId, page = 0, guild = null) {
     const medal = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `**${rank + 1}.**`;
     
     embed.addFields({
-      name: `${medal} ${user.username}`,
+      name: `${medal} ${user.username}${prestigeTag(guildId, user.userId)}`,
       value: 
         `💵 **Cash:** ${user.cash.toLocaleString()} ${getCurrency(guildId)}\n` +
         `🏦 **Bank:** ${user.bank.toLocaleString()} ${getCurrency(guildId)}\n` +
@@ -371,7 +378,7 @@ async function buildFightLeaderboard(guildId, page = 0, guild = null) {
     const earningsSign = netEarnings >= 0 ? '+' : '';
     
     embed.addFields({
-      name: `${medal} ${fighter.username || 'Unknown Fighter'}`,
+      name: `${medal} ${fighter.username || 'Unknown Fighter'}${prestigeTag(guildId, fighter.user_id)}`,
       value: 
         `📊 **Record:** ${record} (${winRate}% win rate)\n` +
         `💥 **KOs:** ${fighter.knockouts || 0} | **TKOs:** ${fighter.tkos || 0}\n` +
@@ -434,7 +441,7 @@ async function buildDungeonLeaderboard(guildId, page = 0, guild = null) {
     const tierBreakdown = tierLines.length > 0 ? tierLines.join('\n') : 'No tier data';
 
     embed.addFields({
-      name: `${medal} ${entry.username || 'Unknown User'}`,
+      name: `${medal} ${entry.username || 'Unknown User'}${prestigeTag(guildId, entry.user_id)}`,
       value:
         `📊 **${entry.total_runs} runs** — ✅ ${entry.total_clears} clears | 🏃 ${entry.total_escapes} escapes | 💀 ${entry.total_deaths} deaths\n` +
         `${tierBreakdown}\n` +

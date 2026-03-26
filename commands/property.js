@@ -1147,6 +1147,7 @@ async function handleRentButton(interaction, guildId, userId, settings, property
   
   // Calculate total payout (rent is always paid, card effect is bonus/penalty)
   let totalPayout = rentAmount + effect.amount;
+  const basePayout = totalPayout;
   
   // Apply to economy balance (handleRentButton)
   if (isEconomyEnabled()) {
@@ -1170,6 +1171,8 @@ async function handleRentButton(interaction, guildId, userId, settings, property
   // Format the effect amount with sign
   const effectStr = effect.amount >= 0 ? `+${effect.amount.toLocaleString()}` : effect.amount.toLocaleString();
   const totalStr = totalPayout >= 0 ? `+${totalPayout.toLocaleString()}` : totalPayout.toLocaleString();
+  let totalDisplay = `**${totalStr}** ${getCurrency(guildId)}`;
+  if (totalPayout > basePayout && basePayout > 0) totalDisplay += ` (🎖️ +${Math.round((totalPayout / basePayout - 1) * 100)}% prestige)`;
   
   const embed = new EmbedBuilder()
     .setColor(totalPayout >= 0 ? 0x2ecc71 : 0xe74c3c)
@@ -1182,7 +1185,7 @@ async function handleRentButton(interaction, guildId, userId, settings, property
       { name: '🧧 Cards Left', value: `**${cards.length - 1}**`, inline: true },
       { name: '💵 Base Rent', value: `+${rentAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: `${cardEmoji} Card Effect`, value: `${effectStr} ${getCurrency(guildId)}`, inline: true },
-      { name: '💰 Total', value: `**${totalStr}** ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Total', value: totalDisplay, inline: true },
       { name: '📝 Effect Details', value: effect.description, inline: false }
     );
   
@@ -1276,6 +1279,7 @@ async function handleRentSelect(interaction) {
   
   // Calculate total payout (rent is always paid, card effect is bonus/penalty)
   let totalPayout = rentAmount + effect.amount;
+  const basePayout = totalPayout;
   
   // Apply to economy balance (handleRentSelect)
   if (isEconomyEnabled()) {
@@ -1299,6 +1303,8 @@ async function handleRentSelect(interaction) {
   // Format the effect amount with sign
   const effectStr = effect.amount >= 0 ? `+${effect.amount.toLocaleString()}` : effect.amount.toLocaleString();
   const totalStr = totalPayout >= 0 ? `+${totalPayout.toLocaleString()}` : totalPayout.toLocaleString();
+  let totalDisplay = `**${totalStr}** ${getCurrency(guildId)}`;
+  if (totalPayout > basePayout && basePayout > 0) totalDisplay += ` (🎖️ +${Math.round((totalPayout / basePayout - 1) * 100)}% prestige)`;
   
   const embed = new EmbedBuilder()
     .setColor(totalPayout >= 0 ? 0x2ecc71 : 0xe74c3c)
@@ -1311,7 +1317,7 @@ async function handleRentSelect(interaction) {
       { name: '🧧 Cards Left', value: `**${cards.length - 1}**`, inline: true },
       { name: '💵 Base Rent', value: `+${rentAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: `${cardEmoji} Card Effect`, value: `${effectStr} ${getCurrency(guildId)}`, inline: true },
-      { name: '💰 Total', value: `**${totalStr}** ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Total', value: totalDisplay, inline: true },
       { name: '📝 Effect Details', value: effect.description, inline: false }
     );
   

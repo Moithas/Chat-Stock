@@ -637,12 +637,14 @@ module.exports = {
           
           const tierIndicator = hackerTierEffects.tier >= 1 ? ` ${hackerTierEffects.emoji}` : '';
           
+          const prestigeNoteHack = hackPrestigeAmount > stolenAmount ? ` (🎖️ +${Math.round((hackPrestigeAmount / stolenAmount - 1) * 100)}% prestige)` : '';
+          
           const successEmbed = new EmbedBuilder()
             .setColor(0x9b59b6)
             .setTitle(`💻 HACK SUCCESSFUL!${tierIndicator}`)
             .setDescription(flavorText)
             .addFields(
-              { name: '💰 Stolen', value: `${stolenAmount.toLocaleString()} ${getCurrency(guildId)}${protectionNote}${earningsCut > 0 ? ` (−${earningsCut}% cut)` : ''}`, inline: true },
+              { name: '💰 Stolen', value: `${hackPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}${protectionNote}${earningsCut > 0 ? ` (−${earningsCut}% cut)` : ''}${prestigeNoteHack}`, inline: true },
               { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}%)` : ''}`, inline: true },
               { name: '🎲 Roll', value: `${hackRoll.toFixed(1)}%`, inline: true }
             )
