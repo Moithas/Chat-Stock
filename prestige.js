@@ -265,8 +265,8 @@ function executePrestige(guildId, userId, totalWealth) {
   db.run('DELETE FROM property_upgrades WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
 
   // 4. Delete loans, bonds & reset credit score
-  db.run('DELETE FROM loans WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM loan_payments WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+  db.run('DELETE FROM loans WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM loan_credit_scores WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM active_bonds WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM bond_history WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
