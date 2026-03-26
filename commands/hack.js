@@ -29,6 +29,7 @@ const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
 const { getInfamySettings, getTierEffects, addInfamy, rollBountyCheck, createBounty, getActiveBounty, claimBounty, startProbation, announceBountyPosted, announceBountyClaimed } = require('../infamy');
 const { addMoney: addMoneyForBounty } = require('../economy');
 const { getCurrency, getAdminSettings } = require('../admin');
+const { applyIncomeMultiplier } = require('../prestige');
 
 
 
@@ -564,7 +565,8 @@ module.exports = {
           }
           
           await removeFromBank(guildId, targetId, stolenAmount, `Hacked by ${interaction.user.username}`);
-          await addMoney(guildId, hackerId, stolenAmount, `Hacked ${targetUser.username}`);
+          const hackPrestigeAmount = applyIncomeMultiplier(guildId, hackerId, stolenAmount);
+          await addMoney(guildId, hackerId, hackPrestigeAmount, `Hacked ${targetUser.username}`);
           
           // Add infamy for successful hack
           const infamySettings = getInfamySettings(guildId);

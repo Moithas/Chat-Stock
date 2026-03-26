@@ -1003,6 +1003,10 @@ function getCreditLoanLimits(guildId, userId) {
     maxLoan = Math.floor(maxLoan * (1 - defaultPenaltyPercent / 100));
   }
 
+  // Apply prestige borrow multiplier
+  const { applyBorrowMultiplier } = require('./prestige');
+  maxLoan = applyBorrowMultiplier(guildId, userId, maxLoan);
+
   // Interest = base rate * tier modifier
   const interestRate = Math.round((settings.loanInterestRate * tier.interestMod) * 10) / 10;
 

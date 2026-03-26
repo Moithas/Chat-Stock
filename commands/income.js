@@ -7,6 +7,7 @@ const { addMoney } = require('../economy');
 const { getEffectValue, EFFECT_TYPES, getHuntEligibleItems, addToInventory } = require('../items');
 const { getLuckyPennyEffect, LP_EFFECT_TYPES, getLuckyPennySettings, canUseLuckyPenny, recordLuckyPennyUse, rollLuckyPenny, applyBuff: applyLpBuff, getActiveLuckyPennyBuffs, LP_EFFECT_EMOJI, INVERSE_EFFECTS } = require('../luckypenny');
 const { getCurrency } = require('../admin');
+const { applyIncomeMultiplier } = require('../prestige');
 
 
 
@@ -332,7 +333,10 @@ async function executeWork(interaction, guildId, userId) {
   // Record the work FIRST to set cooldown (prevents spam exploit)
   recordWork(guildId, userId, amount, flavorText);
   
-  const success = await addMoney(guildId, userId, amount, 'Work payout');
+  // Apply prestige income multiplier
+  const prestigeAmount = applyIncomeMultiplier(guildId, userId, amount);
+  
+  const success = await addMoney(guildId, userId, prestigeAmount, 'Work payout');
   
   if (!success) {
     return interaction.followUp({ content: '❌ Failed to add money. Please try again later.', flags: 64 });
@@ -349,8 +353,8 @@ async function executeWork(interaction, guildId, userId) {
     .addFields({
       name: '💰 You Earned',
       value: boosted 
-        ? `**+${amount.toLocaleString()}** ${getCurrency(guildId)} ⚡ (+${workBoost}% boost!)`
-        : `**+${amount.toLocaleString()}** ${getCurrency(guildId)}`,
+        ? `**+${prestigeAmount.toLocaleString()}** ${getCurrency(guildId)} ⚡ (+${workBoost}% boost!)`
+        : `**+${prestigeAmount.toLocaleString()}** ${getCurrency(guildId)}`,
       inline: true
     })
     .setFooter({ text: `Total earned: ${totalEarned.toLocaleString()} | Jobs completed: ${workCount} | ${interaction.user.displayName}` })
@@ -415,13 +419,14 @@ async function executeLuckyPenny(interaction, guildId, userId) {
       .addFields({ name: '⏱️ Duration', value: `${result.durationHours} hours`, inline: true });
     
   } else if (result.type === 'currency') {
-    await addMoney(guildId, userId, result.amount, 'Lucky Penny');
+    const lpPrestigeAmount = applyIncomeMultiplier(guildId, userId, result.amount);
+    await addMoney(guildId, userId, lpPrestigeAmount, 'Lucky Penny');
     
     embed
       .setColor(0xf1c40f)
       .setTitle('🪙 Lucky Penny — Payday!')
       .setDescription(result.flavorText)
-      .addFields({ name: '💰 Found', value: `${result.amount.toLocaleString()} ${getCurrency(guildId)}`, inline: true });
+      .addFields({ name: '💰 Found', value: `${lpPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true });
     
   } else {
     const nothingCdText = settings.nothingCooldownHours < settings.cooldownHours
@@ -551,8 +556,9 @@ async function executeHunt(interaction, guildId, userId) {
     await interaction.channel.send({ embeds: [embed] });
   } else if (outcome === 'currency') {
     const amount = rollCurrencyAmount(settings);
-    recordHuntResult(guildId, userId, 'currency', null, null, amount);
-    await addMoney(guildId, userId, amount, 'Hunt currency find');
+    const huntPrestigeAmount = applyIncomeMultiplier(guildId, userId, amount);
+    recordHuntResult(guildId, userId, 'currency', null, null, huntPrestigeAmount);
+    await addMoney(guildId, userId, huntPrestigeAmount, 'Hunt currency find');
     
     const embed = new EmbedBuilder()
       .setColor(0xf1c40f)
@@ -561,10 +567,10 @@ async function executeHunt(interaction, guildId, userId) {
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
       .addFields({
         name: '💰 You Found',
-        value: `**+${amount.toLocaleString()}** ${getCurrency(guildId)}`,
+        value: `**+${huntPrestigeAmount.toLocaleString()}** ${getCurrency(guildId)}`,
         inline: true
       })
-      .setFooter({ text: `Hunts: ${stats.totalHunts + 1} | Total earned: ${(stats.totalCurrencyEarned + amount).toLocaleString()} | ${interaction.user.displayName}` })
+      .setFooter({ text: `Hunts: ${stats.totalHunts + 1} | Total earned: ${(stats.totalCurrencyEarned + huntPrestigeAmount).toLocaleString()} | ${interaction.user.displayName}` })
       .setTimestamp();
     
     await interaction.channel.send({ embeds: [embed] });
@@ -621,11 +627,12 @@ async function executeCollect(interaction, guildId, userId) {
       const amount = calculatePassiveIncome(stockPrice, settings.passiveIncomeRate, totalSharesOwned);
       
       if (amount > 0) {
+        const stockPrestigeAmount = applyIncomeMultiplier(guildId, userId, amount);
         // Record FIRST to set cooldown (prevents spam exploit)
-        recordPassiveIncomeCollection(guildId, userId, stockPrice, amount);
-        await addMoney(guildId, userId, amount, 'Stock bonus from stock value');
-        collections.push(`📈 **Stock Bonus:** +${amount.toLocaleString()} ${getCurrency(guildId)}`);
-        totalAmount += amount;
+        recordPassiveIncomeCollection(guildId, userId, stockPrice, stockPrestigeAmount);
+        await addMoney(guildId, userId, stockPrestigeAmount, 'Stock bonus from stock value');
+        collections.push(`📈 **Stock Bonus:** +${stockPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`);
+        totalAmount += stockPrestigeAmount;
       }
     }
   }
@@ -633,11 +640,12 @@ async function executeCollect(interaction, guildId, userId) {
   // Check and collect role incomes
   const { collectableIncomes } = getCollectableRoleIncomes(guildId, userId, userRoleIds);
   for (const roleIncome of collectableIncomes) {
+    const rolePrestigeAmount = applyIncomeMultiplier(guildId, userId, roleIncome.amount);
     // Record FIRST to set cooldown (prevents spam exploit)
-    recordRoleIncomeCollection(guildId, userId, roleIncome.roleId, roleIncome.roleName, roleIncome.amount);
-    await addMoney(guildId, userId, roleIncome.amount, `Role income: ${roleIncome.roleName}`);
-    collections.push(`🏷️ **${roleIncome.roleName}:** +${roleIncome.amount.toLocaleString()} ${getCurrency(guildId)}`);
-    totalAmount += roleIncome.amount;
+    recordRoleIncomeCollection(guildId, userId, roleIncome.roleId, roleIncome.roleName, rolePrestigeAmount);
+    await addMoney(guildId, userId, rolePrestigeAmount, `Role income: ${roleIncome.roleName}`);
+    collections.push(`🏷️ **${roleIncome.roleName}:** +${rolePrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`);
+    totalAmount += rolePrestigeAmount;
   }
   
   if (collections.length === 0) {

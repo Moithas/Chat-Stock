@@ -36,6 +36,7 @@ try {
   console.log('Economy not available for property system');
 }
 const { getCurrency } = require('../admin');
+const { applyIncomeMultiplier } = require('../prestige');
 
 // Helper to check if economy is enabled (checked at runtime)
 function isEconomyEnabled() {
@@ -1145,11 +1146,12 @@ async function handleRentButton(interaction, guildId, userId, settings, property
   setCardCooldown(guildId, userId, propertyId);
   
   // Calculate total payout (rent is always paid, card effect is bonus/penalty)
-  const totalPayout = rentAmount + effect.amount;
+  let totalPayout = rentAmount + effect.amount;
   
   // Apply to economy balance (handleRentButton)
   if (isEconomyEnabled()) {
     if (totalPayout >= 0) {
+      totalPayout = applyIncomeMultiplier(guildId, userId, totalPayout);
       await economy.addMoney(guildId, userId, totalPayout, 'Property rent');
     } else {
       // Apply loss as fine (can go negative)
@@ -1273,11 +1275,12 @@ async function handleRentSelect(interaction) {
   setCardCooldown(guildId, userId, propertyId);
   
   // Calculate total payout (rent is always paid, card effect is bonus/penalty)
-  const totalPayout = rentAmount + effect.amount;
+  let totalPayout = rentAmount + effect.amount;
   
   // Apply to economy balance (handleRentSelect)
   if (isEconomyEnabled()) {
     if (totalPayout >= 0) {
+      totalPayout = applyIncomeMultiplier(guildId, userId, totalPayout);
       await economy.addMoney(guildId, userId, totalPayout, 'Property rent');
     } else {
       // Apply loss as fine (can go negative)

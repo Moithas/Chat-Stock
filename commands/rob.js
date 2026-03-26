@@ -7,6 +7,7 @@ const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
 const { getInfamySettings, getTierEffects, addInfamy, rollBountyCheck, createBounty, getActiveBounty, claimBounty, startProbation, announceBountyPosted, announceBountyClaimed } = require('../infamy');
 const { addMoney: addMoneyForBounty } = require('../economy');
 const { getCurrency, getAdminSettings } = require('../admin');
+const { applyIncomeMultiplier } = require('../prestige');
 
 
 
@@ -442,7 +443,8 @@ module.exports = {
             actualStolen = applyInfamyEarningsCut(actualStolen, robberTierEffects);
 
             await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
-            await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
+            const robPrestigeAmount = applyIncomeMultiplier(guildId, robberId, actualStolen);
+            await addMoney(guildId, robberId, robPrestigeAmount, `Stole from ${targetUser.username}`);
             recordRob(guildId, robberId, targetId, true, actualStolen);
             
             // Process infamy gain, bounty claim/roll
@@ -539,7 +541,8 @@ module.exports = {
 
       // Transfer money
       await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
-      await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
+      const robPrestigeAmount2 = applyIncomeMultiplier(guildId, robberId, actualStolen);
+      await addMoney(guildId, robberId, robPrestigeAmount2, `Stole from ${targetUser.username}`);
 
       // Record the rob
       recordRob(guildId, robberId, targetId, true, actualStolen);
@@ -698,7 +701,8 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
         // Normal rob succeeds
         const flavorText = getRandomFlavor(FLAVOR_TEXTS.hideCashFail).replaceAll('{target}', `**${targetUser.username}**`);
         await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
-        await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
+        const robPrestigeAmountHide = applyIncomeMultiplier(guildId, robberId, actualStolen);
+        await addMoney(guildId, robberId, robPrestigeAmountHide, `Stole from ${targetUser.username}`);
 
         const protectionNote = robProtectionValue > 0 && robProtectionValue < 100 
           ? ` (🛡️ ${robProtectionValue}% protected)`
@@ -773,7 +777,8 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
         // Normal rob succeeds
         const flavorText = getRandomFlavor(FLAVOR_TEXTS.dodgeFail).replaceAll('{target}', `**${targetUser.username}**`);
         await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
-        await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
+        const robPrestigeAmountDodge = applyIncomeMultiplier(guildId, robberId, actualStolen);
+        await addMoney(guildId, robberId, robPrestigeAmountDodge, `Stole from ${targetUser.username}`);
 
         const protectionNoteDodge = robProtectionValue > 0 && robProtectionValue < 100 
           ? ` (🛡️ ${robProtectionValue}% protected)`
@@ -849,7 +854,8 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
         // Normal rob succeeds
         const flavorText = getRandomFlavor(FLAVOR_TEXTS.fightBackFail).replaceAll('{target}', `**${targetUser.username}**`);
         await forceRemoveMoney(guildId, targetId, actualStolen, `Robbed by ${interaction.user.username}`);
-        await addMoney(guildId, robberId, actualStolen, `Stole from ${targetUser.username}`);
+        const robPrestigeAmountFight = applyIncomeMultiplier(guildId, robberId, actualStolen);
+        await addMoney(guildId, robberId, robPrestigeAmountFight, `Stole from ${targetUser.username}`);
 
         const protectionNoteFight = robProtectionValue > 0 && robProtectionValue < 100 
           ? ` (🛡️ ${robProtectionValue}% protected)`

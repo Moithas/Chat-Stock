@@ -636,6 +636,54 @@ const helpPages = {
     ]
   },
   
+  prestige: {
+    title: '🎖️ Prestige System',
+    color: 0xFFD700,
+    description: `Sacrifice everything for permanent bonuses. Use \`/prestige\` to view your status and prestige up.`,
+    fields: [
+      {
+        name: '🏆 Prestige Tiers',
+        value:
+          `🥉 **Bronze** — 100M total wealth\n` +
+          `🥈 **Silver** — 500M total wealth\n` +
+          `🥇 **Gold** — 1.5B total wealth\n` +
+          `💠 **Platinum** — 5B total wealth\n` +
+          `💎 **Diamond** — 150B total wealth`,
+        inline: false
+      },
+      {
+        name: '🎁 Permanent Bonuses (per tier)',
+        value:
+          `• **+5% income** from all sources\n` +
+          `• **+10% XP** for hack & rob skills\n` +
+          `• **+100% borrow limit** from bank\n` +
+          `• Starting cash bonus (25K–500K)\n` +
+          `• Prestige badge on profile`,
+        inline: false
+      },
+      {
+        name: '💀 What Gets Reset',
+        value:
+          `Cash, bank, stocks, properties, items, effects, loans, bonds, credit score, cooldowns, and skills XP.`,
+        inline: true
+      },
+      {
+        name: '✅ What Stays',
+        value:
+          `Fight stats, dungeon progress, infamy, gambling stats, chat streak, and stock popularity.`,
+        inline: true
+      },
+      {
+        name: '⏱️ Rules',
+        value:
+          `• 1-week cooldown between prestiges\n` +
+          `• Must have total wealth ≥ tier cost\n` +
+          `• **Irreversible** — cannot be undone`,
+        inline: false
+      }
+    ]
+  },
+  
   admin: {
     title: '⚙️ Admin Commands',
     color: 0x607d8b,
@@ -728,7 +776,8 @@ function buildHelpMenu(currentPage = 'overview', isAdmin = false) {
     { label: 'Fight & Dungeon', description: 'PvP battles & PvE dungeon', value: 'fight', emoji: '🥊', default: currentPage === 'fight' },
     { label: 'Events & Leaderboard', description: 'Market events, vault & rankings', value: 'events', emoji: '🎪', default: currentPage === 'events' },
     { label: 'Infamy & Bounty', description: 'Criminal reputation system', value: 'infamy', emoji: '🏴‍☠️', default: currentPage === 'infamy' },
-    { label: 'Player Profile', description: 'View detailed player stats', value: 'profile', emoji: '📋', default: currentPage === 'profile' }
+    { label: 'Player Profile', description: 'View detailed player stats', value: 'profile', emoji: '📋', default: currentPage === 'profile' },
+    { label: 'Prestige', description: 'Prestige tiers & permanent bonuses', value: 'prestige', emoji: '🎖️', default: currentPage === 'prestige' }
   ];
   
   // Only show admin option to admins

@@ -1063,6 +1063,7 @@ function startDividendScheduler(client) {
         // Import required database functions
         const { getAllUsers, getAllStockHolders, calculateStockPrice } = require('./database');
         const { addToBank } = require('./economy');
+        const { applyIncomeMultiplier } = require('./prestige');
         
         // Get all unique stock users
         const allUsers = getAllUsers();
@@ -1109,10 +1110,11 @@ function startDividendScheduler(client) {
                 if (payout <= 0) continue;
                 
                 try {
-                    await addToBank(guildId, holder.ownerId, payout, `Dividend from ${stockUser.username || 'Unknown'}'s stock`);
+                    const prestigePayout = applyIncomeMultiplier(guildId, holder.ownerId, payout);
+                    await addToBank(guildId, holder.ownerId, prestigePayout, `Dividend from ${stockUser.username || 'Unknown'}'s stock`);
                 
-                    recordDividendPayout(guildId, stockUser.user_id, holder.ownerId, holder.shares, stockPrice, payout);
-                    totalPaid += payout;
+                    recordDividendPayout(guildId, stockUser.user_id, holder.ownerId, holder.shares, stockPrice, prestigePayout);
+                    totalPaid += prestigePayout;
                     payoutsCount++;
                   
                     // Track for self-dividend bonus
@@ -1153,9 +1155,10 @@ function startDividendScheduler(client) {
               if (bonus <= 0) continue;
               
               try {
-                await addToBank(guildId, stockUserId, bonus, `CEO Bonus: ${settings.selfDividendRate}% of dividends paid on your stock`);
-                recordSelfDividendBonus(guildId, stockUserId, data.totalPaid, bonus);
-                selfDividendsPaid += bonus;
+                const prestigeBonus = applyIncomeMultiplier(guildId, stockUserId, bonus);
+                await addToBank(guildId, stockUserId, prestigeBonus, `CEO Bonus: ${settings.selfDividendRate}% of dividends paid on your stock`);
+                recordSelfDividendBonus(guildId, stockUserId, data.totalPaid, prestigeBonus);
+                selfDividendsPaid += prestigeBonus;
                 selfDividendsCount++;
               } catch (payError) {
                 console.error(`Failed to pay self-dividend to ${stockUserId}:`, payError.message);

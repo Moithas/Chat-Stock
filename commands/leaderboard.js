@@ -5,6 +5,7 @@ const { getTopFighters } = require('../fight');
 const { getDungeonLeaderboard } = require('../dungeon');
 const { getCurrency } = require('../admin');
 const { getActiveBounties, getInfamySettings, getTierFromPoints } = require('../infamy');
+const { getPrestigeLeaderboard, PRESTIGE_TIERS } = require('../prestige');
 
 
 const ITEMS_PER_PAGE = 10;
@@ -56,6 +57,11 @@ async function showLeaderboardPanel(interaction, type = 'stocks', page = 0, isUp
       embed = bountyResult.embed;
       totalPages = bountyResult.totalPages;
       break;
+    case 'prestige':
+      const prestigeResult = await buildPrestigeLeaderboard(guildId, page, interaction.client);
+      embed = prestigeResult.embed;
+      totalPages = prestigeResult.totalPages;
+      break;
     default:
       const defaultResult = await buildStockLeaderboard(guildId, page);
       embed = defaultResult.embed;
@@ -97,14 +103,19 @@ async function showLeaderboardPanel(interaction, type = 'stocks', page = 0, isUp
         .setStyle(type === 'dungeon' ? ButtonStyle.Primary : ButtonStyle.Secondary)
     );
 
-  // Second row with Bounties
+  // Second row with Bounties and Prestige
   const typeButtons2 = new ActionRowBuilder()
     .addComponents(
       new ButtonBuilder()
         .setCustomId(`leaderboard_bounties_${page}_${userId}`)
         .setLabel('Bounty Board')
         .setEmoji('🏴‍☠️')
-        .setStyle(type === 'bounties' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+        .setStyle(type === 'bounties' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`leaderboard_prestige_${page}_${userId}`)
+        .setLabel('Prestige')
+        .setEmoji('🎖️')
+        .setStyle(type === 'prestige' ? ButtonStyle.Primary : ButtonStyle.Secondary)
     );
 
   const navButtons = new ActionRowBuilder()
@@ -477,6 +488,50 @@ async function buildBountyBoard(guildId, page = 0, client) {
   
   desc += `*Successfully hack or rob a bounty target to claim their bounty!*`;
   embed.setDescription(desc);
+
+  return { embed, totalPages };
+}
+
+async function buildPrestigeLeaderboard(guildId, page = 0, client) {
+  const embed = new EmbedBuilder()
+    .setColor(0xFFD700)
+    .setTitle('🎖️ Prestige Leaderboard')
+    .setTimestamp();
+
+  const leaderboard = getPrestigeLeaderboard(guildId);
+  const totalPages = Math.max(1, Math.ceil(leaderboard.length / ITEMS_PER_PAGE));
+  const startIdx = page * ITEMS_PER_PAGE;
+  const endIdx = startIdx + ITEMS_PER_PAGE;
+  const pageEntries = leaderboard.slice(startIdx, endIdx);
+
+  if (leaderboard.length === 0) {
+    embed.setDescription('No players have prestiged yet.\n\n*Use `/prestige` when you have enough wealth to prestige up!*');
+    return { embed, totalPages: 1 };
+  }
+
+  let desc = '';
+  for (let i = 0; i < pageEntries.length; i++) {
+    const entry = pageEntries[i];
+    const rank = startIdx + i + 1;
+    const tier = PRESTIGE_TIERS.find(t => t.level === entry.prestige_level);
+    const badge = tier ? `${tier.emoji} ${tier.name}` : 'Unknown';
+
+    let username = entry.user_id;
+    try {
+      const user = await client.users.fetch(entry.user_id);
+      username = user.username;
+    } catch (e) {}
+
+    const timeStr = entry.prestige_time ? `<t:${Math.floor(entry.prestige_time / 1000)}:R>` : 'N/A';
+    const medal = rank === 1 ? '👑' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `**${rank}.**`;
+
+    desc += `${medal} **${username}** — ${badge}`;
+    if (entry.total_prestiges > 1) desc += ` (×${entry.total_prestiges})`;
+    desc += ` • ${timeStr}\n`;
+  }
+
+  embed.setDescription(desc);
+  embed.setFooter({ text: `${leaderboard.length} players prestiged` });
 
   return { embed, totalPages };
 }

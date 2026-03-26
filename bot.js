@@ -33,6 +33,7 @@ const { initSYN } = require('./screwyourneighbor');
 const { initLuckyPenny } = require('./luckypenny');
 const { initBumpReward, getBumpSettings, getBumpStats, isDisboardBump, extractBumperUserId, rollBumpReward, recordBump } = require('./bumpreward');
 const { initInfamy, decayAllInfamy } = require('./infamy');
+const { initPrestige } = require('./prestige');
 const fs = require('fs');
 const path = require('path');
 
@@ -411,6 +412,9 @@ client.once('clientReady', async () => {
 
   // Initialize infamy & bounty system
   initInfamy(getDb(), client);
+
+  // Initialize prestige system
+  initPrestige(getDb());
 
   // Initialize maintenance system (cleanup, error logging, rate limiting)
   initMaintenance(getDb(), client);
@@ -1323,6 +1327,27 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // Handle prestige buttons
+    if (interaction.isButton() && interaction.customId.startsWith('prestige_')) {
+      // Exclude admin panel buttons
+      const prestigeAdminButtons = ['prestige_toggle', 'prestige_edit_settings', 'prestige_view_leaderboard', 'back_prestige'];
+      if (!prestigeAdminButtons.includes(interaction.customId)) {
+        try {
+          const { handleButton } = require('./commands/prestige');
+          await handleButton(interaction);
+        } catch (error) {
+          if (error.code === 10062 || error.code === 40060) return;
+          console.error('Error handling prestige button:', error);
+          try {
+            if (!interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content: 'An error occurred.', flags: 64 });
+            }
+          } catch (e) { /* Interaction expired */ }
+        }
+        return;
+      }
+    }
+
     // Handle rob defense buttons fallback only for DMs (channel implementation handles guild clicks)
     if (interaction.isButton() && interaction.customId.startsWith('rob_defend_') && !interaction.guildId) {
       // Note: In-channel defense buttons are handled inside rob.js via awaitMessageComponent.
@@ -1486,6 +1511,9 @@ client.on('interactionCreate', async (interaction) => {
       'infamy_edit_bounty', 'infamy_edit_misc', 'infamy_set_channel', 'back_infamy',
       'modal_infamy_tiers', 'modal_infamy_rates', 'modal_infamy_bounty', 'modal_infamy_misc',
       'infamy_channel_select',
+      // Prestige
+      'admin_prestige', 'prestige_toggle', 'prestige_edit_settings', 'prestige_view_leaderboard', 'back_prestige',
+      'modal_prestige_settings',
     ];
     
     // Check for exact match OR dynamic card/property edit IDs

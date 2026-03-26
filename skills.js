@@ -380,6 +380,10 @@ function addXp(guildId, userId, skill, amount, success, amountStolen = 0) {
     xpGained = Math.max(1, Math.floor(xpGained * (1 + lpXpBoost / 100)));
   }
   
+  // Apply prestige XP multiplier
+  const { applyXpMultiplier } = require('./prestige');
+  xpGained = applyXpMultiplier(guildId, userId, xpGained);
+  
   const currentXp = skill === 'hack' ? userSkills.hackXp : userSkills.robXp;
   const currentLevel = getLevel(currentXp);
   const newXp = currentXp + xpGained;

@@ -8,6 +8,7 @@ const { getUserSkills, getLevel, createProgressBar } = require('../skills');
 const { getTotalDividendsReceived, getLastSplitTime } = require('../dividends');
 const { getUserInventory } = require('../items');
 const { getCurrency } = require('../admin');
+const { getPrestigeData, getTierInfo, getPrestigeBadge } = require('../prestige');
 
 
 
@@ -545,10 +546,14 @@ function getDungeonData(guildId, userId) {
 
 function buildOverviewEmbed(guildId, userId, user, displayName, avatarUrl) {
   const data = getOverviewData(guildId, userId, user);
+  const prestigeData = getPrestigeData(guildId, userId);
+  const prestigeBadge = getPrestigeBadge(prestigeData.level);
+  
+  const titlePrefix = prestigeBadge ? `${prestigeBadge} ` : '';
   
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
-    .setTitle(`📋 ${displayName}'s Profile`)
+    .setTitle(`📋 ${titlePrefix}${displayName}'s Profile`)
     .setThumbnail(avatarUrl)
     .addFields(
       { name: '💰 Total Wealth', value: `${Math.round(data.totalWealth).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
@@ -559,7 +564,7 @@ function buildOverviewEmbed(guildId, userId, user, displayName, avatarUrl) {
       { name: '🏠 Properties', value: `${Math.round(data.propValue).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '💬 Messages', value: data.totalMessages.toLocaleString(), inline: true },
       { name: '🎒 Items Owned', value: String(data.itemCount), inline: true },
-      { name: '\u200b', value: '\u200b', inline: true }
+      { name: '🎖️ Prestige', value: prestigeBadge || 'None', inline: true }
     )
     .setFooter({ text: 'Select a category below for detailed stats' });
   

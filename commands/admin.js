@@ -19,6 +19,7 @@ const adminDungeon = require('./admin-dungeon');
 const adminSYN = require('./admin-syn');
 const adminInfamy = require('./admin-infamy');
 const adminSettings = require('./admin-settings');
+const adminPrestige = require('./admin-prestige');
 
 // ==================== MAIN DASHBOARD ====================
 async function showDashboard(interaction) {
@@ -32,7 +33,8 @@ async function showDashboard(interaction) {
       { name: '🎰 Gambling',   value: 'Lottery, scratch, SYN & vault',   inline: true },
       { name: '⚔️ Combat',     value: 'Fight, dungeon, rob & hack',      inline: true },
       { name: '🏴‍☠️ Infamy',     value: 'Criminal reputation & bounties',  inline: true },
-      { name: '🎓 Skills',     value: 'XP, training & level bonuses',    inline: true },
+      { name: '�️ Prestige',    value: 'Tiers, multipliers & resets',     inline: true },
+      { name: '�🎓 Skills',     value: 'XP, training & level bonuses',    inline: true },
       { name: '🛒 Items',      value: 'Shop items, prices & effects',    inline: true },
       { name: '🏠 Properties', value: 'Wealth cards, tiers & upgrades',  inline: true },
       { name: '⚙️ System',     value: 'Market, ticker, events & spam',   inline: true },
@@ -67,6 +69,7 @@ async function showDashboard(interaction) {
         { label: 'Hack',            value: 'hack',       emoji: '💻', description: 'Bank hacking & defenses' },
         { label: 'Skills',          value: 'skills',     emoji: '🎓', description: 'XP, training & level bonuses' },
         { label: 'Infamy',          value: 'infamy',     emoji: '🏴‍☠️', description: 'Criminal reputation & bounty system' },
+        { label: 'Prestige',        value: 'prestige',   emoji: '🎖️', description: 'Prestige tiers & permanent bonuses' },
 
         // — Assets —
         { label: 'Properties',      value: 'property',   emoji: '🏠', description: 'Wealth cards, tiers & upgrades' },
@@ -145,6 +148,7 @@ module.exports.handleAdminInteraction = async function(interaction) {
         case 'dungeon': await adminDungeon.showDungeonPanel(interaction, guildId); break;
         case 'syn': await adminSYN.showSYNPanel(interaction, guildId); break;
         case 'infamy': await adminInfamy.showInfamyPanel(interaction, guildId); break;
+        case 'prestige': await adminPrestige.showPrestigePanel(interaction, guildId); break;
         case 'settings': await adminSettings.showSettingsPanel(interaction, guildId); break;
         case 'reset_game': await adminSettings.showSettingsPanel(interaction, guildId); break;
       }
@@ -167,6 +171,7 @@ module.exports.handleAdminInteraction = async function(interaction) {
     if (await adminDungeon.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Dungeon'); return; }
     if (await adminSYN.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by SYN'); return; }
     if (await adminInfamy.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Infamy'); return; }
+    if (await adminPrestige.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Prestige'); return; }
     if (await adminSettings.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Settings'); return; }
     console.log('[Admin] No handler matched for:', interaction.customId);
 
