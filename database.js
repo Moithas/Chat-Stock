@@ -724,7 +724,7 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
   let shareQuery, shareParams;
   if (excludeBuyerId) {
     // Exclude a specific buyer's shares from demand calculation (prevents self-pump-and-dump)
-    shareQuery = 'SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ? AND user_id != ?';
+    shareQuery = 'SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ? AND owner_id != ?';
     shareParams = [userId, excludeBuyerId];
   } else {
     shareQuery = 'SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ?';
