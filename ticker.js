@@ -141,7 +141,7 @@ function setDashboardChannel(channelId) {
 async function generateSparkline(userId, username, priceChange, guildId = null) {
   const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
   let priceData = getPriceHistoryByTimeRange(userId, oneDayAgo);
-  const currentPrice = calculateStockPrice(userId, guildId);
+  const currentPrice = calculateStockPrice(userId, guildId, null, true);
   
   // Add current price
   let allPrices = [...priceData, { price: currentPrice, timestamp: Date.now() }];
@@ -419,7 +419,7 @@ async function buildMarketDashboard(guildId = null) {
   const recentSplitters = getRecentSplitters(oneDayAgo);
 
   for (const user of users) {
-    const currentPrice = calculateStockPrice(user.user_id, guildId);
+    const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
     const dayHistory = getPriceHistoryByTimeRange(user.user_id, oneDayAgo);
     
     let dayAgoPrice = currentPrice;
@@ -689,7 +689,7 @@ async function checkPriceMovements() {
   const alerts = [];
   
   for (const user of users) {
-    const currentPrice = calculateStockPrice(user.user_id, guildId);
+    const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
     const lastPrice = lastKnownPrices.get(user.user_id);
     
     if (lastPrice) {
@@ -788,7 +788,7 @@ async function sendEarningsReport() {
     const guildId = channel.guild?.id || null;
     
     for (const user of users) {
-      const currentPrice = calculateStockPrice(user.user_id, guildId);
+      const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
       const weekHistory = getPriceHistoryByTimeRange(user.user_id, oneWeekAgo);
       
       let weekAgoPrice = currentPrice; // Default if no history
@@ -966,7 +966,7 @@ async function refreshLastKnownPrices(guildId = null) {
   if (!users || users.length === 0) return;
   
   for (const user of users) {
-    const currentPrice = calculateStockPrice(user.user_id, guildId);
+    const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
     lastKnownPrices.set(user.user_id, currentPrice);
   }
   

@@ -639,9 +639,9 @@ function calculateDailyContribution(messageCount, settings) {
 }
 
 // Calculate stock price (guildId optional - for price impact delay and market events)
-function calculateStockPrice(userId, guildId = null, excludeBuyerId = null) {
+function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excludeEvents = false) {
   // Check price cache first
-  const cacheKey = `${userId}:${guildId || 'null'}${excludeBuyerId ? `:ex${excludeBuyerId}` : ''}`;
+  const cacheKey = `${userId}:${guildId || 'null'}${excludeBuyerId ? `:ex${excludeBuyerId}` : ''}${excludeEvents ? ':noev' : ''}`;
   const cached = priceCache.get(cacheKey);
   if (cached && Date.now() - cached.time < PRICE_CACHE_TTL) {
     return cached.price;
@@ -753,7 +753,7 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null) {
   price *= priceModifier;
 
   // Apply market event multiplier if active
-  if (guildId) {
+  if (guildId && !excludeEvents) {
     try {
       const { getMarketEventMultiplier } = require('./events');
       const eventMultiplier = getMarketEventMultiplier(guildId);
