@@ -91,14 +91,8 @@ function calculateBuyFee(guildId, totalCost, userId = null) {
     return 0;
   }
   
-  let fee;
-  if (settings.buyFeeType === 'percent') {
-    fee = Math.round(totalCost * (settings.buyFeeValue / 100));
-  } else {
-    fee = Math.round(settings.buyFeeValue);
-  }
-  
-  // Apply infamy fee modifier if userId provided
+  // Get infamy fee modifier (additive to rate)
+  let infamyFeeAdd = 0;
   if (userId) {
     try {
       const { getTierEffects, getInfamySettings } = require('./infamy');
@@ -106,7 +100,7 @@ function calculateBuyFee(guildId, totalCost, userId = null) {
       if (infSettings.enabled) {
         const tierEffects = getTierEffects(guildId, userId);
         if (tierEffects.feeModifier > 0) {
-          fee = Math.round(fee * (1 + tierEffects.feeModifier / 100));
+          infamyFeeAdd = tierEffects.feeModifier;
         }
       }
     } catch (e) {
@@ -114,7 +108,50 @@ function calculateBuyFee(guildId, totalCost, userId = null) {
     }
   }
   
-  return fee;
+  let baseFee;
+  if (settings.buyFeeType === 'percent') {
+    baseFee = Math.round(totalCost * (settings.buyFeeValue / 100));
+  } else {
+    baseFee = Math.round(settings.buyFeeValue);
+  }
+  
+  const infamyFee = infamyFeeAdd > 0 ? Math.round(totalCost * (infamyFeeAdd / 100)) : 0;
+  
+  return baseFee + infamyFee;
+}
+
+// Returns { total, baseFee, infamyFee, infamyRate } for itemized display
+function calculateBuyFeeBreakdown(guildId, totalCost, userId = null) {
+  const settings = getGuildSettings(guildId);
+  
+  if (!settings.feesEnabled) {
+    return { total: 0, baseFee: 0, infamyFee: 0, infamyRate: 0 };
+  }
+  
+  let infamyFeeAdd = 0;
+  if (userId) {
+    try {
+      const { getTierEffects, getInfamySettings } = require('./infamy');
+      const infSettings = getInfamySettings(guildId);
+      if (infSettings.enabled) {
+        const tierEffects = getTierEffects(guildId, userId);
+        if (tierEffects.feeModifier > 0) {
+          infamyFeeAdd = tierEffects.feeModifier;
+        }
+      }
+    } catch (e) {}
+  }
+  
+  let baseFee;
+  if (settings.buyFeeType === 'percent') {
+    baseFee = Math.round(totalCost * (settings.buyFeeValue / 100));
+  } else {
+    baseFee = Math.round(settings.buyFeeValue);
+  }
+  
+  const infamyFee = infamyFeeAdd > 0 ? Math.round(totalCost * (infamyFeeAdd / 100)) : 0;
+  
+  return { total: baseFee + infamyFee, baseFee, infamyFee, infamyRate: infamyFeeAdd };
 }
 
 function calculateSellFee(guildId, totalValue, userId = null) {
@@ -124,14 +161,8 @@ function calculateSellFee(guildId, totalValue, userId = null) {
     return 0;
   }
   
-  let fee;
-  if (settings.sellFeeType === 'percent') {
-    fee = Math.round(totalValue * (settings.sellFeeValue / 100));
-  } else {
-    fee = Math.round(settings.sellFeeValue);
-  }
-  
-  // Apply infamy fee modifier if userId provided
+  // Get infamy fee modifier (additive to rate)
+  let infamyFeeAdd = 0;
   if (userId) {
     try {
       const { getTierEffects, getInfamySettings } = require('./infamy');
@@ -139,7 +170,7 @@ function calculateSellFee(guildId, totalValue, userId = null) {
       if (infSettings.enabled) {
         const tierEffects = getTierEffects(guildId, userId);
         if (tierEffects.feeModifier > 0) {
-          fee = Math.round(fee * (1 + tierEffects.feeModifier / 100));
+          infamyFeeAdd = tierEffects.feeModifier;
         }
       }
     } catch (e) {
@@ -147,7 +178,50 @@ function calculateSellFee(guildId, totalValue, userId = null) {
     }
   }
   
-  return fee;
+  let baseFee;
+  if (settings.sellFeeType === 'percent') {
+    baseFee = Math.round(totalValue * (settings.sellFeeValue / 100));
+  } else {
+    baseFee = Math.round(settings.sellFeeValue);
+  }
+  
+  const infamyFee = infamyFeeAdd > 0 ? Math.round(totalValue * (infamyFeeAdd / 100)) : 0;
+  
+  return baseFee + infamyFee;
+}
+
+// Returns { total, baseFee, infamyFee, infamyRate } for itemized display
+function calculateSellFeeBreakdown(guildId, totalValue, userId = null) {
+  const settings = getGuildSettings(guildId);
+  
+  if (!settings.feesEnabled) {
+    return { total: 0, baseFee: 0, infamyFee: 0, infamyRate: 0 };
+  }
+  
+  let infamyFeeAdd = 0;
+  if (userId) {
+    try {
+      const { getTierEffects, getInfamySettings } = require('./infamy');
+      const infSettings = getInfamySettings(guildId);
+      if (infSettings.enabled) {
+        const tierEffects = getTierEffects(guildId, userId);
+        if (tierEffects.feeModifier > 0) {
+          infamyFeeAdd = tierEffects.feeModifier;
+        }
+      }
+    } catch (e) {}
+  }
+  
+  let baseFee;
+  if (settings.sellFeeType === 'percent') {
+    baseFee = Math.round(totalValue * (settings.sellFeeValue / 100));
+  } else {
+    baseFee = Math.round(settings.sellFeeValue);
+  }
+  
+  const infamyFee = infamyFeeAdd > 0 ? Math.round(totalValue * (infamyFeeAdd / 100)) : 0;
+  
+  return { total: baseFee + infamyFee, baseFee, infamyFee, infamyRate: infamyFeeAdd };
 }
 
 function formatFee(type, value) {
@@ -183,7 +257,9 @@ module.exports = {
   getGuildSettings,
   saveGuildSettings,
   calculateBuyFee,
+  calculateBuyFeeBreakdown,
   calculateSellFee,
+  calculateSellFeeBreakdown,
   formatFee,
   updateBuyFee,
   updateSellFee,

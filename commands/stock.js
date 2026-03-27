@@ -32,7 +32,7 @@ const {
 } = require('../dividends');
 const { sendSplitAnnouncement } = require('../ticker');
 const { isEnabled, hasEnoughMoney, hasEnoughInBank, removeMoney, removeFromBank, addMoney, getBalance } = require('../economy');
-const { calculateBuyFee, calculateSellFee, getGuildSettings } = require('../fees');
+const { calculateBuyFee, calculateBuyFeeBreakdown, calculateSellFee, calculateSellFeeBreakdown, getGuildSettings } = require('../fees');
 const { recordPurchase, recordPriceImpact, getMarketSettings, checkSellCooldown, consumePurchaseShares, calculateCapitalGainsTax, previewCapitalGainsTax } = require('../market');
 const { getActiveMarketEvent } = require('../events');
 const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
@@ -1011,7 +1011,8 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
   }
   
   const subtotal = Math.round(currentPrice * shares);
-  const fee = calculateBuyFee(guildId, subtotal, userId);
+  const feeBreakdown = calculateBuyFeeBreakdown(guildId, subtotal, userId);
+  const fee = feeBreakdown.total;
   const totalCost = subtotal + fee;
   
   // Check if user has enough
@@ -1035,10 +1036,20 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
       { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
       { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '💰 Trading Fee', value: `${fee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '\u200b', value: '\u200b', inline: true },
-      { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
+      { name: '💰 Trading Fee', value: `${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true }
     );
+  
+  // Add infamy surcharge line if applicable
+  if (feeBreakdown.infamyFee > 0) {
+    embed.addFields(
+      { name: `🔥 Infamy Surcharge (+${feeBreakdown.infamyRate}%)`, value: `${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
+    );
+  }
+  
+  embed.addFields(
+    { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
+  );
   
   // Add Lucky Penny modifier line if active
   if (lpBuyMod !== 0) {
@@ -1106,7 +1117,8 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
   }
   
   const subtotal = Math.round(currentPrice * shares);
-  const fee = calculateBuyFee(guildId, subtotal, userId);
+  const feeBreakdown = calculateBuyFeeBreakdown(guildId, subtotal, userId);
+  const fee = feeBreakdown.total;
   const totalCost = subtotal + fee;
   
   // Check if user has enough
@@ -1130,10 +1142,20 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
       { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
       { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '💰 Trading Fee', value: `${fee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '\u200b', value: '\u200b', inline: true },
-      { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
+      { name: '💰 Trading Fee', value: `${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true }
     );
+  
+  // Add infamy surcharge line if applicable
+  if (feeBreakdown.infamyFee > 0) {
+    embed.addFields(
+      { name: `🔥 Infamy Surcharge (+${feeBreakdown.infamyRate}%)`, value: `${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
+    );
+  }
+  
+  embed.addFields(
+    { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
+  );
   
   // Add Lucky Penny modifier line if active
   if (lpBuyMod !== 0) {
@@ -1212,7 +1234,8 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
     ? Math.max(0.01, Math.round(baseSellPrice * (1 + lpSellMod / 100) * 100) / 100)
     : baseSellPrice;
   const grossValue = Math.round(currentPrice * shares);
-  const fee = calculateSellFee(guildId, grossValue, userId);
+  const feeBreakdown = calculateSellFeeBreakdown(guildId, grossValue, userId);
+  const fee = feeBreakdown.total;
   
   // Preview capital gains tax without modifying database
   const { totalTax, breakdown } = previewCapitalGainsTax(guildId, userId, targetUserId, shares, currentPrice);
@@ -1229,9 +1252,16 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
       { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
       { name: '📝 Gross Sale', value: `${grossValue.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '💰 Trading Fee', value: `-${fee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Trading Fee', value: `-${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true }
     );
+  
+  // Add infamy surcharge line if applicable
+  if (feeBreakdown.infamyFee > 0) {
+    embed.addFields(
+      { name: `🔥 Infamy Surcharge (+${feeBreakdown.infamyRate}%)`, value: `-${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
+    );
+  }
   
   // Add Lucky Penny modifier line if active
   if (lpSellMod !== 0) {
@@ -1344,7 +1374,8 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
   }
   
   const subtotal = Math.round(currentPrice * shares);
-  const fee = calculateBuyFee(guildId, subtotal, userId);
+  const feeBreakdown = calculateBuyFeeBreakdown(guildId, subtotal, userId);
+  const fee = feeBreakdown.total;
   totalCost = subtotal + fee;
   
   // Check and deduct balance
@@ -1376,9 +1407,18 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
     .addFields(
       { name: 'Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: 'Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: 'Fee', value: `${fee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: 'Total Paid', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
+      { name: 'Fee', value: `${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     );
+  
+  if (feeBreakdown.infamyFee > 0) {
+    embed.addFields(
+      { name: `🔥 Infamy Surcharge (+${feeBreakdown.infamyRate}%)`, value: `${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
+    );
+  }
+  
+  embed.addFields(
+    { name: 'Total Paid', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
+  );
   
   // Show market protection info
   const marketSettings = getMarketSettings(guildId);
@@ -1617,7 +1657,8 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     ? Math.max(0.01, Math.round(baseSellPrice * (1 + lpSellStockMod / 100) * 100) / 100)
     : baseSellPrice;
   const grossValue = Math.round(currentPrice * shares);
-  const fee = calculateSellFee(guildId, grossValue, userId);
+  const feeBreakdown = calculateSellFeeBreakdown(guildId, grossValue, userId);
+  const fee = feeBreakdown.total;
   
   const consumedPurchases = consumePurchaseShares(guildId, userId, targetUserId, shares);
   const { totalTax } = calculateCapitalGainsTax(guildId, consumedPurchases, currentPrice);
@@ -1658,9 +1699,24 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .addFields(
       { name: 'Gross Value', value: `${grossValue.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: 'Fees/Tax', value: `-${(fee + totalTax).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: 'You Received', value: `**${netValue.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
+      { name: 'Trading Fee', value: `-${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     );
+  
+  if (feeBreakdown.infamyFee > 0) {
+    embed.addFields(
+      { name: `🔥 Infamy (+${feeBreakdown.infamyRate}%)`, value: `-${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
+    );
+  }
+  
+  if (totalTax > 0) {
+    embed.addFields(
+      { name: 'Capital Gains Tax', value: `-${totalTax.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
+    );
+  }
+  
+  embed.addFields(
+    { name: 'You Received', value: `**${netValue.toLocaleString()}** ${getCurrency(guildId)}`, inline: true }
+  );
   
   // For modal confirmations, clear the ephemeral confirmation message
   // For regular flow, update the panel
