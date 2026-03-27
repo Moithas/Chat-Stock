@@ -1206,7 +1206,7 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
     username = user.username;
   } catch (e) {}
   
-  const baseSellPrice = calculateStockPrice(targetUserId, guildId);
+  const baseSellPrice = calculateStockPrice(targetUserId, guildId, userId);
   const lpSellMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
   const currentPrice = lpSellMod !== 0
     ? Math.max(0.01, Math.round(baseSellPrice * (1 + lpSellMod / 100) * 100) / 100)
@@ -1501,7 +1501,7 @@ async function showSellAmountButtons(interaction, guildId, userId, targetUserId,
     username = user.username;
   } catch (e) {}
   
-  const basePrice = calculateStockPrice(targetUserId, guildId);
+  const basePrice = calculateStockPrice(targetUserId, guildId, userId);
   const lpSellMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
   const currentPrice = lpSellMod !== 0
     ? Math.max(0.01, Math.round(basePrice * (1 + lpSellMod / 100) * 100) / 100)
@@ -1610,7 +1610,7 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     username = user.username;
   } catch (e) {}
   
-  const baseSellPrice = calculateStockPrice(targetUserId, guildId);
+  const baseSellPrice = calculateStockPrice(targetUserId, guildId, userId);
   // Apply Lucky Penny stock price modifier (personal to the seller)
   const lpSellStockMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
   const currentPrice = lpSellStockMod !== 0 

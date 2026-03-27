@@ -639,9 +639,9 @@ function calculateDailyContribution(messageCount, settings) {
 }
 
 // Calculate stock price (guildId optional - for price impact delay and market events)
-function calculateStockPrice(userId, guildId = null) {
+function calculateStockPrice(userId, guildId = null, excludeBuyerId = null) {
   // Check price cache first
-  const cacheKey = `${userId}:${guildId || 'null'}`;
+  const cacheKey = `${userId}:${guildId || 'null'}${excludeBuyerId ? `:ex${excludeBuyerId}` : ''}`;
   const cached = priceCache.get(cacheKey);
   if (cached && Date.now() - cached.time < PRICE_CACHE_TTL) {
     return cached.price;
@@ -721,7 +721,16 @@ function calculateStockPrice(userId, guildId = null) {
   }
 
   // Apply market pressure (supply and demand)
-  const result = db.exec('SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ?', [userId]);
+  let shareQuery, shareParams;
+  if (excludeBuyerId) {
+    // Exclude a specific buyer's shares from demand calculation (prevents self-pump-and-dump)
+    shareQuery = 'SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ? AND user_id != ?';
+    shareParams = [userId, excludeBuyerId];
+  } else {
+    shareQuery = 'SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ?';
+    shareParams = [userId];
+  }
+  const result = db.exec(shareQuery, shareParams);
   let totalShares = result.length > 0 && result[0].values.length > 0 ? result[0].values[0][0] : 0;
   
   // Apply price impact delay if guildId provided
