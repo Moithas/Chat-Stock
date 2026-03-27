@@ -453,7 +453,7 @@ client.once('clientReady', async () => {
   // Start stale game cleanup (every 5 minutes)
   setInterval(() => cleanupStaleBlackjackGames(), 5 * 60 * 1000);
   
-  // Register slash commands
+  // Register slash commands (only when definitions change, to preserve Discord integration overrides)
   const commands = [];
   for (const file of commandFiles) {
     const command = require(`./commands/${file}`);
@@ -463,32 +463,45 @@ client.once('clientReady', async () => {
     }
   }
 
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-  
-  try {
-    log.info('Registering slash commands...');
+  const crypto = require('crypto');
+  const commandHash = crypto.createHash('md5').update(JSON.stringify(commands)).digest('hex');
+  const hashFile = require('path').join(__dirname, '.command-hash');
+  let previousHash = '';
+  try { previousHash = require('fs').readFileSync(hashFile, 'utf8').trim(); } catch (e) {}
+
+  if (commandHash !== previousHash) {
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     
-    // Clear global commands (to prevent duplicates with guild commands)
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: [] }
-    );
-    log.info('Cleared global commands');
-    
-    // Register per-guild for instant availability (no duplicates)
-    for (const guild of client.guilds.cache.values()) {
-      try {
-        await rest.put(
-          Routes.applicationGuildCommands(client.user.id, guild.id),
-          { body: commands }
-        );
-        log.info(`Slash commands registered for guild: ${guild.name}`);
-      } catch (guildError) {
-        console.error(`Error registering commands for guild ${guild.name}:`, guildError.message);
+    try {
+      log.info('Command definitions changed — registering slash commands...');
+      
+      // Clear global commands (to prevent duplicates with guild commands)
+      await rest.put(
+        Routes.applicationCommands(client.user.id),
+        { body: [] }
+      );
+      log.info('Cleared global commands');
+      
+      // Register per-guild for instant availability (no duplicates)
+      for (const guild of client.guilds.cache.values()) {
+        try {
+          await rest.put(
+            Routes.applicationGuildCommands(client.user.id, guild.id),
+            { body: commands }
+          );
+          log.info(`Slash commands registered for guild: ${guild.name}`);
+        } catch (guildError) {
+          console.error(`Error registering commands for guild ${guild.name}:`, guildError.message);
+        }
       }
+      
+      require('fs').writeFileSync(hashFile, commandHash);
+      log.info('Command hash saved — future restarts will skip registration');
+    } catch (error) {
+      console.error('Error registering commands:', error);
     }
-  } catch (error) {
-    console.error('Error registering commands:', error);
+  } else {
+    log.info('Slash commands unchanged — skipping registration (preserving integration overrides)');
   }
 
   // Rotating status messages
