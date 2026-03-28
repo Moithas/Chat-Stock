@@ -727,9 +727,10 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
     });
   }
   
-  // Generate chart if requested
+  // Generate chart if requested (exclude events for consistent charting)
   if (chartRange) {
-    const chartUrl = await generatePriceChart(targetUserId, targetUser.username, chartRange, stockPrice);
+    const chartPrice = calculateStockPrice(targetUserId, guildId, null, true);
+    const chartUrl = await generatePriceChart(targetUserId, targetUser.username, chartRange, chartPrice);
     if (chartUrl) {
       embed.setImage(chartUrl);
       embed.addFields({ 
