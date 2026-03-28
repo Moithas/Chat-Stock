@@ -54,7 +54,7 @@ module.exports = {
     if (amountInput.toLowerCase() === 'all') {
       amount = senderBalance.cash;
     } else {
-      amount = parseInt(amountInput);
+      amount = parseInt(amountInput.replace(/,/g, ''));
       if (isNaN(amount) || amount <= 0) {
         return interaction.editReply({
           embeds: [new EmbedBuilder()
