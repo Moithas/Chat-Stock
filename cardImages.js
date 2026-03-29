@@ -1272,6 +1272,175 @@ async function generateSYNRevealImage(players) {
   return canvas.toBuffer('image/png');
 }
 
+// ==================== VIDEO POKER TABLE ====================
+
+async function generateVideoPokerImage(cards, held, betAmount, playerName, variantName, payTable, result = null) {
+  const safePlayerName = sanitizeDisplayName(playerName);
+
+  const TABLE_WIDTH = 950;
+  const TABLE_HEIGHT = 700;
+  const VP_CARD_WIDTH = 140;
+  const VP_CARD_HEIGHT = 196;
+
+  const canvas = createCanvas(TABLE_WIDTH, TABLE_HEIGHT);
+  const ctx = canvas.getContext('2d');
+
+  // Draw felt background
+  drawVideoPokerFelt(ctx, TABLE_WIDTH, TABLE_HEIGHT);
+
+  // Draw payout table at top
+  drawVideoPokerPayoutTable(ctx, TABLE_WIDTH, payTable, betAmount, result);
+
+  // Draw cards centered
+  const cardSpacing = VP_CARD_WIDTH + 20;
+  const totalCardsWidth = 5 * VP_CARD_WIDTH + 4 * 20;
+  const cardStartX = (TABLE_WIDTH - totalCardsWidth) / 2;
+  const cardY = 310;
+
+  for (let i = 0; i < 5; i++) {
+    const x = cardStartX + i * cardSpacing;
+
+    // Draw HELD indicator above card
+    if (held[i]) {
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 20px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('HELD', x + VP_CARD_WIDTH / 2, cardY - 10);
+    }
+
+    await drawCardScaled(ctx, cards[i], x, cardY, VP_CARD_WIDTH, VP_CARD_HEIGHT);
+
+    // Highlight held cards with gold border
+    if (held[i]) {
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 3;
+      roundRect(ctx, x - 2, cardY - 2, VP_CARD_WIDTH + 4, VP_CARD_HEIGHT + 4, 8);
+      ctx.stroke();
+    }
+  }
+
+  // Draw bet amount and chip
+  const chipY = cardY + VP_CARD_HEIGHT + 50;
+  drawFlatChipStack(ctx, TABLE_WIDTH / 2, chipY, betAmount, 30);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 18px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(`BET: ${betAmount.toLocaleString()}`, TABLE_WIDTH / 2, chipY + 50);
+
+  // Draw result overlay if resolved
+  if (result) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    roundRect(ctx, TABLE_WIDTH / 2 - 200, cardY + VP_CARD_HEIGHT + 5, 400, 50, 12);
+    ctx.fill();
+
+    ctx.fillStyle = result.payout > 0 ? '#4CAF50' : '#F44336';
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(result.payout > 0 ? result.rank : 'No Win', TABLE_WIDTH / 2, cardY + VP_CARD_HEIGHT + 38);
+  }
+
+  // Player name at bottom
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '24px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(safePlayerName, TABLE_WIDTH / 2, TABLE_HEIGHT - 15);
+
+  return canvas.toBuffer('image/png');
+}
+
+function drawVideoPokerFelt(ctx, width, height) {
+  const gradient = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width / 2);
+  gradient.addColorStop(0, '#0D47A1');
+  gradient.addColorStop(0.7, '#0A3579');
+  gradient.addColorStop(1, '#062550');
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  // Subtle grid texture
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < width; i += 20) {
+    ctx.beginPath();
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i, height);
+    ctx.stroke();
+  }
+  for (let i = 0; i < height; i += 20) {
+    ctx.beginPath();
+    ctx.moveTo(0, i);
+    ctx.lineTo(width, i);
+    ctx.stroke();
+  }
+
+  // Table border
+  ctx.strokeStyle = '#3E2723';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, width - 8, height - 8);
+
+  ctx.strokeStyle = '#5D4037';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(8, 8, width - 16, height - 16);
+}
+
+function drawVideoPokerPayoutTable(ctx, tableWidth, payTable, betAmount, result) {
+  const entries = Object.entries(payTable);
+  const cols = entries.length;
+  const rowHeight = 28;
+  const headerHeight = 32;
+  const tableHeight = headerHeight + rowHeight + 8;
+  const startY = 20;
+  const padding = 30;
+  const colWidth = (tableWidth - padding * 2) / cols;
+
+  // Background panel
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  roundRect(ctx, padding - 10, startY - 5, tableWidth - padding * 2 + 20, tableHeight + 10, 8);
+  ctx.fill();
+
+  // Draw each hand column
+  for (let i = 0; i < entries.length; i++) {
+    const [handName, multiplier] = entries[i];
+    const x = padding + i * colWidth + colWidth / 2;
+
+    // Highlight winning hand
+    const isWinning = result && result.rank === handName && result.payout > 0;
+
+    if (isWinning) {
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.3)';
+      roundRect(ctx, padding + i * colWidth - 2, startY - 2, colWidth + 4, tableHeight + 4, 4);
+      ctx.fill();
+    }
+
+    // Hand name (top row)
+    ctx.fillStyle = isWinning ? '#FFD700' : '#BBDEFB';
+    ctx.font = `bold ${cols > 8 ? 11 : 13}px Arial`;
+    ctx.textAlign = 'center';
+
+    // Word wrap long hand names
+    const words = handName.split(' ');
+    if (words.length > 2 && cols > 8) {
+      const mid = Math.ceil(words.length / 2);
+      ctx.fillText(words.slice(0, mid).join(' '), x, startY + 14);
+      ctx.fillText(words.slice(mid).join(' '), x, startY + 26);
+    } else {
+      ctx.fillText(handName, x, startY + 20);
+    }
+
+    // Payout value (bottom row)
+    const payoutAmount = multiplier * betAmount;
+    ctx.fillStyle = isWinning ? '#FFD700' : '#FFFFFF';
+    ctx.font = `bold ${cols > 8 ? 13 : 15}px Arial`;
+    ctx.fillText(payoutAmount.toLocaleString(), x, startY + headerHeight + rowHeight - 4);
+  }
+
+  // Variant label
+  ctx.fillStyle = '#64B5F6';
+  ctx.font = 'bold 16px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('VIDEO POKER', tableWidth / 2, startY + tableHeight + 25);
+}
+
 module.exports = {
   generateHandImage,
   generateBlackjackImage,
@@ -1279,6 +1448,7 @@ module.exports = {
   generateLetItRideImage,
   generateThreeCardPokerImage,
   generateSYNRevealImage,
+  generateVideoPokerImage,
   CARD_WIDTH,
   CARD_HEIGHT
 };

@@ -13,9 +13,10 @@ const BUTTON_IDS = [
   'inbetween_toggle', 'inbetween_edit_settings', 'inbetween_reset_pot',
   'letitride_toggle', 'letitride_edit_settings',
   'threecardpoker_toggle', 'threecardpoker_edit_settings',
+  'videopoker_toggle', 'videopoker_edit_settings', 'gambling_videopoker_settings',
   'back_gambling'
 ];
-const MODAL_IDS = ['modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_vault_spawn', 'modal_vault_reward', 'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings'];
+const MODAL_IDS = ['modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_vault_spawn', 'modal_vault_reward', 'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings', 'modal_videopoker_settings'];
 const SELECT_IDS = ['scratch_select_card', 'lottery_channel_select', 'vault_channel_select'];
 
 // Scratch card modal IDs are dynamic: modal_scratch_cheese, modal_scratch_cash, etc.
@@ -206,6 +207,27 @@ async function handleInteraction(interaction, guildId) {
         const { getSettings } = require('../threecardpoker');
         const settings = getSettings(guildId);
         const modal = createThreeCardPokerSettingsModal(settings);
+        await interaction.showModal(modal);
+      }
+      // Video Poker buttons
+      else if (customId === 'gambling_videopoker_settings') {
+        await interaction.deferUpdate();
+        await showVideoPokerPanel(interaction, guildId);
+      }
+      else if (customId === 'videopoker_toggle') {
+        const { getSettings, updateSettings, clearSettingsCache } = require('../videopoker');
+        const oldSettings = getSettings(guildId);
+        const newEnabled = !oldSettings.enabled;
+        clearSettingsCache(guildId);
+        updateSettings(guildId, { enabled: newEnabled });
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Toggled Video Poker ${newEnabled ? 'ON' : 'OFF'}`);
+        await interaction.deferUpdate();
+        await showVideoPokerPanel(interaction, guildId);
+      }
+      else if (customId === 'videopoker_edit_settings') {
+        const { getSettings } = require('../videopoker');
+        const settings = getSettings(guildId);
+        const modal = createVideoPokerSettingsModal(settings);
         await interaction.showModal(modal);
       }
       // Back button
@@ -471,6 +493,22 @@ async function handleInteraction(interaction, guildId) {
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated Three Card Poker settings: Min=${minBet}, Max=${maxBet}, Timer=${timer}s`);
         await interaction.reply({ content: `✅ Three Card Poker settings updated!\n• Min Bet: **${minBet.toLocaleString()}** ${getCurrency(guildId)}\n• Max Bet: **${maxBet.toLocaleString()}** ${getCurrency(guildId)}\n• Decision Timer: **${timer}s**`, flags: 64 });
       }
+      // Video Poker settings modal
+      else if (customId === 'modal_videopoker_settings') {
+        const { updateSettings } = require('../videopoker');
+        const minBet = parseInt(interaction.fields.getTextInputValue('min_bet'));
+        const maxBet = parseInt(interaction.fields.getTextInputValue('max_bet'));
+        const timer = parseInt(interaction.fields.getTextInputValue('decision_timer'));
+        
+        if ([minBet, maxBet, timer].some(isNaN) || minBet < 100 || maxBet < minBet || timer < 5) {
+          await interaction.reply({ content: '❌ Invalid values. Min bet must be at least 100, max must be >= min, timer must be at least 5 seconds.', flags: 64 });
+          return true;
+        }
+        
+        updateSettings(guildId, { minBet, maxBet, timerSeconds: timer });
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated Video Poker settings: Min=${minBet}, Max=${maxBet}, Timer=${timer}s`);
+        await interaction.reply({ content: `✅ Video Poker settings updated!\n• Min Bet: **${minBet.toLocaleString()}** ${getCurrency(guildId)}\n• Max Bet: **${maxBet.toLocaleString()}** ${getCurrency(guildId)}\n• Decision Timer: **${timer}s**`, flags: 64 });
+      }
       return true;
     } catch (err) {
       console.error('[Admin-Gambling] Modal error:', err);
@@ -560,8 +598,13 @@ async function showGamblingPanel(interaction, guildId) {
     .setLabel('◀️ Back')
     .setStyle(ButtonStyle.Secondary);
 
+  const videoPokerBtn = new ButtonBuilder()
+    .setCustomId('gambling_videopoker_settings')
+    .setLabel('🎰 Video Poker')
+    .setStyle(ButtonStyle.Primary);
+
   const row1 = new ActionRowBuilder().addComponents(blackjackBtn, lotteryBtn, inbetweenBtn, letItRideBtn, threeCardPokerBtn);
-  const row2 = new ActionRowBuilder().addComponents(scratchToggleBtn, scratchConfigBtn, scratchStatsBtn, backBtn);
+  const row2 = new ActionRowBuilder().addComponents(videoPokerBtn, scratchToggleBtn, scratchConfigBtn, scratchStatsBtn, backBtn);
 
   await interaction.editReply({ embeds: [embed], components: [row1, row2] });
 }
@@ -1326,6 +1369,88 @@ function createThreeCardPokerSettingsModal(settings) {
     );
 }
 
+// ==================== VIDEO POKER PANEL ====================
+async function showVideoPokerPanel(interaction, guildId) {
+  const { getSettings } = require('../videopoker');
+  let settings;
+  try {
+    settings = getSettings(guildId);
+  } catch (err) {
+    console.error('[Admin-Gambling] Error getting Video Poker settings:', err);
+    settings = null;
+  }
+
+  if (!settings) {
+    settings = { enabled: true, minBet: 100, maxBet: 1000000, timerSeconds: 30 };
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(settings.enabled ? 0x1565C0 : 0xe74c3c)
+    .setTitle('🎰 Video Poker Settings')
+    .setDescription('Configure Video Poker (Jacks or Better, Deuces Wild, Bonus Poker)')
+    .addFields(
+      { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+      { name: '💰 Min Bet', value: `**${(settings.minBet || 100).toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+      { name: '💎 Max Bet', value: `**${(settings.maxBet || 1000000).toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+      { name: '⏱️ Hold Timer', value: `**${settings.timerSeconds || 30}** seconds`, inline: true }
+    )
+    .setFooter({ text: '3 variants: Jacks or Better • Deuces Wild • Bonus Poker' });
+
+  const toggleBtn = new ButtonBuilder()
+    .setCustomId('videopoker_toggle')
+    .setLabel(settings.enabled ? 'Disable' : 'Enable')
+    .setStyle(settings.enabled ? ButtonStyle.Danger : ButtonStyle.Success);
+
+  const settingsBtn = new ButtonBuilder()
+    .setCustomId('videopoker_edit_settings')
+    .setLabel('⚙️ Settings')
+    .setStyle(ButtonStyle.Primary);
+
+  const backBtn = new ButtonBuilder()
+    .setCustomId('back_gambling')
+    .setLabel('◀️ Back')
+    .setStyle(ButtonStyle.Secondary);
+
+  const row = new ActionRowBuilder().addComponents(toggleBtn, settingsBtn, backBtn);
+
+  await interaction.editReply({ embeds: [embed], components: [row] });
+}
+
+function createVideoPokerSettingsModal(settings) {
+  return new ModalBuilder()
+    .setCustomId('modal_videopoker_settings')
+    .setTitle('Video Poker Settings')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('min_bet')
+          .setLabel('Minimum Bet')
+          .setPlaceholder('100')
+          .setValue(String(settings.minBet || 100))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('max_bet')
+          .setLabel('Maximum Bet')
+          .setPlaceholder('1000000')
+          .setValue(String(settings.maxBet || 1000000))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('decision_timer')
+          .setLabel('Hold Timer (seconds)')
+          .setPlaceholder('30')
+          .setValue(String(settings.timerSeconds || 30))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
 module.exports = {
   handleInteraction,
   showGamblingPanel,
@@ -1335,5 +1460,6 @@ module.exports = {
   showVaultPanel,
   showInBetweenPanel,
   showLetItRidePanel,
-  showThreeCardPokerPanel
+  showThreeCardPokerPanel,
+  showVideoPokerPanel
 };

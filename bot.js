@@ -25,6 +25,7 @@ const { initCooldownTracker, startAllTrackers } = require('./cooldown-tracker');
 const { initialize: initInBetween } = require('./inbetween');
 const { initialize: initLetItRide } = require('./letitride');
 const { initialize: initThreeCardPoker } = require('./threecardpoker');
+const { initialize: initVideoPoker } = require('./videopoker');
 const { initMaintenance, startCleanupScheduler, logError, checkCommandCooldown, updateCommandCooldown } = require('./maintenance');
 const { initDungeon } = require('./dungeon');
 const { initHunt } = require('./hunt');
@@ -394,6 +395,9 @@ client.once('clientReady', async () => {
 
   // Initialize Three Card Poker game
   initThreeCardPoker(getDb());
+
+  // Initialize Video Poker game
+  initVideoPoker(getDb());
 
   // Initialize dungeon system
   initDungeon(getDb());
@@ -1005,6 +1009,23 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Handle Video Poker buttons
+  if (interaction.isButton() && interaction.customId.startsWith('vp_')) {
+    try {
+      const { handleButton } = require('./commands/videopoker');
+      await handleButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      console.error('Error handling Video Poker button:', error);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
   // Handle Three Card Poker select menus
   if (interaction.isStringSelectMenu() && (interaction.customId.startsWith('tcp_pairplus_') || interaction.customId.startsWith('tcp_sixcard_'))) {
     try {
@@ -1439,8 +1460,9 @@ client.on('interactionCreate', async (interaction) => {
       'inbetween_toggle', 'inbetween_edit_settings', 'inbetween_reset_pot',
       'letitride_toggle', 'letitride_edit_settings',
       'threecardpoker_toggle', 'threecardpoker_edit_settings',
+      'videopoker_toggle', 'videopoker_edit_settings', 'gambling_videopoker_settings',
       'modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_vault_spawn', 'modal_vault_reward',
-      'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings',
+      'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings', 'modal_videopoker_settings',
       'scratch_select_card', 'lottery_channel_select', 'vault_channel_select',
       'lottery_draw_now', 'lottery_schedule', 'lottery_prizes',
       'scratch_toggle', 'scratch_config', 'scratch_config_cheese', 'scratch_config_cash', 

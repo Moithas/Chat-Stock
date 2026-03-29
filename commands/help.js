@@ -311,6 +311,15 @@ const helpPages = {
         inline: true
       },
       {
+        name: '🎰 /videopoker [bet]',
+        value:
+          `Video Poker with 3 variants!\n` +
+          `• Jacks or Better, Deuces Wild, Bonus Poker\n` +
+          `• Hold cards and draw for the best hand\n` +
+          `• Up to 250:1 on Royal Flush!`,
+        inline: true
+      },
+      {
         name: '🎰 /scratch & /scratcher',
         value: 
           `Buy and scratch lottery tickets!\n` +
