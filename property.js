@@ -1,5 +1,6 @@
 // Property Management System
 const { getCurrency } = require('./admin');
+const { migrateAddColumn } = require('./database');
 
 let db = null;
 
@@ -129,18 +130,10 @@ function initProperty(database) {
   `);
   
   // Add required_role column if it doesn't exist (migration)
-  try {
-    db.run(`ALTER TABLE property_settings ADD COLUMN required_role TEXT DEFAULT NULL`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'property_settings', 'required_role TEXT DEFAULT NULL');
 
   // Add register_price column if it doesn't exist (migration)
-  try {
-    db.run(`ALTER TABLE property_settings ADD COLUMN register_price INTEGER DEFAULT 10000`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'property_settings', 'register_price INTEGER DEFAULT 10000');
   
   // Create properties table (customizable per guild)
   db.run(`

@@ -1,6 +1,8 @@
 // Bank module for Chat-Stock
 // Handles loans with interest and savings bonds
 
+const { migrateAddColumn } = require('./database');
+
 let db = null;
 
 // Default bank settings
@@ -63,9 +65,7 @@ function initBank(database) {
   `);
   
   // Add collateral column if it doesn't exist (for existing databases)
-  try {
-    db.run('ALTER TABLE bank_settings ADD COLUMN loan_seize_collateral INTEGER DEFAULT 0');
-  } catch (e) { /* Column may already exist */ }
+  migrateAddColumn(db, 'bank_settings', 'loan_seize_collateral INTEGER DEFAULT 0');
   
   // Create loans table
   db.run(`
@@ -164,18 +164,10 @@ function initBank(database) {
   `);
 
   // Migration: add last_recovery_time column if missing
-  try {
-    db.run(`ALTER TABLE loan_credit_scores ADD COLUMN last_recovery_time INTEGER DEFAULT 0`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'loan_credit_scores', 'last_recovery_time INTEGER DEFAULT 0');
 
   // Migration: add total_defaulted_amount column for lifetime default tracking
-  try {
-    db.run(`ALTER TABLE loan_credit_scores ADD COLUMN total_defaulted_amount INTEGER DEFAULT 0`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'loan_credit_scores', 'total_defaulted_amount INTEGER DEFAULT 0');
 
   // Create credit tier settings table (per-guild overrides)
   db.run(`
@@ -189,12 +181,7 @@ function initBank(database) {
   `);
 
   // Migration: Add prepaid_amount column to loans table
-  try {
-    db.exec(`SELECT prepaid_amount FROM loans LIMIT 1`);
-  } catch (e) {
-    db.run(`ALTER TABLE loans ADD COLUMN prepaid_amount INTEGER DEFAULT 0`);
-    console.log('🏦 Added prepaid_amount column to loans table');
-  }
+  migrateAddColumn(db, 'loans', 'prepaid_amount INTEGER DEFAULT 0');
 
   // Create indexes for faster lookups
   db.run(`CREATE INDEX IF NOT EXISTS idx_loans_guild_user ON loans(guild_id, user_id)`);
@@ -224,7 +211,9 @@ function initBank(database) {
             AND ab.status = 'expired'
         )
     `);
-  } catch (e) {}
+  } catch (e) {
+    console.error('[Migration Error] Bond history backfill failed:', e.message);
+  }
 
   console.log('🏦 Bank system initialized');
 }

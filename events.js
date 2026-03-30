@@ -1,4 +1,5 @@
 
+const { migrateAddColumn } = require('./database');
 
 let db = null;
 let client = null;
@@ -68,33 +69,13 @@ function initEvents(database, discordClient) {
   `);
   
   // Migration: Convert interval columns to message columns if needed
-  try {
-    db.run(`ALTER TABLE event_settings ADD COLUMN min_messages INTEGER DEFAULT 500`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE event_settings ADD COLUMN max_messages INTEGER DEFAULT 2000`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'event_settings', 'min_messages INTEGER DEFAULT 500');
+  migrateAddColumn(db, 'event_settings', 'max_messages INTEGER DEFAULT 2000');
   
   // Migration: Add event duration columns if they don't exist
-  try {
-    db.run(`ALTER TABLE event_settings ADD COLUMN event_duration_minutes INTEGER DEFAULT 30`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE event_settings ADD COLUMN min_duration_minutes INTEGER DEFAULT 15`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE event_settings ADD COLUMN max_duration_minutes INTEGER DEFAULT 60`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'event_settings', 'event_duration_minutes INTEGER DEFAULT 30');
+  migrateAddColumn(db, 'event_settings', 'min_duration_minutes INTEGER DEFAULT 15');
+  migrateAddColumn(db, 'event_settings', 'max_duration_minutes INTEGER DEFAULT 60');
   
   // Create vault settings table (with message count triggers)
   db.run(`
@@ -110,16 +91,8 @@ function initEvents(database, discordClient) {
   `);
   
   // Migration: Convert interval columns to message columns if needed
-  try {
-    db.run(`ALTER TABLE cheese_truck_settings ADD COLUMN min_messages INTEGER DEFAULT 200`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE cheese_truck_settings ADD COLUMN max_messages INTEGER DEFAULT 1000`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'cheese_truck_settings', 'min_messages INTEGER DEFAULT 200');
+  migrateAddColumn(db, 'cheese_truck_settings', 'max_messages INTEGER DEFAULT 1000');
   
   // Create event history table
   db.run(`

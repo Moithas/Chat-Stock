@@ -1,6 +1,8 @@
 // Gambling module for Chat-Stock
 // Handles blackjack and roulette games
 
+const { migrateAddColumn } = require('./database');
+
 let db = null;
 
 // Active games storage (in-memory, keyed by oduserId)
@@ -49,34 +51,16 @@ function initGambling(database) {
   `);
   
   // Add new columns if they don't exist (migration)
-  try {
-    db.run(`ALTER TABLE gambling_settings ADD COLUMN lottery_draw_day INTEGER DEFAULT NULL`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE gambling_settings ADD COLUMN lottery_draw_hour INTEGER DEFAULT NULL`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE gambling_settings ADD COLUMN lottery_draw_minute INTEGER DEFAULT 0`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE gambling_settings ADD COLUMN lottery_channel_id TEXT DEFAULT NULL`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE gambling_settings ADD COLUMN lottery_auto_draw INTEGER DEFAULT 0`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE gambling_settings ADD COLUMN lottery_prize_2match INTEGER DEFAULT 1000`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE gambling_settings ADD COLUMN lottery_prize_3match INTEGER DEFAULT 5000`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE gambling_settings ADD COLUMN lottery_ticket_price INTEGER DEFAULT 1000`);
-  } catch (e) {}
+  migrateAddColumn(db, 'gambling_settings', 'lottery_draw_day INTEGER DEFAULT NULL');
+  migrateAddColumn(db, 'gambling_settings', 'lottery_draw_hour INTEGER DEFAULT NULL');
+  migrateAddColumn(db, 'gambling_settings', 'lottery_draw_minute INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'gambling_settings', 'lottery_channel_id TEXT DEFAULT NULL');
+  migrateAddColumn(db, 'gambling_settings', 'lottery_auto_draw INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'gambling_settings', 'lottery_prize_2match INTEGER DEFAULT 1000');
+  migrateAddColumn(db, 'gambling_settings', 'lottery_prize_3match INTEGER DEFAULT 5000');
+  migrateAddColumn(db, 'gambling_settings', 'lottery_ticket_price INTEGER DEFAULT 1000');
   // Scratch card settings
-  try {
-    db.run(`ALTER TABLE gambling_settings ADD COLUMN scratch_enabled INTEGER DEFAULT 1`);
-  } catch (e) {}
+  migrateAddColumn(db, 'gambling_settings', 'scratch_enabled INTEGER DEFAULT 1');
   
   // Create scratch card settings table (per-guild card type customization)
   db.run(`
@@ -148,11 +132,7 @@ function initGambling(database) {
   `);
   
   // Add is_free column if it doesn't exist (for existing databases)
-  try {
-    db.run(`ALTER TABLE scratch_tickets ADD COLUMN is_free INTEGER DEFAULT 0`);
-  } catch (e) {
-    // Column already exists, ignore
-  }
+  migrateAddColumn(db, 'scratch_tickets', 'is_free INTEGER DEFAULT 0');
   
   // Create scratch card stats table
   db.run(`

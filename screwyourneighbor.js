@@ -1,7 +1,7 @@
 // Screw Your Neighbor (SYN) - Multiplayer card game
 // Lowest card loses a life. Last player standing wins the pot.
 
-const { saveDatabase } = require('./database');
+const { saveDatabase, migrateAddColumn } = require('./database');
 
 let db = null;
 
@@ -79,11 +79,7 @@ function initSYN(database) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_syn_stats_guild ON syn_stats(guild_id)`);
 
   // Migration: add deal_delay_seconds column if missing
-  try {
-    db.run(`ALTER TABLE syn_settings ADD COLUMN deal_delay_seconds INTEGER DEFAULT 5`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'syn_settings', 'deal_delay_seconds INTEGER DEFAULT 5');
 
   saveDatabase();
   console.log('🃏 Screw Your Neighbor system initialized');
@@ -566,6 +562,23 @@ function updateSYNSettings(guildId, newSettings) {
   saveDatabase();
 }
 
+// Clean up stale SYN games (stuck for over 1 hour)
+function cleanupStaleGames() {
+  const now = Date.now();
+  const GAME_TIMEOUT = 60 * 60 * 1000;
+  let cleaned = 0;
+  for (const [key, game] of activeGames) {
+    const lastActive = game.lastActivity || game.createdAt || 0;
+    if (now - lastActive > GAME_TIMEOUT) {
+      activeGames.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[GC] Cleaned up ${cleaned} stale SYN game(s)`);
+  }
+}
+
 module.exports = {
   initSYN,
   createDeck,
@@ -601,5 +614,6 @@ module.exports = {
   TURN_TIME_MS,
   REVEAL_DELAY_MS,
   ELIMINATION_DELAY_MS,
-  CARD_VALUES
+  CARD_VALUES,
+  cleanupStaleGames
 };

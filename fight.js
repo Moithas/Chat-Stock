@@ -873,6 +873,28 @@ function resetAllFighterStats(guildId) {
   return true;
 }
 
+// Clean up stale fights and challenges (stuck for over 1 hour)
+function cleanupStaleFights() {
+  const now = Date.now();
+  const FIGHT_TIMEOUT = 60 * 60 * 1000; // 1 hour
+  let cleaned = 0;
+  for (const [key, fight] of activeFights) {
+    if (fight.createdAt && now - fight.createdAt > FIGHT_TIMEOUT) {
+      activeFights.delete(key);
+      cleaned++;
+    }
+  }
+  for (const [key, challenge] of pendingChallenges) {
+    if (challenge.createdAt && now - challenge.createdAt > FIGHT_TIMEOUT) {
+      pendingChallenges.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[GC] Cleaned up ${cleaned} stale fight(s)/challenge(s)`);
+  }
+}
+
 module.exports = {
   initFight,
   getFightSettings,
@@ -905,5 +927,6 @@ module.exports = {
   DAMAGE,
   GIFS,
   activeFights,
-  pendingChallenges
+  pendingChallenges,
+  cleanupStaleFights
 };

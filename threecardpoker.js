@@ -810,6 +810,22 @@ function getStats(guildId, userId) {
   return cols.reduce((obj, col, i) => ({ ...obj, [col]: vals[i] }), {});
 }
 
+// Clean up stale Three Card Poker games (stuck for over 30 minutes)
+function cleanupStaleGames() {
+  const now = Date.now();
+  const GAME_TIMEOUT = 30 * 60 * 1000;
+  let cleaned = 0;
+  for (const [key, game] of activeGames) {
+    if (game.startTime && now - game.startTime > GAME_TIMEOUT) {
+      activeGames.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[GC] Cleaned up ${cleaned} stale Three Card Poker game(s)`);
+  }
+}
+
 // ============ EXPORTS ============
 
 module.exports = {
@@ -835,5 +851,6 @@ module.exports = {
   evaluate5CardHand,
   PAIR_PLUS_PAYOUTS,
   SIX_CARD_BONUS_PAYOUTS,
-  ANTE_BONUS_PAYOUTS
+  ANTE_BONUS_PAYOUTS,
+  cleanupStaleGames
 };

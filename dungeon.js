@@ -1,7 +1,7 @@
 // Dungeon Crawl System - Solo PvE combat with tiered difficulty
 // Fight through floors of NPC enemies for small rewards
 
-const { saveDatabase } = require('./database');
+const { saveDatabase, migrateAddColumn } = require('./database');
 
 let db = null;
 
@@ -255,25 +255,13 @@ function initDungeon(database) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_dungeon_history_guild_user ON dungeon_history(guild_id, user_id)`);
 
   // Migration: add floor_heal_percent column if missing
-  try {
-    db.run(`ALTER TABLE dungeon_settings ADD COLUMN floor_heal_percent INTEGER DEFAULT 20`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'dungeon_settings', 'floor_heal_percent INTEGER DEFAULT 20');
 
   // Migration: add tier column to dungeon_history if missing
-  try {
-    db.run(`ALTER TABLE dungeon_history ADD COLUMN tier INTEGER DEFAULT 1`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'dungeon_history', 'tier INTEGER DEFAULT 1');
 
   // Migration: add enraged_threshold column to dungeon_tier_settings
-  try {
-    db.run(`ALTER TABLE dungeon_tier_settings ADD COLUMN enraged_threshold INTEGER`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'dungeon_tier_settings', 'enraged_threshold INTEGER');
 
   saveDatabase();
   console.log('🏰 Dungeon system initialized');
@@ -657,6 +645,7 @@ function getActiveRun(guildId, userId) {
 }
 
 function setActiveRun(guildId, userId, runState) {
+  if (!runState.startTime) runState.startTime = Date.now();
   activeRuns.set(`${guildId}-${userId}`, runState);
 }
 
@@ -705,6 +694,22 @@ function getDungeonLeaderboard(guildId) {
   return results;
 }
 
+// Clean up stale dungeon runs (stuck for over 1 hour)
+function cleanupStaleRuns() {
+  const now = Date.now();
+  const RUN_TIMEOUT = 60 * 60 * 1000;
+  let cleaned = 0;
+  for (const [key, run] of activeRuns) {
+    if (run.startTime && now - run.startTime > RUN_TIMEOUT) {
+      activeRuns.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[GC] Cleaned up ${cleaned} stale dungeon run(s)`);
+  }
+}
+
 module.exports = {
   initDungeon,
   getDungeonSettings,
@@ -731,5 +736,6 @@ module.exports = {
   TIER_DEFAULTS,
   FLOOR_INTROS,
   DAMAGE,
-  getDungeonLeaderboard
+  getDungeonLeaderboard,
+  cleanupStaleRuns
 };

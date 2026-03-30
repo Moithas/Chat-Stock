@@ -1,6 +1,8 @@
 // Hack module for Chat-Stock
 // Allows users to hack other players' bank balances
 
+const { migrateAddColumn } = require('./database');
+
 let db = null;
 
 const DEFAULT_SETTINGS = {
@@ -40,18 +42,10 @@ function initHack(database) {
   `);
   
   // Add unique_targets_required column if it doesn't exist (migration)
-  try {
-    db.run(`ALTER TABLE hack_settings ADD COLUMN unique_targets_required INTEGER DEFAULT 3`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'hack_settings', 'unique_targets_required INTEGER DEFAULT 3');
 
   // Add attempt_penalty_minutes column (migration)
-  try {
-    db.run(`ALTER TABLE hack_settings ADD COLUMN attempt_penalty_minutes INTEGER DEFAULT 10`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'hack_settings', 'attempt_penalty_minutes INTEGER DEFAULT 10');
   
   // Create hacker cooldown tracker table
   db.run(`
@@ -65,11 +59,7 @@ function initHack(database) {
   `);
 
   // Add penalty_until column to hack_tracker (migration)
-  try {
-    db.run(`ALTER TABLE hack_tracker ADD COLUMN penalty_until INTEGER DEFAULT 0`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'hack_tracker', 'penalty_until INTEGER DEFAULT 0');
   
   // Create target cooldown tracker table
   db.run(`
@@ -325,13 +315,31 @@ function canHackTarget(guildId, hackerId, targetId) {
 // Start tracking an active hack
 function startActiveHack(guildId, targetId, hackerId) {
   const hackKey = `${guildId}_${targetId}`;
-  activeHacks.set(hackKey, hackerId);
+  activeHacks.set(hackKey, { hackerId, startTime: Date.now() });
 }
 
 // End tracking an active hack
 function endActiveHack(guildId, targetId) {
   const hackKey = `${guildId}_${targetId}`;
   activeHacks.delete(hackKey);
+}
+
+// Clean up stale hack entries (stuck for over 1 hour)
+function cleanupStaleHacks() {
+  const now = Date.now();
+  const HACK_TIMEOUT = 60 * 60 * 1000; // 1 hour
+  let cleaned = 0;
+  for (const [key, data] of activeHacks) {
+    // Support old format (just hackerId string) and new format (object with startTime)
+    const startTime = typeof data === 'object' ? data.startTime : 0;
+    if (now - startTime > HACK_TIMEOUT) {
+      activeHacks.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[GC] Cleaned up ${cleaned} stale active hack(s)`);
+  }
 }
 
 // Record hacker's cooldown (called when hack starts)
@@ -559,5 +567,6 @@ module.exports = {
   addHackImmuneRole,
   removeHackImmuneRole,
   clearHackImmuneRoles,
-  recordHack
+  recordHack,
+  cleanupStaleHacks
 };

@@ -2,6 +2,7 @@
 // Handles dividend payouts and user-controlled stock splits
 
 let db = null;
+const { migrateAddColumn } = require('./database');
 
 const DEFAULT_SETTINGS = {
   // Dividends
@@ -59,40 +60,22 @@ function initDividends(database) {
   `);
   
   // Migration: Add dividend_min_price column if it doesn't exist
-  try {
-    db.run(`ALTER TABLE dividend_settings ADD COLUMN dividend_min_price INTEGER DEFAULT 100`);
-  } catch (e) {
-    // Column already exists, ignore error
-  }
+  migrateAddColumn(db, 'dividend_settings', 'dividend_min_price INTEGER DEFAULT 100');
   
   // Migration: Add self-dividend columns
-  try {
-    db.run(`ALTER TABLE dividend_settings ADD COLUMN self_dividend_enabled INTEGER DEFAULT 1`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE dividend_settings ADD COLUMN self_dividend_rate REAL DEFAULT 5`);
-  } catch (e) {}
+  migrateAddColumn(db, 'dividend_settings', 'self_dividend_enabled INTEGER DEFAULT 1');
+  migrateAddColumn(db, 'dividend_settings', 'self_dividend_rate REAL DEFAULT 5');
   
   // Migration: Add passive income columns
-  try {
-    db.run(`ALTER TABLE dividend_settings ADD COLUMN passive_income_enabled INTEGER DEFAULT 1`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE dividend_settings ADD COLUMN passive_income_rate REAL DEFAULT 0.1`);
-  } catch (e) {}
-  try {
-    db.run(`ALTER TABLE dividend_settings ADD COLUMN passive_income_cooldown INTEGER DEFAULT 2`);
-  } catch (e) {}
+  migrateAddColumn(db, 'dividend_settings', 'passive_income_enabled INTEGER DEFAULT 1');
+  migrateAddColumn(db, 'dividend_settings', 'passive_income_rate REAL DEFAULT 0.1');
+  migrateAddColumn(db, 'dividend_settings', 'passive_income_cooldown INTEGER DEFAULT 2');
   
   // Migration: Add dividend payout hour
-  try {
-    db.run(`ALTER TABLE dividend_settings ADD COLUMN dividend_payout_hour INTEGER DEFAULT 12`);
-  } catch (e) {}
+  migrateAddColumn(db, 'dividend_settings', 'dividend_payout_hour INTEGER DEFAULT 12');
   
   // Migration: Add announcement channel
-  try {
-    db.run(`ALTER TABLE dividend_settings ADD COLUMN announcement_channel_id TEXT`);
-  } catch (e) {}
+  migrateAddColumn(db, 'dividend_settings', 'announcement_channel_id TEXT');
   
   // Create dividend history table
   db.run(`

@@ -1,6 +1,7 @@
 // Infamy & Bounty System - Backend Module
 // Tracks criminal reputation, bounty mechanics, insider trading detection, and probation
 
+const { migrateAddColumn } = require('./database');
 
 
 let db = null;
@@ -105,9 +106,7 @@ function initInfamy(database, discordClient) {
   `);
 
   // Add peak_infamy column if missing (migration)
-  try {
-    db.run('ALTER TABLE infamy_tracker ADD COLUMN peak_infamy REAL DEFAULT 0');
-  } catch (e) { /* column already exists */ }
+  migrateAddColumn(db, 'infamy_tracker', 'peak_infamy REAL DEFAULT 0');
 
   console.log('🏴‍☠️ Infamy & Bounty system initialized');
 }

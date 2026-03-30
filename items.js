@@ -1,6 +1,8 @@
 // Items module for Chat-Stock
 // Manages shop items, user inventory, and active effects
 
+const { migrateAddColumn } = require('./database');
+
 let db = null;
 
 // Effect types that items can have
@@ -228,32 +230,16 @@ function initItems(database) {
   `);
   
   // Add usable column if it doesn't exist (migration for existing DBs)
-  try {
-    db.run('ALTER TABLE shop_items ADD COLUMN usable INTEGER DEFAULT 1');
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'shop_items', 'usable INTEGER DEFAULT 1');
   
   // Add use_cooldown_hours column if it doesn't exist (cooldown between uses of same effect type)
-  try {
-    db.run('ALTER TABLE shop_items ADD COLUMN use_cooldown_hours INTEGER DEFAULT 0');
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'shop_items', 'use_cooldown_hours INTEGER DEFAULT 0');
   
   // Add effect_value_text column for storing large IDs like Discord snowflakes (role IDs)
-  try {
-    db.run('ALTER TABLE shop_items ADD COLUMN effect_value_text TEXT');
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'shop_items', 'effect_value_text TEXT');
 
   // Add hunt_eligible column (whether item can drop from /hunt)
-  try {
-    db.run('ALTER TABLE shop_items ADD COLUMN hunt_eligible INTEGER DEFAULT 0');
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'shop_items', 'hunt_eligible INTEGER DEFAULT 0');
   
   // Create user inventory table
   db.run(`
@@ -310,12 +296,8 @@ function initItems(database) {
   `);
   
   // Add ticket columns if they don't exist (migration for existing databases)
-  try {
-    db.run(`ALTER TABLE item_settings ADD COLUMN ticket_category_id TEXT`);
-  } catch (e) { /* Column already exists */ }
-  try {
-    db.run(`ALTER TABLE item_settings ADD COLUMN ticket_log_channel_id TEXT`);
-  } catch (e) { /* Column already exists */ }
+  migrateAddColumn(db, 'item_settings', 'ticket_category_id TEXT');
+  migrateAddColumn(db, 'item_settings', 'ticket_log_channel_id TEXT');
   
   // Create fulfillment requests table (for service/cosmetic items that need admin action)
   db.run(`
@@ -338,11 +320,7 @@ function initItems(database) {
   `);
   
   // Add ticket_channel_id column if it doesn't exist (migration for existing databases)
-  try {
-    db.run(`ALTER TABLE item_fulfillment_requests ADD COLUMN ticket_channel_id TEXT`);
-  } catch (e) {
-    // Column already exists, ignore
-  }
+  migrateAddColumn(db, 'item_fulfillment_requests', 'ticket_channel_id TEXT');
   
   // Create indexes for better performance
   db.run(`CREATE INDEX IF NOT EXISTS idx_user_inventory_guild_user ON user_inventory(guild_id, user_id)`);

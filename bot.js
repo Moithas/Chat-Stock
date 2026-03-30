@@ -14,23 +14,23 @@ const { initWork } = require('./work');
 const { initCrime } = require('./crime');
 const { initSlut } = require('./slut');
 const { initRob, startImmunityScheduler } = require('./rob');
-const { initHack } = require('./hack');
-const { initFight } = require('./fight');
+const { initHack, cleanupStaleHacks } = require('./hack');
+const { initFight, cleanupStaleFights } = require('./fight');
 const { initBank, startBankScheduler } = require('./bank');
 const { addMoney } = require('./economy');
 const { initWealthTax, getWealthTaxSettings, collectWealthTax, getLotteryInfo: getWealthTaxLotteryInfo } = require('./wealth-tax');
 const { initSkills } = require('./skills');
 const { initItems, getExpiredRoleGrants, removeRoleGrantRecord } = require('./items');
 const { initCooldownTracker, startAllTrackers } = require('./cooldown-tracker');
-const { initialize: initInBetween } = require('./inbetween');
-const { initialize: initLetItRide } = require('./letitride');
-const { initialize: initThreeCardPoker } = require('./threecardpoker');
-const { initialize: initVideoPoker } = require('./videopoker');
+const { initialize: initInBetween, cleanupStaleGames: cleanupStaleInBetween } = require('./inbetween');
+const { initialize: initLetItRide, cleanupStaleGames: cleanupStaleLetItRide } = require('./letitride');
+const { initialize: initThreeCardPoker, cleanupStaleGames: cleanupStaleThreeCardPoker } = require('./threecardpoker');
+const { initialize: initVideoPoker, cleanupStaleGames: cleanupStaleVideoPoker } = require('./videopoker');
 const { initMaintenance, startCleanupScheduler, logError, checkCommandCooldown, updateCommandCooldown } = require('./maintenance');
-const { initDungeon } = require('./dungeon');
+const { initDungeon, cleanupStaleRuns: cleanupStaleDungeons } = require('./dungeon');
 const { initHunt } = require('./hunt');
 const log = require('./logger');
-const { initSYN } = require('./screwyourneighbor');
+const { initSYN, cleanupStaleGames: cleanupStaleSYN } = require('./screwyourneighbor');
 const { initLuckyPenny } = require('./luckypenny');
 const { initBumpReward, getBumpSettings, getBumpStats, isDisboardBump, extractBumperUserId, rollBumpReward, recordBump } = require('./bumpreward');
 const { initInfamy, decayAllInfamy } = require('./infamy');
@@ -455,7 +455,17 @@ client.once('clientReady', async () => {
   setInterval(() => decayAllInfamy(), 3600000);
 
   // Start stale game cleanup (every 5 minutes)
-  setInterval(() => cleanupStaleBlackjackGames(), 5 * 60 * 1000);
+  setInterval(() => {
+    cleanupStaleBlackjackGames();
+    cleanupStaleHacks();
+    cleanupStaleFights();
+    cleanupStaleInBetween();
+    cleanupStaleLetItRide();
+    cleanupStaleThreeCardPoker();
+    cleanupStaleVideoPoker();
+    cleanupStaleDungeons();
+    cleanupStaleSYN();
+  }, 5 * 60 * 1000);
   
   // Register slash commands (only when definitions change, to preserve Discord integration overrides)
   const commands = [];
@@ -548,13 +558,22 @@ client.on('guildCreate', async (guild) => {
 // Handle bot being removed from a guild
 client.on('guildDelete', async (guild) => {
   log.info(`Removed from guild: ${guild.name} (${guild.id})`);
-  // Note: guild data remains in the database.
-  // A manual admin purge or scheduled cleanup can remove it later.
+  // Guild data stays in DB for potential re-join. Active games are cleaned
+  // by the 5-minute stale game cleanup interval. Settings caches are tiny
+  // and will be naturally evicted on restart.
 });
 
 // Bump reward processing — track by message ID to prevent race conditions and duplicate payouts
 const processedBumpMessages = new Set();
 const processingBumpMessages = new Set();
+
+// Clear processedBumpMessages every 6 hours to prevent unbounded growth
+setInterval(() => {
+  if (processedBumpMessages.size > 0) {
+    console.log(`[GC] Clearing ${processedBumpMessages.size} processed bump message IDs`);
+    processedBumpMessages.clear();
+  }
+}, 6 * 60 * 60 * 1000);
 
 async function processBumpReward(message) {
   if (!message.author || !message.guildId) return;
@@ -589,7 +608,7 @@ async function processBumpReward(message) {
     if (stats.lastBump && (Date.now() - stats.lastBump) < 2 * 60 * 60 * 1000) return;
     
     const reward = rollBumpReward(settings.minReward, settings.maxReward);
-    addMoney(guildId, bumperId, reward);
+    await addMoney(guildId, bumperId, reward);
     recordBump(guildId, bumperId, reward);
     processedBumpMessages.add(msgId);
     console.log(`[BumpReward] User ${bumperId} rewarded ${reward} for bumping`);

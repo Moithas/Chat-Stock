@@ -1,5 +1,7 @@
 // Anti-spam system for stock inflation prevention
 
+const { migrateAddColumn } = require('./database');
+
 // In-memory cooldown tracker
 const userCooldowns = new Map();
 const buttonCooldowns = new Map();
@@ -33,18 +35,10 @@ function initAntiSpam(database) {
   `);
   
   // Add button_cooldown_seconds column if it doesn't exist (migration for existing databases)
-  try {
-    db.run(`ALTER TABLE spam_settings ADD COLUMN button_cooldown_seconds INTEGER DEFAULT 3`);
-  } catch (e) {
-    // Column already exists, ignore error
-  }
+  migrateAddColumn(db, 'spam_settings', 'button_cooldown_seconds INTEGER DEFAULT 3');
   
   // Add base_value_growth column if it doesn't exist
-  try {
-    db.run(`ALTER TABLE spam_settings ADD COLUMN base_value_growth REAL DEFAULT 0.075`);
-  } catch (e) {
-    // Column already exists, ignore error
-  }
+  migrateAddColumn(db, 'spam_settings', 'base_value_growth REAL DEFAULT 0.075');
   
   console.log('🛡️ Anti-spam system initialized');
 }

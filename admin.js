@@ -1,5 +1,7 @@
 // Admin role and logging system
 
+const { migrateAddColumn } = require('./database');
+
 let db = null;
 let discordClient = null;
 
@@ -21,12 +23,12 @@ function initAdmin(database, client) {
   `);
 
   // Migration: add currency_symbol column if missing
-  try { db.run(`ALTER TABLE admin_settings ADD COLUMN currency_symbol TEXT`); } catch (e) { /* already exists */ }
+  migrateAddColumn(db, 'admin_settings', 'currency_symbol TEXT');
   
   // Migration: add starting_balance and new_player_immunity_days columns
-  try { db.run(`ALTER TABLE admin_settings ADD COLUMN starting_balance INTEGER DEFAULT 0`); } catch (e) { /* already exists */ }
-  try { db.run(`ALTER TABLE admin_settings ADD COLUMN new_player_immunity_days INTEGER DEFAULT 7`); } catch (e) { /* already exists */ }
-  try { db.run(`ALTER TABLE admin_settings ADD COLUMN support_server_url TEXT`); } catch (e) { /* already exists */ }
+  migrateAddColumn(db, 'admin_settings', 'starting_balance INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'admin_settings', 'new_player_immunity_days INTEGER DEFAULT 7');
+  migrateAddColumn(db, 'admin_settings', 'support_server_url TEXT');
   
   // Create admin log table
   db.run(`

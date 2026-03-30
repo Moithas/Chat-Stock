@@ -115,28 +115,12 @@ async function initDatabase() {
   `);
 
   // Migration: Add price_modifier column if it doesn't exist
-  try {
-    db.run(`ALTER TABLE users ADD COLUMN price_modifier REAL DEFAULT 1.0`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'users', 'price_modifier REAL DEFAULT 1.0');
 
   // Migration: Add streak tracking columns
-  try {
-    db.run(`ALTER TABLE users ADD COLUMN streak_tier INTEGER DEFAULT 0`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE users ADD COLUMN streak_tier_reached INTEGER DEFAULT 0`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE users ADD COLUMN streak_reset_time INTEGER DEFAULT 0`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'users', 'streak_tier INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'users', 'streak_tier_reached INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'users', 'streak_reset_time INTEGER DEFAULT 0');
 
   db.run(`
     CREATE TABLE IF NOT EXISTS stocks (
@@ -180,7 +164,7 @@ async function initDatabase() {
   `);
 
   // Migration: add created_at column to balances for new player immunity tracking
-  try { db.run(`ALTER TABLE balances ADD COLUMN created_at INTEGER DEFAULT 0`); } catch (e) { /* already exists */ }
+  migrateAddColumn(db, 'balances', 'created_at INTEGER DEFAULT 0');
 
   db.run(`
     CREATE TABLE IF NOT EXISTS economy_transactions (
@@ -967,6 +951,17 @@ function adminRemoveShares(ownerId, stockUserId, shares) {
   return { success: true, newShares };
 }
 
+// Safe migration helper: only swallows "duplicate column name" errors
+function migrateAddColumn(db, table, columnDef) {
+  try {
+    db.run(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+  } catch (e) {
+    if (!e.message || !e.message.includes('duplicate column name')) {
+      console.error(`[Migration Error] Failed to add column to ${table}: ${e.message}`);
+    }
+  }
+}
+
 module.exports = {
   initDatabase,
   saveDatabase,
@@ -1000,5 +995,6 @@ module.exports = {
   adminRemoveShares,
   getActivityTierSettings,
   updateActivityTierSettings,
-  calculateDailyContribution
+  calculateDailyContribution,
+  migrateAddColumn
 };

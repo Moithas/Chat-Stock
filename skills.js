@@ -1,6 +1,8 @@
 // Skills module for Chat-Stock
 // Manages XP, levels, and training for /hack and /rob
 
+const { migrateAddColumn } = require('./database');
+
 let db = null;
 
 
@@ -166,26 +168,14 @@ function initSkills(database) {
   `);
   
   // Migration: Add trained_at_level columns if they don't exist
-  try {
-    db.run(`ALTER TABLE user_skills ADD COLUMN hack_trained_at_level INTEGER DEFAULT -1`);
-    console.log('🎓 Added hack_trained_at_level column');
-  } catch (e) { /* Column already exists */ }
+  migrateAddColumn(db, 'user_skills', 'hack_trained_at_level INTEGER DEFAULT -1');
   
-  try {
-    db.run(`ALTER TABLE user_skills ADD COLUMN rob_trained_at_level INTEGER DEFAULT -1`);
-    console.log('🎓 Added rob_trained_at_level column');
-  } catch (e) { /* Column already exists */ }
+  migrateAddColumn(db, 'user_skills', 'rob_trained_at_level INTEGER DEFAULT -1');
   
   // Migration: Add training_started_at_level columns to track what level training was initiated at
-  try {
-    db.run(`ALTER TABLE user_skills ADD COLUMN hack_training_started_at_level INTEGER DEFAULT -1`);
-    console.log('🎓 Added hack_training_started_at_level column');
-  } catch (e) { /* Column already exists */ }
+  migrateAddColumn(db, 'user_skills', 'hack_training_started_at_level INTEGER DEFAULT -1');
   
-  try {
-    db.run(`ALTER TABLE user_skills ADD COLUMN rob_training_started_at_level INTEGER DEFAULT -1`);
-    console.log('🎓 Added rob_training_started_at_level column');
-  } catch (e) { /* Column already exists */ }
+  migrateAddColumn(db, 'user_skills', 'rob_training_started_at_level INTEGER DEFAULT -1');
   
   console.log('🎓 Skills system initialized');
 }

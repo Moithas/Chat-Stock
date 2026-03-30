@@ -1,6 +1,8 @@
 // Rob module for Chat-Stock
 // Allows users to rob other players' cash
 
+const { migrateAddColumn } = require('./database');
+
 let db = null;
 
 const DEFAULT_SETTINGS = {
@@ -43,18 +45,10 @@ function initRob(database) {
   `);
   
   // Add cooldown_minutes column if it doesn't exist (migration for existing databases)
-  try {
-    db.run(`ALTER TABLE rob_settings ADD COLUMN cooldown_minutes INTEGER DEFAULT 240`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'rob_settings', 'cooldown_minutes INTEGER DEFAULT 240');
   
   // Add target_cooldown_seconds column if it doesn't exist (migration)
-  try {
-    db.run(`ALTER TABLE rob_settings ADD COLUMN target_cooldown_seconds INTEGER DEFAULT 60`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'rob_settings', 'target_cooldown_seconds INTEGER DEFAULT 60');
   
   // Migrate from cooldown_hours to cooldown_minutes if needed
   try {
@@ -69,38 +63,14 @@ function initRob(database) {
   }
   
   // Add unique_targets_required column if it doesn't exist (migration)
-  try {
-    db.run(`ALTER TABLE rob_settings ADD COLUMN unique_targets_required INTEGER DEFAULT 3`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'rob_settings', 'unique_targets_required INTEGER DEFAULT 3');
   
   // Add defense columns if they don't exist (migration for existing databases)
-  try {
-    db.run(`ALTER TABLE rob_settings ADD COLUMN defenses_enabled INTEGER DEFAULT 1`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE rob_settings ADD COLUMN hidecash_success_rate INTEGER DEFAULT 70`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE rob_settings ADD COLUMN dodge_success_rate INTEGER DEFAULT 60`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE rob_settings ADD COLUMN fightback_success_rate INTEGER DEFAULT 50`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    db.run(`ALTER TABLE rob_settings ADD COLUMN defense_window_seconds INTEGER DEFAULT 10`);
-  } catch (e) {
-    // Column already exists
-  }
+  migrateAddColumn(db, 'rob_settings', 'defenses_enabled INTEGER DEFAULT 1');
+  migrateAddColumn(db, 'rob_settings', 'hidecash_success_rate INTEGER DEFAULT 70');
+  migrateAddColumn(db, 'rob_settings', 'dodge_success_rate INTEGER DEFAULT 60');
+  migrateAddColumn(db, 'rob_settings', 'fightback_success_rate INTEGER DEFAULT 50');
+  migrateAddColumn(db, 'rob_settings', 'defense_window_seconds INTEGER DEFAULT 10');
   
   // Create rob tracker table (for robber cooldowns)
   db.run(`
@@ -169,14 +139,10 @@ function initRob(database) {
   `);
   
   // Add role_id column if it doesn't exist (migration)
-  try {
-    db.run(`ALTER TABLE rob_immunity_tiers ADD COLUMN role_id TEXT`);
-  } catch (e) { /* Column may already exist */ }
+  migrateAddColumn(db, 'rob_immunity_tiers', 'role_id TEXT');
   
   // Add role_id to user immunity table for tracking
-  try {
-    db.run(`ALTER TABLE rob_user_immunity ADD COLUMN role_id TEXT`);
-  } catch (e) { /* Column may already exist */ }
+  migrateAddColumn(db, 'rob_user_immunity', 'role_id TEXT');
   
   // Create user purchased immunity table
   db.run(`

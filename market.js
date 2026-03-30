@@ -85,6 +85,10 @@ function initMarketProtection(database) {
       console.log('📊 Added guild_id column to pending_impacts');
     }
   } catch (e) {}
+
+  // Indexes for query performance
+  db.run(`CREATE INDEX IF NOT EXISTS idx_stock_purchases_guild_owner ON stock_purchases(guild_id, owner_id, stock_user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_pending_impacts_guild_stock ON pending_impacts(guild_id, stock_user_id)`);
   
   console.log('🛡️ Market protection system initialized');
 }

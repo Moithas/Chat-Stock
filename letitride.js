@@ -569,6 +569,22 @@ function getPayoutTable() {
   return PAYOUT_TABLE;
 }
 
+// Clean up stale Let It Ride games (stuck for over 30 minutes)
+function cleanupStaleGames() {
+  const now = Date.now();
+  const GAME_TIMEOUT = 30 * 60 * 1000;
+  let cleaned = 0;
+  for (const [key, game] of activeGames) {
+    if (game.startTime && now - game.startTime > GAME_TIMEOUT) {
+      activeGames.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[GC] Cleaned up ${cleaned} stale Let It Ride game(s)`);
+  }
+}
+
 module.exports = {
   initialize,
   getSettings,
@@ -587,5 +603,6 @@ module.exports = {
   formatCard,
   getPayoutTable,
   evaluateHand,
-  PAYOUT_TABLE
+  PAYOUT_TABLE,
+  cleanupStaleGames
 };

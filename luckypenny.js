@@ -1,7 +1,7 @@
 // Lucky Penny System - Random buff/debuff/currency/nothing roller
 // Uses the items.js active_effects table for buff storage
 
-const { saveDatabase } = require('./database');
+const { saveDatabase, migrateAddColumn } = require('./database');
 
 let db = null;
 
@@ -148,11 +148,7 @@ function initLuckyPenny(database) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_lp_tracker ON luckypenny_tracker(guild_id, user_id)`);
 
   // Migration: add nothing_cooldown_hours column if missing
-  try {
-    db.run(`ALTER TABLE luckypenny_settings ADD COLUMN nothing_cooldown_hours REAL DEFAULT 2`);
-  } catch (e) {
-    // Column already exists — ignore
-  }
+  migrateAddColumn(db, 'luckypenny_settings', 'nothing_cooldown_hours REAL DEFAULT 2');
 
   saveDatabase();
   console.log('🪙 Lucky Penny system initialized');

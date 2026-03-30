@@ -656,6 +656,28 @@ function calculateOdds(game) {
   };
 }
 
+// Clean up stale In-Between games and old lastGameTime entries
+function cleanupStaleGames() {
+  const now = Date.now();
+  const GAME_TIMEOUT = 30 * 60 * 1000;
+  let cleaned = 0;
+  for (const [key, game] of activeGames) {
+    if (game.startTime && now - game.startTime > GAME_TIMEOUT) {
+      activeGames.delete(key);
+      cleaned++;
+    }
+  }
+  // Clean up old lastGameTime entries (older than 1 hour)
+  for (const [key, time] of lastGameTime) {
+    if (now - time > 60 * 60 * 1000) {
+      lastGameTime.delete(key);
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[GC] Cleaned up ${cleaned} stale In-Between game(s)`);
+  }
+}
+
 module.exports = {
   initialize,
   getSettings,
@@ -683,5 +705,6 @@ module.exports = {
   getPoleValues,
   formatCard,
   SUITS,
-  RANKS
+  RANKS,
+  cleanupStaleGames
 };
