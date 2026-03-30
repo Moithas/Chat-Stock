@@ -162,6 +162,12 @@ function getPrestigeBadge(level) {
   return tier ? `${tier.emoji} ${tier.name}` : '';
 }
 
+function getPrestigeEmoji(guildId, userId) {
+  const level = getPrestigeLevel(guildId, userId);
+  const tier = getTierInfo(level);
+  return tier ? tier.emoji : '🎖️';
+}
+
 // ============ MULTIPLIER CALCULATIONS ============
 function getIncomeMultiplier(guildId, userId) {
   const level = getPrestigeLevel(guildId, userId);
@@ -400,6 +406,7 @@ module.exports = {
   applyBorrowMultiplier,
   canPrestige,
   executePrestige,
+  getPrestigeEmoji,
   getPrestigeLeaderboard,
   getPrestigeHistory,
   adminSetPrestige,

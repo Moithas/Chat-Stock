@@ -7,7 +7,7 @@ const { addMoney } = require('../economy');
 const { getEffectValue, EFFECT_TYPES, getHuntEligibleItems, addToInventory } = require('../items');
 const { getLuckyPennyEffect, LP_EFFECT_TYPES, getLuckyPennySettings, canUseLuckyPenny, recordLuckyPennyUse, rollLuckyPenny, applyBuff: applyLpBuff, getActiveLuckyPennyBuffs, LP_EFFECT_EMOJI, INVERSE_EFFECTS } = require('../luckypenny');
 const { getCurrency } = require('../admin');
-const { applyIncomeMultiplier } = require('../prestige');
+const { applyIncomeMultiplier, getPrestigeEmoji } = require('../prestige');
 
 
 
@@ -356,7 +356,7 @@ async function executeWork(interaction, guildId, userId) {
         let text = `**+${prestigeAmount.toLocaleString()}** ${getCurrency(guildId)}`;
         const tags = [];
         if (boosted) tags.push(`⚡ +${workBoost}% boost`);
-        if (prestigeAmount > amount) tags.push(`🎖️ +${Math.round((prestigeAmount / amount - 1) * 100)}% prestige`);
+        if (prestigeAmount > amount) tags.push(`${getPrestigeEmoji(guildId, userId)} +${Math.round((prestigeAmount / amount - 1) * 100)}% prestige`);
         if (tags.length) text += ` (${tags.join(', ')})`;
         return text;
       })(),
@@ -432,7 +432,7 @@ async function executeLuckyPenny(interaction, guildId, userId) {
       .setTitle('🪙 Lucky Penny — Payday!')
       .setDescription(result.flavorText)
       .addFields({ name: '💰 Found', value: lpPrestigeAmount > result.amount
-        ? `${lpPrestigeAmount.toLocaleString()} ${getCurrency(guildId)} (🎖️ +${Math.round((lpPrestigeAmount / result.amount - 1) * 100)}% prestige)`
+        ? `${lpPrestigeAmount.toLocaleString()} ${getCurrency(guildId)} (${getPrestigeEmoji(guildId, userId)} +${Math.round((lpPrestigeAmount / result.amount - 1) * 100)}% prestige)`
         : `${lpPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`, inline: true });
     
   } else {
@@ -575,7 +575,7 @@ async function executeHunt(interaction, guildId, userId) {
       .addFields({
         name: '💰 You Found',
         value: huntPrestigeAmount > amount
-          ? `**+${huntPrestigeAmount.toLocaleString()}** ${getCurrency(guildId)} (🎖️ +${Math.round((huntPrestigeAmount / amount - 1) * 100)}% prestige)`
+          ? `**+${huntPrestigeAmount.toLocaleString()}** ${getCurrency(guildId)} (${getPrestigeEmoji(guildId, userId)} +${Math.round((huntPrestigeAmount / amount - 1) * 100)}% prestige)`
           : `**+${huntPrestigeAmount.toLocaleString()}** ${getCurrency(guildId)}`,
         inline: true
       })
@@ -641,7 +641,7 @@ async function executeCollect(interaction, guildId, userId) {
         recordPassiveIncomeCollection(guildId, userId, stockPrice, stockPrestigeAmount);
         await addMoney(guildId, userId, stockPrestigeAmount, 'Stock bonus from stock value');
         let stockLine = `📈 **Stock Bonus:** +${stockPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`;
-        if (stockPrestigeAmount > amount) stockLine += ` (🎖️ +${Math.round((stockPrestigeAmount / amount - 1) * 100)}% prestige)`;
+        if (stockPrestigeAmount > amount) stockLine += ` (${getPrestigeEmoji(guildId, userId)} +${Math.round((stockPrestigeAmount / amount - 1) * 100)}% prestige)`;
         collections.push(stockLine);
         totalAmount += stockPrestigeAmount;
       }
@@ -656,7 +656,7 @@ async function executeCollect(interaction, guildId, userId) {
     recordRoleIncomeCollection(guildId, userId, roleIncome.roleId, roleIncome.roleName, rolePrestigeAmount);
     await addMoney(guildId, userId, rolePrestigeAmount, `Role income: ${roleIncome.roleName}`);
     let roleLine = `🏷️ **${roleIncome.roleName}:** +${rolePrestigeAmount.toLocaleString()} ${getCurrency(guildId)}`;
-    if (rolePrestigeAmount > roleIncome.amount) roleLine += ` (🎖️ +${Math.round((rolePrestigeAmount / roleIncome.amount - 1) * 100)}% prestige)`;
+    if (rolePrestigeAmount > roleIncome.amount) roleLine += ` (${getPrestigeEmoji(guildId, userId)} +${Math.round((rolePrestigeAmount / roleIncome.amount - 1) * 100)}% prestige)`;
     collections.push(roleLine);
     totalAmount += rolePrestigeAmount;
   }

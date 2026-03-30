@@ -7,7 +7,7 @@ const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
 const { getInfamySettings, getTierEffects, addInfamy, rollBountyCheck, createBounty, getActiveBounty, claimBounty, startProbation, announceBountyPosted, announceBountyClaimed } = require('../infamy');
 const { addMoney: addMoneyForBounty } = require('../economy');
 const { getCurrency, getAdminSettings } = require('../admin');
-const { applyIncomeMultiplier } = require('../prestige');
+const { applyIncomeMultiplier, getPrestigeEmoji } = require('../prestige');
 
 
 
@@ -468,7 +468,7 @@ module.exports = {
 
             const tierIndicator = robberTierEffects.tier >= 1 ? ` ${robberTierEffects.emoji}` : '';
 
-            const prestigeNoteTimeout = robPrestigeAmount > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmount / actualStolen - 1) * 100)}% prestige)` : '';
+            const prestigeNoteTimeout = robPrestigeAmount > actualStolen ? ` (${getPrestigeEmoji(guildId, robberId)} +${Math.round((robPrestigeAmount / actualStolen - 1) * 100)}% prestige)` : '';
 
             timeoutEmbed
               .setColor(0x2ecc71)
@@ -570,7 +570,7 @@ module.exports = {
 
       const tierIndicator = robberTierEffects.tier >= 1 ? ` ${robberTierEffects.emoji}` : '';
 
-      const prestigeNote2 = robPrestigeAmount2 > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmount2 / actualStolen - 1) * 100)}% prestige)` : '';
+      const prestigeNote2 = robPrestigeAmount2 > actualStolen ? ` (${getPrestigeEmoji(guildId, robberId)} +${Math.round((robPrestigeAmount2 / actualStolen - 1) * 100)}% prestige)` : '';
 
       embed
         .setColor(0x2ecc71)
@@ -712,7 +712,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           ? ` (🛡️ ${robProtectionValue}% protected)`
           : '';
 
-        const prestigeNoteHide = robPrestigeAmountHide > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmountHide / actualStolen - 1) * 100)}% prestige)` : '';
+        const prestigeNoteHide = robPrestigeAmountHide > actualStolen ? ` (${getPrestigeEmoji(guildId, robberId)} +${Math.round((robPrestigeAmountHide / actualStolen - 1) * 100)}% prestige)` : '';
 
         embed
           .setColor(0xe74c3c)
@@ -790,7 +790,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           ? ` (🛡️ ${robProtectionValue}% protected)`
           : '';
 
-        const prestigeNoteDodge = robPrestigeAmountDodge > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmountDodge / actualStolen - 1) * 100)}% prestige)` : '';
+        const prestigeNoteDodge = robPrestigeAmountDodge > actualStolen ? ` (${getPrestigeEmoji(guildId, robberId)} +${Math.round((robPrestigeAmountDodge / actualStolen - 1) * 100)}% prestige)` : '';
 
         embed
           .setColor(0xe74c3c)
@@ -869,7 +869,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           ? ` (🛡️ ${robProtectionValue}% protected)`
           : '';
 
-        const prestigeNoteFight = robPrestigeAmountFight > actualStolen ? ` (🎖️ +${Math.round((robPrestigeAmountFight / actualStolen - 1) * 100)}% prestige)` : '';
+        const prestigeNoteFight = robPrestigeAmountFight > actualStolen ? ` (${getPrestigeEmoji(guildId, robberId)} +${Math.round((robPrestigeAmountFight / actualStolen - 1) * 100)}% prestige)` : '';
 
         embed
           .setColor(0xe74c3c)

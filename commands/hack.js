@@ -29,7 +29,7 @@ const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
 const { getInfamySettings, getTierEffects, addInfamy, rollBountyCheck, createBounty, getActiveBounty, claimBounty, startProbation, announceBountyPosted, announceBountyClaimed } = require('../infamy');
 const { addMoney: addMoneyForBounty } = require('../economy');
 const { getCurrency, getAdminSettings } = require('../admin');
-const { applyIncomeMultiplier } = require('../prestige');
+const { applyIncomeMultiplier, getPrestigeEmoji } = require('../prestige');
 
 
 
@@ -637,7 +637,7 @@ module.exports = {
           
           const tierIndicator = hackerTierEffects.tier >= 1 ? ` ${hackerTierEffects.emoji}` : '';
           
-          const prestigeNoteHack = hackPrestigeAmount > stolenAmount ? ` (🎖️ +${Math.round((hackPrestigeAmount / stolenAmount - 1) * 100)}% prestige)` : '';
+          const prestigeNoteHack = hackPrestigeAmount > stolenAmount ? ` (${getPrestigeEmoji(guildId, hackerId)} +${Math.round((hackPrestigeAmount / stolenAmount - 1) * 100)}% prestige)` : '';
           
           const successEmbed = new EmbedBuilder()
             .setColor(0x9b59b6)

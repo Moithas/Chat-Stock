@@ -36,7 +36,7 @@ try {
   console.log('Economy not available for property system');
 }
 const { getCurrency } = require('../admin');
-const { applyIncomeMultiplier } = require('../prestige');
+const { applyIncomeMultiplier, getPrestigeEmoji } = require('../prestige');
 
 // Helper to check if economy is enabled (checked at runtime)
 function isEconomyEnabled() {
@@ -1172,7 +1172,7 @@ async function handleRentButton(interaction, guildId, userId, settings, property
   const effectStr = effect.amount >= 0 ? `+${effect.amount.toLocaleString()}` : effect.amount.toLocaleString();
   const totalStr = totalPayout >= 0 ? `+${totalPayout.toLocaleString()}` : totalPayout.toLocaleString();
   let totalDisplay = `**${totalStr}** ${getCurrency(guildId)}`;
-  if (totalPayout > basePayout && basePayout > 0) totalDisplay += ` (🎖️ +${Math.round((totalPayout / basePayout - 1) * 100)}% prestige)`;
+  if (totalPayout > basePayout && basePayout > 0) totalDisplay += ` (${getPrestigeEmoji(guildId, userId)} +${Math.round((totalPayout / basePayout - 1) * 100)}% prestige)`;
   
   const embed = new EmbedBuilder()
     .setColor(totalPayout >= 0 ? 0x2ecc71 : 0xe74c3c)
@@ -1304,7 +1304,7 @@ async function handleRentSelect(interaction) {
   const effectStr = effect.amount >= 0 ? `+${effect.amount.toLocaleString()}` : effect.amount.toLocaleString();
   const totalStr = totalPayout >= 0 ? `+${totalPayout.toLocaleString()}` : totalPayout.toLocaleString();
   let totalDisplay = `**${totalStr}** ${getCurrency(guildId)}`;
-  if (totalPayout > basePayout && basePayout > 0) totalDisplay += ` (🎖️ +${Math.round((totalPayout / basePayout - 1) * 100)}% prestige)`;
+  if (totalPayout > basePayout && basePayout > 0) totalDisplay += ` (${getPrestigeEmoji(guildId, userId)} +${Math.round((totalPayout / basePayout - 1) * 100)}% prestige)`;
   
   const embed = new EmbedBuilder()
     .setColor(totalPayout >= 0 ? 0x2ecc71 : 0xe74c3c)
