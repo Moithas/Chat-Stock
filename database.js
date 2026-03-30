@@ -227,20 +227,17 @@ function saveDatabase() {
 // Checkpoint periodically
 setInterval(saveDatabase, 60000);
 
-// Clean shutdown
-process.on('exit', () => {
+// Clean shutdown helper — exported so bot.js can orchestrate full shutdown
+function shutdownDatabase() {
   if (db) {
     try { db.db.pragma('wal_checkpoint(TRUNCATE)'); } catch (e) {}
     try { db.close(); } catch (e) {}
+    db = null;
   }
-});
-process.on('SIGINT', () => {
-  if (db) {
-    try { db.db.pragma('wal_checkpoint(TRUNCATE)'); } catch (e) {}
-    try { db.close(); } catch (e) {}
-  }
-  process.exit();
-});
+}
+
+// Clean shutdown on process exit
+process.on('exit', shutdownDatabase);
 
 // === Database Backup System ===
 function createBackup() {
@@ -1009,5 +1006,6 @@ module.exports = {
   getActivityTierSettings,
   updateActivityTierSettings,
   calculateDailyContribution,
-  migrateAddColumn
+  migrateAddColumn,
+  shutdownDatabase
 };

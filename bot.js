@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection, REST, Routes, ActivityType } = require('discord.js');
-const { initDatabase, createUser, updateMessageCount, calculateStockPrice, logPrice, getUser, getDb, getStreakInfo } = require('./database');
+const { initDatabase, createUser, updateMessageCount, calculateStockPrice, logPrice, getUser, getDb, getStreakInfo, shutdownDatabase } = require('./database');
 const { initTicker, sendStreakAnnouncement, sendStreakExpiredAnnouncement } = require('./ticker');
 const { initFees } = require('./fees');
 const { initAntiSpam, shouldCountMessage, shouldCountButtonInteraction, getSpamSettings } = require('./antispam');
@@ -37,6 +37,7 @@ const { initInfamy, decayAllInfamy } = require('./infamy');
 const { initPrestige } = require('./prestige');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 
 const client = new Client({
   intents: [
@@ -157,12 +158,12 @@ function startLotteryScheduler(client) {
                 await channel.send({ embeds: [embed] });
               }
             } catch (e) {
-              console.error('Failed to announce lottery results:', e);
+              logError({ guildId: guild.id, command: 'lottery_announce', error: e });
             }
           }
         }
       } catch (e) {
-        console.error(`Error checking lottery for guild ${guild.id}:`, e);
+        logError({ guildId: guild.id, command: 'lottery_scheduler', error: e });
       }
     }
     
@@ -242,12 +243,12 @@ function startWealthTaxScheduler(client) {
                 await channel.send({ embeds: [embed] });
               }
             } catch (e) {
-              console.error('Failed to announce wealth tax collection:', e);
+              logError({ guildId: guild.id, command: 'wealth_tax_announce', error: e });
             }
           }
         }
       } catch (e) {
-        console.error(`Error collecting wealth tax for guild ${guild.id}:`, e);
+        logError({ guildId: guild.id, command: 'wealth_tax_scheduler', error: e });
       }
     }
     
@@ -621,14 +622,14 @@ async function processBumpReward(message) {
           content: `📣 <@${bumperId}> bumped the server and earned **${reward.toLocaleString()}** ${getCurrency(guildId)}! Thanks for the bump!`
         });
       } catch (e) {
-        console.error('[BumpReward] Failed to send announcement:', e.message);
+        logError({ guildId, command: 'bump_announce', error: e });
       }
     }
     } finally {
       processingBumpMessages.delete(msgId);
     }
   } catch (e) {
-    console.error('[BumpReward] Error processing bump:', e);
+    logError({ guildId, userId: bumperId, command: 'bump_reward', error: e });
   }
 }
 
@@ -783,7 +784,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling scratch button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'scratch button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -803,7 +804,7 @@ client.on('interactionCreate', async (interaction) => {
       if (handled) return;
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling maintenance interaction:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'maintenance interaction', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -820,7 +821,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleInteraction(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling help menu:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'help menu', error });
     }
     return;
   }
@@ -832,7 +833,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleTicketButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling ticket button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'ticket button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -849,7 +850,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling scratcher button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'scratcher button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -866,7 +867,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling deletedata button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'deletedata button', error });
     }
     return;
   }
@@ -878,7 +879,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling stock panel button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'stock panel button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -895,7 +896,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleSelectMenu(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling stock panel select:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'stock panel select', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -912,7 +913,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleSelectMenu(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling stock panel user select:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'stock panel user select', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -929,7 +930,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleModal(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling stock modal:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'stock modal', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -946,7 +947,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleLotteryTicketModal(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling lottery ticket modal:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'lottery ticket modal', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -963,7 +964,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling In Between button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'In Between button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -979,7 +980,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleModal(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling In Between modal:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'In Between modal', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -996,7 +997,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling Let It Ride button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'Let It Ride button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1018,7 +1019,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction, action, targetUserId, extraData);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling Three Card Poker button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'Three Card Poker button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1035,7 +1036,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling Video Poker button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'Video Poker button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1055,7 +1056,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleSelectMenu(interaction, menuType, targetUserId);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling Three Card Poker select menu:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'Three Card Poker select menu', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1071,7 +1072,7 @@ client.on('interactionCreate', async (interaction) => {
       const { handleBlackjackButton } = require('./commands/blackjack');
       await handleBlackjackButton(interaction);
     } catch (error) {
-      console.error('Error handling blackjack button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'blackjack button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1099,7 +1100,7 @@ client.on('interactionCreate', async (interaction) => {
       }
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling split interaction:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'split interaction', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1116,7 +1117,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleRouletteButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling roulette button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'roulette button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1134,7 +1135,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling infamy button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'infamy button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1151,7 +1152,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling profile button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'profile button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1168,7 +1169,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleUserSelect(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
-      console.error('Error handling profile user select:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'profile user select', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1193,7 +1194,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleBankInteraction(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling bank interaction:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'bank interaction', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1210,7 +1211,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling leaderboard button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'leaderboard button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1227,7 +1228,7 @@ client.on('interactionCreate', async (interaction) => {
       await handleIncomeButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-      console.error('Error handling income button:', error);
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'income button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1249,7 +1250,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleButton(interaction);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-        console.error('Error handling property panel button:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'property panel button', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1266,7 +1267,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleRentSelect(interaction);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-        console.error('Error handling rent select:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'rent select', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1283,7 +1284,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleSellSelect(interaction);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-        console.error('Error handling sell select:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'sell select', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1300,7 +1301,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleUpgradeSelect(interaction);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-        console.error('Error handling upgrade select:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'upgrade select', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1318,7 +1319,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleSellConfirm(interaction, propertyId);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-        console.error('Error handling sell confirm:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'sell confirm', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1334,7 +1335,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleSellCancel(interaction);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-        console.error('Error handling sell cancel:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'sell cancel', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1353,7 +1354,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleButton(interaction);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-        console.error('Error handling fight button:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'fight button', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1370,7 +1371,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleButton(interaction);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-        console.error('Error handling skills button:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'skills button', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1390,7 +1391,7 @@ client.on('interactionCreate', async (interaction) => {
           await handleButton(interaction);
         } catch (error) {
           if (error.code === 10062 || error.code === 40060) return;
-          console.error('Error handling prestige button:', error);
+          logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'prestige button', error });
           try {
             if (!interaction.replied && !interaction.deferred) {
               await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1421,7 +1422,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleButton(interaction);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return;
-        console.error('Error handling SYN button:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'SYN button', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1639,7 +1640,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleAdminInteraction(interaction);
       } catch (error) {
         if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
-        console.error('Error handling admin interaction:', error);
+        logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'admin interaction', error });
         try {
           if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1739,3 +1740,53 @@ client.on('interactionCreate', async (interaction) => {
 
 // Login
 client.login(process.env.DISCORD_TOKEN);
+
+// === Health check HTTP server ===
+const HEALTH_PORT = process.env.HEALTH_PORT || 8080;
+const healthServer = http.createServer((req, res) => {
+  if (req.url === '/health' && req.method === 'GET') {
+    const healthy = client.ws.status === 0; // 0 = READY
+    res.writeHead(healthy ? 200 : 503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: healthy ? 'ok' : 'degraded',
+      uptime: process.uptime(),
+      guilds: client.guilds.cache.size,
+      ping: client.ws.ping,
+      memory: Math.round(process.memoryUsage().rss / 1024 / 1024)
+    }));
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+});
+healthServer.listen(HEALTH_PORT, '127.0.0.1', () => {
+  log.info(`Health check listening on 127.0.0.1:${HEALTH_PORT}/health`);
+});
+
+// === Graceful shutdown ===
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log.warn(`${signal} received — shutting down gracefully`);
+  try { healthServer.close(); } catch (e) {}
+  try { client.destroy(); } catch (e) {}
+  try { shutdownDatabase(); } catch (e) {}
+  log.info('Shutdown complete');
+  process.exit(0);
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+process.on('uncaughtException', (error) => {
+  log.error('Uncaught exception', { error: error.message, stack: error.stack });
+  logError({ command: 'UNCAUGHT_EXCEPTION', error });
+  gracefulShutdown('uncaughtException');
+});
+
+process.on('unhandledRejection', (reason) => {
+  const error = reason instanceof Error ? reason : new Error(String(reason));
+  log.error('Unhandled rejection', { error: error.message, stack: error.stack });
+  logError({ command: 'UNHANDLED_REJECTION', error });
+});
