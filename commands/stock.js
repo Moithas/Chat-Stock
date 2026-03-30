@@ -980,8 +980,11 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
     username = user.username;
   } catch (e) {}
   
+  const basePrice = calculateStockPrice(targetUserId, guildId);
   const lpBuyMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
-  const currentPrice = calculateStockPrice(targetUserId, guildId, null, false, lpBuyMod);
+  const currentPrice = lpBuyMod !== 0
+    ? calculateStockPrice(targetUserId, guildId, null, false, lpBuyMod)
+    : basePrice;
   
   // Get balance and calculate max shares
   let balance = 0;
