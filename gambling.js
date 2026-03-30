@@ -2,6 +2,7 @@
 // Handles blackjack and roulette games
 
 const { migrateAddColumn } = require('./database');
+const { TTLCache } = require('./cache');
 
 let db = null;
 
@@ -13,7 +14,7 @@ const activeBlackjackGames = new Map();
 const guildShoes = new Map();
 
 // Cache for gambling settings per guild
-const guildGamblingSettings = new Map();
+const guildGamblingSettings = new TTLCache();
 
 // Card suits and values
 const SUITS = ['♠', '♥', '♦', '♣'];

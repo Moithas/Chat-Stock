@@ -2,6 +2,7 @@
 // Handles game logic, hand evaluation, and payouts
 
 const { getDb } = require('./database');
+const { TTLCache } = require('./cache');
 
 let db = null;
 
@@ -14,7 +15,7 @@ const DEFAULT_SETTINGS = {
 
 // In-memory game state
 const activeGames = new Map();
-const settingsCache = new Map();
+const settingsCache = new TTLCache();
 
 
 // Card constants

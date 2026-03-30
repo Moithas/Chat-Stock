@@ -1,6 +1,8 @@
 // Work module for Chat-Stock
 // Handles /work command with configurable rewards and flavor texts
 
+const { TTLCache } = require('./cache');
+
 let db = null;
 
 const DEFAULT_FLAVOR_TEXTS = [
@@ -65,7 +67,7 @@ const DEFAULT_SETTINGS = {
 };
 
 // Cache for settings per guild
-const guildWorkSettings = new Map();
+const guildWorkSettings = new TTLCache();
 
 function initWork(database) {
   db = database;
@@ -183,7 +185,7 @@ function canWork(guildId, userId, cooldownReduction = 0) {
   const now = Date.now();
   const baseCooldownMs = settings.cooldownHours * 60 * 60 * 1000;
   const cooldownMs = baseCooldownMs * (1 - cooldownReduction / 100);
-  const timeSinceWork = now - lastWorkTime;
+  const timeSinceWork = Math.max(0, now - lastWorkTime);
   
   if (timeSinceWork < cooldownMs) {
     const remainingMs = cooldownMs - timeSinceWork;

@@ -2,6 +2,7 @@
 // Uses the items.js active_effects table for buff storage
 
 const { saveDatabase, migrateAddColumn } = require('./database');
+const { TTLCache } = require('./cache');
 
 let db = null;
 
@@ -116,7 +117,7 @@ const FLAVOR_TEXTS = {
   ]
 };
 
-const guildSettings = new Map();
+const guildSettings = new TTLCache();
 
 function initLuckyPenny(database) {
   db = database;

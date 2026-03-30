@@ -1,6 +1,8 @@
 // Let It Ride Card Game Module
 // Classic poker variant - player vs house
 
+const { TTLCache } = require('./cache');
+
 let db = null;
 
 // Card constants
@@ -31,7 +33,7 @@ const PAYOUT_TABLE = {
 };
 
 // In-memory caches
-const guildSettings = new Map();
+const guildSettings = new TTLCache();
 const activeGames = new Map(); // visually userId -> game state
 
 function initialize(database) {

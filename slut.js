@@ -303,7 +303,7 @@ function canSlut(guildId, userId) {
   
   const now = Date.now();
   const cooldownMs = settings.cooldownHours * 60 * 60 * 1000;
-  const timeSince = now - lastSlutTime;
+  const timeSince = Math.max(0, now - lastSlutTime);
   
   if (timeSince < cooldownMs) {
     const remaining = cooldownMs - timeSince;

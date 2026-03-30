@@ -1,12 +1,13 @@
 // Admin role and logging system
 
 const { migrateAddColumn } = require('./database');
+const { TTLCache } = require('./cache');
 
 let db = null;
 let discordClient = null;
 
 // In-memory cache
-const guildAdminSettings = new Map();
+const guildAdminSettings = new TTLCache();
 
 function initAdmin(database, client) {
   db = database;

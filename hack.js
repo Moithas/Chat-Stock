@@ -2,6 +2,7 @@
 // Allows users to hack other players' bank balances
 
 const { migrateAddColumn } = require('./database');
+const { TTLCache } = require('./cache');
 
 let db = null;
 
@@ -18,7 +19,7 @@ const DEFAULT_SETTINGS = {
 };
 
 // Cache for settings per guild
-const guildHackSettings = new Map();
+const guildHackSettings = new TTLCache();
 
 // Track active hacks to prevent concurrent targeting
 const activeHacks = new Map(); // guildId_targetId -> hackerId
@@ -203,7 +204,7 @@ function canHack(guildId, userId, cooldownReduction = 0) {
   // Apply cooldown reduction from skills
   const reducedCooldownMinutes = settings.hackerCooldownMinutes * (1 - cooldownReduction / 100);
   const cooldownMs = reducedCooldownMinutes * 60 * 1000;
-  const timeSinceHack = now - lastHackTime;
+  const timeSinceHack = Math.max(0, now - lastHackTime);
   
   if (timeSinceHack < cooldownMs) {
     const remainingMs = cooldownMs - timeSinceHack;
@@ -248,7 +249,7 @@ function canBeHacked(guildId, targetId) {
   
   const now = Date.now();
   const cooldownMs = settings.targetCooldownMinutes * 60 * 1000;
-  const timeSinceHacked = now - lastHackedTime;
+  const timeSinceHacked = Math.max(0, now - lastHackedTime);
   
   if (timeSinceHacked < cooldownMs) {
     const remainingMs = cooldownMs - timeSinceHacked;

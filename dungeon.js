@@ -390,7 +390,7 @@ function canRunDungeon(guildId, userId) {
   stmt.free();
   const lastTime = row.last_dungeon_time;
   const cooldownMs = settings.cooldownMinutes * 60 * 1000;
-  const elapsed = Date.now() - lastTime;
+  const elapsed = Math.max(0, Date.now() - lastTime);
 
   if (elapsed < cooldownMs) {
     const remaining = cooldownMs - elapsed;

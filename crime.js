@@ -202,7 +202,7 @@ function canCrime(guildId, userId) {
   
   const now = Date.now();
   const cooldownMs = settings.cooldownHours * 60 * 60 * 1000;
-  const timeSinceCrime = now - lastCrimeTime;
+  const timeSinceCrime = Math.max(0, now - lastCrimeTime);
   
   if (timeSinceCrime < cooldownMs) {
     const remainingMs = cooldownMs - timeSinceCrime;

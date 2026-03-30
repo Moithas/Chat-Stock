@@ -1,6 +1,8 @@
 // Video Poker game module for Chat-Stock
 // Supports Jacks or Better, Deuces Wild, Bonus Poker
 
+const { TTLCache } = require('./cache');
+
 let db = null;
 
 // Card constants
@@ -68,7 +70,7 @@ const PAY_TABLES = {
 };
 
 // In-memory caches
-const guildSettings = new Map();
+const guildSettings = new TTLCache();
 const activeGames = new Map();
 
 // ============ INITIALIZATION ============

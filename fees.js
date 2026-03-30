@@ -1,7 +1,9 @@
 // Trading fee configuration and calculation module
 
+const { TTLCache } = require('./cache');
+
 // In-memory cache for guild settings (loaded from database)
-const guildSettings = new Map();
+const guildSettings = new TTLCache();
 
 // Default fee settings
 const DEFAULT_SETTINGS = {

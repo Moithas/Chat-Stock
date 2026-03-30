@@ -1,5 +1,6 @@
 
 const { migrateAddColumn } = require('./database');
+const { TTLCache } = require('./cache');
 
 let db = null;
 let client = null;
@@ -46,7 +47,7 @@ const DEFAULT_EVENTS = [
 ];
 
 // In-memory cache
-const guildEventSettings = new Map();
+const guildEventSettings = new TTLCache();
 
 function initEvents(database, discordClient) {
   db = database;

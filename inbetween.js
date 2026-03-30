@@ -1,6 +1,8 @@
 // In Between (Acey Deucey) Card Game Module
 // Progressive pot style card game played against the house
 
+const { TTLCache } = require('./cache');
+
 let db = null;
 
 // Card constants
@@ -17,7 +19,7 @@ const DEFAULT_SETTINGS = {
 };
 
 // In-memory caches
-const guildSettings = new Map();
+const guildSettings = new TTLCache();
 const guildPots = new Map();
 const activeGames = new Map(); // guildId -> game state
 const lastGameTime = new Map(); // guildId:oderId -> timestamp of last completed game (per-player cooldown)

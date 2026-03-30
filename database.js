@@ -51,6 +51,12 @@ class SqlJsCompat {
   close() {
     this.db.close();
   }
+
+  // Expose better-sqlite3 transaction support
+  // Usage: db.transaction(fn)() where fn receives no args and uses db.run/exec inside
+  transaction(fn) {
+    return this.db.transaction(fn);
+  }
 }
 
 // Compatibility wrapper for sql.js statement API (bind/step/getAsObject/free)
@@ -344,17 +350,20 @@ function getStock(ownerId, stockUserId) {
 }
 
 function buyStock(ownerId, stockUserId, shares, price) {
-  const existing = getStock(ownerId, stockUserId);
-  
-  if (existing) {
-    const newShares = existing.shares + shares;
-    const newAvgPrice = ((existing.shares * existing.avg_buy_price) + (shares * price)) / newShares;
-    db.run('UPDATE stocks SET shares = ?, avg_buy_price = ? WHERE owner_id = ? AND stock_user_id = ?', 
-      [newShares, newAvgPrice, ownerId, stockUserId]);
-  } else {
-    db.run('INSERT INTO stocks (owner_id, stock_user_id, shares, avg_buy_price) VALUES (?, ?, ?, ?)',
-      [ownerId, stockUserId, shares, price]);
-  }
+  const doBuy = db.transaction(() => {
+    const existing = getStock(ownerId, stockUserId);
+    
+    if (existing) {
+      const newShares = existing.shares + shares;
+      const newAvgPrice = ((existing.shares * existing.avg_buy_price) + (shares * price)) / newShares;
+      db.run('UPDATE stocks SET shares = ?, avg_buy_price = ? WHERE owner_id = ? AND stock_user_id = ?', 
+        [newShares, newAvgPrice, ownerId, stockUserId]);
+    } else {
+      db.run('INSERT INTO stocks (owner_id, stock_user_id, shares, avg_buy_price) VALUES (?, ?, ?, ?)',
+        [ownerId, stockUserId, shares, price]);
+    }
+  });
+  doBuy();
   saveDatabase();
 }
 
@@ -751,7 +760,9 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
     price *= (1 + eventMod + lpMod);
   }
 
-  const finalPrice = Math.max(0.01, Math.round(price * 100) / 100);
+  // Cap stock price to prevent runaway values from compounding multipliers
+  const MAX_STOCK_PRICE = 1_000_000_000; // 1 billion
+  const finalPrice = Math.min(MAX_STOCK_PRICE, Math.max(0.01, Math.round(price * 100) / 100));
   priceCache.set(cacheKey, { price: finalPrice, time: Date.now() });
   return finalPrice;
 }
@@ -901,7 +912,9 @@ function adjustAvgBuyPrice(stockUserId, multiplier) {
 }
 
 // Update price modifier for a user (used by splits)
+// Clamped to [0.0001, 10000] to prevent runaway values from repeated splits
 function setPriceModifier(userId, modifier) {
+  modifier = Math.max(0.0001, Math.min(10000, modifier));
   db.run('UPDATE users SET price_modifier = ? WHERE user_id = ?', [modifier, userId]);
   saveDatabase();
 }

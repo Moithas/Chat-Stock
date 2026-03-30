@@ -3,9 +3,21 @@ const { getDb } = require('./database');
 const { getAdminSettings } = require('./admin');
 const log = require('./logger');
 
+// Hard cap: no single transaction should exceed 1 trillion (well within MAX_SAFE_INTEGER)
+const MAX_ECONOMY_VALUE = 1_000_000_000_000;
+
 // Validate amount is a positive finite number — blocks NaN, Infinity, negatives, non-numbers
 function isValidAmount(amount) {
   return typeof amount === 'number' && isFinite(amount) && amount > 0;
+}
+
+// Clamp amount to safe economy range — prevents precision loss near MAX_SAFE_INTEGER
+function clampAmount(amount) {
+  if (amount > MAX_ECONOMY_VALUE) {
+    log.warn(`[ECONOMY OVERFLOW] Amount ${amount} clamped to MAX_ECONOMY_VALUE (${MAX_ECONOMY_VALUE})`);
+    return MAX_ECONOMY_VALUE;
+  }
+  return amount;
 }
 
 // Get user's balance
@@ -74,7 +86,7 @@ async function addMoney(guildId, userId, amount, reason = 'Transaction') {
     log.error(`[ECONOMY GUARD] addMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
     return false;
   }
-  amount = Math.round(amount);
+  amount = Math.round(clampAmount(amount));
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -98,7 +110,7 @@ async function addToBank(guildId, userId, amount, reason = 'Deposit') {
     log.error(`[ECONOMY GUARD] addToBank rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
     return false;
   }
-  amount = Math.round(amount);
+  amount = Math.round(clampAmount(amount));
   try {
     const db = getDb();
     ensureBalance(guildId, userId);
@@ -116,7 +128,7 @@ async function addToBank(guildId, userId, amount, reason = 'Deposit') {
   }
 }
 
-// Remove money from user's cash
+// Remove money from user's cash (atomic check-and-deduct)
 async function removeMoney(guildId, userId, amount, reason = 'Transaction') {
   if (!isValidAmount(amount)) {
     log.error(`[ECONOMY GUARD] removeMoney rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
@@ -127,16 +139,16 @@ async function removeMoney(guildId, userId, amount, reason = 'Transaction') {
     const db = getDb();
     ensureBalance(guildId, userId);
     
-    const balance = getBalance(guildId, userId);
-    if (balance.cash < amount) {
-      log.warn(`Insufficient cash: ${balance.cash} < ${amount}`);
+    // Atomic: deduct only if sufficient funds, return rows changed
+    const result = db.run(
+      'UPDATE balances SET cash = cash - ? WHERE guild_id = ? AND user_id = ? AND cash >= ?',
+      [amount, guildId, userId, amount]
+    );
+    
+    if (!result || result.changes === 0) {
+      log.warn(`Insufficient cash for removeMoney: user ${userId}, amount ${amount}`);
       return false;
     }
-    
-    db.run(
-      'UPDATE balances SET cash = cash - ? WHERE guild_id = ? AND user_id = ?',
-      [amount, guildId, userId]
-    );
     
     logTransaction(guildId, userId, -amount, 'cash', reason);
     return true;
@@ -171,7 +183,7 @@ async function forceRemoveMoney(guildId, userId, amount, reason = 'Transaction')
   }
 }
 
-// Remove money from user's bank
+// Remove money from user's bank (atomic check-and-deduct)
 async function removeFromBank(guildId, userId, amount, reason = 'Withdrawal') {
   if (!isValidAmount(amount)) {
     log.error(`[ECONOMY GUARD] removeFromBank rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
@@ -182,16 +194,16 @@ async function removeFromBank(guildId, userId, amount, reason = 'Withdrawal') {
     const db = getDb();
     ensureBalance(guildId, userId);
     
-    const balance = getBalance(guildId, userId);
-    if (balance.bank < amount) {
-      log.warn(`Insufficient bank balance: ${balance.bank} < ${amount}`);
+    // Atomic: deduct only if sufficient funds
+    const result = db.run(
+      'UPDATE balances SET bank = bank - ? WHERE guild_id = ? AND user_id = ? AND bank >= ?',
+      [amount, guildId, userId, amount]
+    );
+    
+    if (!result || result.changes === 0) {
+      log.warn(`Insufficient bank balance for removeFromBank: user ${userId}, amount ${amount}`);
       return false;
     }
-    
-    db.run(
-      'UPDATE balances SET bank = bank - ? WHERE guild_id = ? AND user_id = ?',
-      [amount, guildId, userId]
-    );
     
     logTransaction(guildId, userId, -amount, 'bank', reason);
     return true;
@@ -224,7 +236,7 @@ async function hasEnoughInBank(guildId, userId, amount) {
   }
 }
 
-// Remove money from total balance (cash first, then bank)
+// Remove money from total balance (cash first, then bank) — atomic transaction
 async function removeFromTotal(guildId, userId, amount, reason = 'Purchase') {
   if (!isValidAmount(amount)) {
     log.error(`[ECONOMY GUARD] removeFromTotal rejected invalid amount: ${amount} (${typeof amount}) for user ${userId}, reason: ${reason}`);
@@ -235,36 +247,37 @@ async function removeFromTotal(guildId, userId, amount, reason = 'Purchase') {
     const db = getDb();
     ensureBalance(guildId, userId);
     
-    const balance = getBalance(guildId, userId);
+    const doTransfer = db.transaction(() => {
+      const balance = getBalance(guildId, userId);
+      
+      if (balance.total < amount) {
+        return { success: false, error: 'Insufficient funds' };
+      }
+      
+      const availableCash = Math.max(0, balance.cash);
+      const fromCash = Math.min(availableCash, amount);
+      const fromBank = amount - fromCash;
+      
+      if (fromCash > 0) {
+        db.run(
+          'UPDATE balances SET cash = cash - ? WHERE guild_id = ? AND user_id = ?',
+          [fromCash, guildId, userId]
+        );
+        logTransaction(guildId, userId, -fromCash, 'cash', reason);
+      }
+      
+      if (fromBank > 0) {
+        db.run(
+          'UPDATE balances SET bank = bank - ? WHERE guild_id = ? AND user_id = ?',
+          [fromBank, guildId, userId]
+        );
+        logTransaction(guildId, userId, -fromBank, 'bank', reason);
+      }
+      
+      return { success: true, fromCash, fromBank };
+    });
     
-    if (balance.total < amount) {
-      return { success: false, error: 'Insufficient funds' };
-    }
-    
-    // Take from cash first, but only if cash is positive
-    const availableCash = Math.max(0, balance.cash); // Treat negative cash as 0 available
-    const fromCash = Math.min(availableCash, amount);
-    const fromBank = amount - fromCash;
-    
-    // Remove from cash if needed
-    if (fromCash > 0) {
-      db.run(
-        'UPDATE balances SET cash = cash - ? WHERE guild_id = ? AND user_id = ?',
-        [fromCash, guildId, userId]
-      );
-      logTransaction(guildId, userId, -fromCash, 'cash', reason);
-    }
-    
-    // Remove from bank if needed
-    if (fromBank > 0) {
-      db.run(
-        'UPDATE balances SET bank = bank - ? WHERE guild_id = ? AND user_id = ?',
-        [fromBank, guildId, userId]
-      );
-      logTransaction(guildId, userId, -fromBank, 'bank', reason);
-    }
-    
-    return { success: true, fromCash, fromBank };
+    return doTransfer();
   } catch (error) {
     log.error('Error removing from total', { error: error.message });
     return { success: false, error: error.message };
@@ -371,6 +384,51 @@ function getPlayerCreatedAt(guildId, userId) {
   return result[0].values[0][0] || 0;
 }
 
+// Atomic transfer between two users (for rob, hack, fight, give)
+// Deducts from source and credits to target in a single transaction
+async function atomicTransfer(guildId, fromUserId, toUserId, amount, fromType = 'cash', toType = 'cash', reason = 'Transfer') {
+  if (!isValidAmount(amount)) {
+    log.error(`[ECONOMY GUARD] atomicTransfer rejected invalid amount: ${amount} for ${fromUserId} → ${toUserId}, reason: ${reason}`);
+    return { success: false, error: 'Invalid amount' };
+  }
+  amount = Math.round(amount);
+  try {
+    const db = getDb();
+    ensureBalance(guildId, fromUserId);
+    ensureBalance(guildId, toUserId);
+    
+    const doTransfer = db.transaction(() => {
+      const fromBalance = getBalance(guildId, fromUserId);
+      const available = fromType === 'bank' ? fromBalance.bank : fromBalance.cash;
+      
+      if (available < amount) {
+        return { success: false, error: 'Insufficient funds' };
+      }
+      
+      // Deduct from source
+      db.run(
+        `UPDATE balances SET ${fromType} = ${fromType} - ? WHERE guild_id = ? AND user_id = ?`,
+        [amount, guildId, fromUserId]
+      );
+      logTransaction(guildId, fromUserId, -amount, fromType, reason);
+      
+      // Credit to target
+      db.run(
+        `UPDATE balances SET ${toType} = ${toType} + ? WHERE guild_id = ? AND user_id = ?`,
+        [amount, guildId, toUserId]
+      );
+      logTransaction(guildId, toUserId, amount, toType, reason);
+      
+      return { success: true };
+    });
+    
+    return doTransfer();
+  } catch (error) {
+    log.error('Error in atomic transfer', { error: error.message });
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = {
   isEnabled,
   getBalance,
@@ -387,5 +445,7 @@ module.exports = {
   getTransactionHistory,
   getAllBalances,
   applyFine,
-  getPlayerCreatedAt
+  getPlayerCreatedAt,
+  atomicTransfer,
+  MAX_ECONOMY_VALUE
 };

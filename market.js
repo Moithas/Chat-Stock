@@ -1,10 +1,12 @@
 // Market protection system - Anti-gaming measures
 // Includes: Sell Cooldown, Price Impact Delay, Capital Gains Tax
 
+const { TTLCache } = require('./cache');
+
 let db = null;
 
 // In-memory cache for guild settings
-const guildMarketSettings = new Map();
+const guildMarketSettings = new TTLCache();
 
 // Default market protection settings
 const DEFAULT_SETTINGS = {

@@ -2,6 +2,7 @@
 // Handles loans with interest and savings bonds
 
 const { migrateAddColumn } = require('./database');
+const { TTLCache } = require('./cache');
 
 let db = null;
 
@@ -35,7 +36,7 @@ const DEFAULT_SETTINGS = {
 };
 
 // Cache for guild settings
-const guildBankSettings = new Map();
+const guildBankSettings = new TTLCache();
 
 function initBank(database) {
   db = database;

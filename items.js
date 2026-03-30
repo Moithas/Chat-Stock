@@ -2,6 +2,7 @@
 // Manages shop items, user inventory, and active effects
 
 const { migrateAddColumn } = require('./database');
+const { TTLCache } = require('./cache');
 
 let db = null;
 
@@ -203,7 +204,7 @@ const DEFAULT_ITEMS = [
 ];
 
 // Cache for settings per guild
-const guildItemSettings = new Map();
+const guildItemSettings = new TTLCache();
 
 function initItems(database) {
   db = database;

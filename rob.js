@@ -2,6 +2,7 @@
 // Allows users to rob other players' cash
 
 const { migrateAddColumn } = require('./database');
+const { TTLCache } = require('./cache');
 
 let db = null;
 
@@ -21,7 +22,7 @@ const DEFAULT_SETTINGS = {
 };
 
 // Cache for settings per guild
-const guildRobSettings = new Map();
+const guildRobSettings = new TTLCache();
 
 function initRob(database) {
   db = database;
@@ -267,7 +268,7 @@ function canRob(guildId, userId, cooldownReduction = 0) {
   // Apply cooldown reduction from skills
   const reducedCooldownMinutes = settings.cooldownMinutes * (1 - cooldownReduction / 100);
   const cooldownMs = reducedCooldownMinutes * 60 * 1000;
-  const timeSinceRob = now - lastRobTime;
+  const timeSinceRob = Math.max(0, now - lastRobTime);
   
   if (timeSinceRob < cooldownMs) {
     const remainingMs = cooldownMs - timeSinceRob;
@@ -306,7 +307,7 @@ function canBeRobbed(guildId, targetId) {
   
   const now = Date.now();
   const cooldownMs = settings.targetCooldownSeconds * 1000;
-  const timeSinceTargeted = now - lastTargetedTime;
+  const timeSinceTargeted = Math.max(0, now - lastTargetedTime);
   
   if (timeSinceTargeted < cooldownMs) {
     const remainingMs = cooldownMs - timeSinceTargeted;
