@@ -26,7 +26,7 @@ const { initialize: initInBetween, cleanupStaleGames: cleanupStaleInBetween } = 
 const { initialize: initLetItRide, cleanupStaleGames: cleanupStaleLetItRide } = require('./letitride');
 const { initialize: initThreeCardPoker, cleanupStaleGames: cleanupStaleThreeCardPoker } = require('./threecardpoker');
 const { initialize: initVideoPoker, cleanupStaleGames: cleanupStaleVideoPoker } = require('./videopoker');
-const { initMaintenance, startCleanupScheduler, logError, checkCommandCooldown, updateCommandCooldown } = require('./maintenance');
+const { initMaintenance, startCleanupScheduler, logError, checkCommandCooldown, updateCommandCooldown, trackCommandUsage } = require('./maintenance');
 const { initDungeon, cleanupStaleRuns: cleanupStaleDungeons } = require('./dungeon');
 const { initHunt } = require('./hunt');
 const log = require('./logger');
@@ -35,6 +35,7 @@ const { initLuckyPenny } = require('./luckypenny');
 const { initBumpReward, getBumpSettings, getBumpStats, isDisboardBump, extractBumperUserId, rollBumpReward, recordBump } = require('./bumpreward');
 const { initInfamy, decayAllInfamy } = require('./infamy');
 const { initPrestige } = require('./prestige');
+const { initPremium } = require('./premium');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -421,6 +422,9 @@ client.once('clientReady', async () => {
   // Initialize prestige system
   initPrestige(getDb());
 
+  // Initialize premium tier system
+  initPremium(getDb());
+
   // Initialize maintenance system (cleanup, error logging, rate limiting)
   initMaintenance(getDb(), client);
 
@@ -554,6 +558,37 @@ client.once('clientReady', async () => {
 // Handle bot joining a new guild
 client.on('guildCreate', async (guild) => {
   log.info(`Joined new guild: ${guild.name} (${guild.id}) — ${guild.memberCount} members`);
+  
+  // Send welcome embed to the first available text channel
+  try {
+    const { EmbedBuilder } = require('discord.js');
+    const channel = guild.systemChannel || guild.channels.cache.find(
+      ch => ch.isTextBased() && ch.permissionsFor(guild.members.me)?.has('SendMessages')
+    );
+    if (channel) {
+      const embed = new EmbedBuilder()
+        .setColor(0x2ecc71)
+        .setTitle('📈 Welcome to Black Ledger!')
+        .setDescription(
+          'Thanks for adding me! I\'m a full-featured economy & stock market bot.\n\n' +
+          '**Quick Start:**\n' +
+          '• `/help` — Browse all features and commands\n' +
+          '• `/balance` — Check your starting balance\n' +
+          '• `/work` — Start earning money\n' +
+          '• `/stock` — View and trade stocks\n\n' +
+          '**Admin Setup:**\n' +
+          '• `/admin` — Configure economy, gambling, items & more\n' +
+          '• `/admin-items` — Add default shop items\n' +
+          '• `/admin-maintenance` — Monitor bot health & usage\n\n' +
+          '*All features work out of the box with sensible defaults. Admins can tweak everything via the admin panels.*'
+        )
+        .setFooter({ text: `Serving ${client.guilds.cache.size} servers` })
+        .setTimestamp();
+      await channel.send({ embeds: [embed] });
+    }
+  } catch (e) {
+    log.warn('Could not send welcome message', { guild: guild.id, error: e.message });
+  }
 });
 
 // Handle bot being removed from a guild
@@ -1702,6 +1737,7 @@ client.on('interactionCreate', async (interaction) => {
 
   // Update cooldown timestamp after successful command lookup
   updateCommandCooldown(guildId, userId, commandName);
+  trackCommandUsage(guildId, commandName);
 
   try {
     await command.execute(interaction);

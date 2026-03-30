@@ -91,6 +91,17 @@ function initMaintenance(database, discordClient) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_error_log_guild_time ON error_log(guild_id, occurred_at)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_maintenance_history_time ON maintenance_history(executed_at)`);
   
+  // Create command usage tracking table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS command_usage (
+      guild_id TEXT NOT NULL,
+      command_name TEXT NOT NULL,
+      uses INTEGER DEFAULT 0,
+      last_used INTEGER,
+      PRIMARY KEY (guild_id, command_name)
+    )
+  `);
+  
   console.log('🔧 Maintenance system initialized');
 }
 
@@ -504,6 +515,57 @@ function startCleanupScheduler() {
   console.log('🧹 Database cleanup scheduler started (daily at 4 AM)');
 }
 
+// ============ COMMAND USAGE TRACKING ============
+
+/**
+ * Track a command usage (upsert: increment counter)
+ */
+function trackCommandUsage(guildId, commandName) {
+  if (!db) return;
+  try {
+    db.run(`
+      INSERT INTO command_usage (guild_id, command_name, uses, last_used)
+      VALUES (?, ?, 1, ?)
+      ON CONFLICT(guild_id, command_name)
+      DO UPDATE SET uses = uses + 1, last_used = ?
+    `, [guildId, commandName, Date.now(), Date.now()]);
+  } catch (e) {
+    // Non-critical — don't break commands over metrics
+  }
+}
+
+/**
+ * Get usage stats for a guild — top commands sorted by usage
+ */
+function getUsageStats(guildId) {
+  if (!db) return [];
+  const result = db.exec(
+    'SELECT command_name, uses, last_used FROM command_usage WHERE guild_id = ? ORDER BY uses DESC',
+    [guildId]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  return result[0].values.map(row => ({
+    command: row[0],
+    uses: row[1],
+    lastUsed: row[2]
+  }));
+}
+
+/**
+ * Get total usage across all guilds — for bot-wide analytics
+ */
+function getGlobalUsageStats() {
+  if (!db) return [];
+  const result = db.exec(
+    'SELECT command_name, SUM(uses) as total_uses FROM command_usage GROUP BY command_name ORDER BY total_uses DESC'
+  );
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  return result[0].values.map(row => ({
+    command: row[0],
+    uses: row[1]
+  }));
+}
+
 // Export functions
 module.exports = {
   initMaintenance,
@@ -517,6 +579,9 @@ module.exports = {
   checkCommandCooldown,
   updateCommandCooldown,
   startCleanupScheduler,
+  trackCommandUsage,
+  getUsageStats,
+  getGlobalUsageStats,
   HISTORY_RETENTION_DAYS,
   DEFAULT_COMMAND_COOLDOWNS
 };

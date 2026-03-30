@@ -8,6 +8,7 @@ const {
   getErrorsFromDb,
   getCommandCooldownSettings,
   setCommandCooldown,
+  getUsageStats,
   HISTORY_RETENTION_DAYS,
   DEFAULT_COMMAND_COOLDOWNS
 } = require('../maintenance');
@@ -17,7 +18,8 @@ const {
 // Define all interaction IDs this module handles
 const BUTTON_IDS = [
   'maint_cleanup', 'maint_view_errors', 'maint_db_stats',
-  'maint_rate_limits', 'maint_edit_cooldown', 'maint_back'
+  'maint_rate_limits', 'maint_edit_cooldown', 'maint_back',
+  'maint_usage_stats'
 ];
 
 const MODAL_IDS = [
@@ -65,6 +67,9 @@ module.exports = {
           return true;
         case 'maint_rate_limits':
           await handleRateLimits(interaction, guildId);
+          return true;
+        case 'maint_usage_stats':
+          await handleUsageStats(interaction, guildId);
           return true;
         case 'maint_edit_cooldown':
           await showCooldownSelect(interaction, guildId);
@@ -162,6 +167,10 @@ async function showMaintenancePanel(interaction, guildId) {
     new ButtonBuilder()
       .setCustomId('maint_rate_limits')
       .setLabel('⏱️ Rate Limits')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('maint_usage_stats')
+      .setLabel('📈 Usage Stats')
       .setStyle(ButtonStyle.Primary)
   );
   
@@ -354,6 +363,50 @@ async function handleRateLimits(interaction, guildId) {
       .setCustomId('maint_edit_cooldown')
       .setLabel('✏️ Edit Cooldown')
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('maint_back')
+      .setLabel('← Back')
+      .setStyle(ButtonStyle.Secondary)
+  );
+  
+  await interaction.editReply({ embeds: [embed], components: [row] });
+}
+
+// ==================== USAGE STATS ====================
+async function handleUsageStats(interaction, guildId) {
+  await interaction.deferUpdate();
+  
+  const stats = getUsageStats(guildId);
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x3498db)
+    .setTitle('📈 Command Usage Stats')
+    .setTimestamp();
+  
+  if (stats.length === 0) {
+    embed.setDescription('No command usage recorded yet. Stats will populate as commands are used.');
+  } else {
+    const totalUses = stats.reduce((sum, s) => sum + s.uses, 0);
+    embed.setDescription(`**${totalUses.toLocaleString()}** total command uses tracked`);
+    
+    // Top 15 commands
+    const top = stats.slice(0, 15);
+    const maxUses = top[0]?.uses || 1;
+    
+    const lines = top.map((s, i) => {
+      const bar = '█'.repeat(Math.max(1, Math.round((s.uses / maxUses) * 10)));
+      const ago = s.lastUsed ? `<t:${Math.floor(s.lastUsed / 1000)}:R>` : 'never';
+      return `\`${String(i + 1).padStart(2)}.\` **/${s.command}** — ${s.uses.toLocaleString()} uses ${bar} (${ago})`;
+    });
+    
+    embed.addFields({ name: 'Top Commands', value: lines.join('\n'), inline: false });
+    
+    if (stats.length > 15) {
+      embed.setFooter({ text: `Showing top 15 of ${stats.length} commands` });
+    }
+  }
+  
+  const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('maint_back')
       .setLabel('← Back')
