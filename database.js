@@ -639,9 +639,9 @@ function calculateDailyContribution(messageCount, settings) {
 }
 
 // Calculate stock price (guildId optional - for price impact delay and market events)
-function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excludeEvents = false) {
+function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excludeEvents = false, lpModifier = 0) {
   // Check price cache first
-  const cacheKey = `${userId}:${guildId || 'null'}${excludeBuyerId ? `:ex${excludeBuyerId}` : ''}${excludeEvents ? ':noev' : ''}`;
+  const cacheKey = `${userId}:${guildId || 'null'}${excludeBuyerId ? `:ex${excludeBuyerId}` : ''}${excludeEvents ? ':noev' : ''}${lpModifier ? `:lp${lpModifier}` : ''}`;
   const cached = priceCache.get(cacheKey);
   if (cached && Date.now() - cached.time < PRICE_CACHE_TTL) {
     return cached.price;
@@ -752,18 +752,22 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
   const priceModifier = user.price_modifier || 1.0;
   price *= priceModifier;
 
-  // Apply market event multiplier if active
+  // Apply market event multiplier and LP modifier additively
+  let eventMod = 0;
   if (guildId && !excludeEvents) {
     try {
       const { getMarketEventMultiplier } = require('./events');
-      const eventMultiplier = getMarketEventMultiplier(guildId);
-      price *= eventMultiplier;
+      eventMod = getMarketEventMultiplier(guildId) - 1; // e.g., 0.20 for +20%
     } catch (e) {
       // Events module not loaded yet, skip market event
     }
   }
+  const lpMod = lpModifier / 100; // e.g., 0.18 for +18%
+  if (eventMod !== 0 || lpMod !== 0) {
+    price *= (1 + eventMod + lpMod);
+  }
 
-  const finalPrice = Math.round(price * 100) / 100;
+  const finalPrice = Math.max(0.01, Math.round(price * 100) / 100);
   priceCache.set(cacheKey, { price: finalPrice, time: Date.now() });
   return finalPrice;
 }
