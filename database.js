@@ -188,6 +188,9 @@ async function initDatabase() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_balances_guild_user ON balances(guild_id, user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_stocks_owner ON stocks(owner_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_stocks_stock_user ON stocks(stock_user_id)`);
+
+  // Clean up any orphaned 0-share rows from wealth tax seizures
+  db.run(`DELETE FROM stocks WHERE shares <= 0`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(timestamp)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_buyer ON transactions(buyer_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_user ON price_history(user_id)`);
@@ -328,7 +331,7 @@ function updateMessageCount(timestamp, userId, baseValueGrowth = 0.075) {
 
 // Stock functions
 function getPortfolio(ownerId) {
-  const result = db.exec('SELECT * FROM stocks WHERE owner_id = ?', [ownerId]);
+  const result = db.exec('SELECT * FROM stocks WHERE owner_id = ? AND shares > 0', [ownerId]);
   if (result.length === 0) return [];
   
   return result[0].values.map(row => {

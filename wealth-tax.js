@@ -325,6 +325,18 @@ async function collectWealthTax(guildId) {
               [sharesToSell, user.userId, stock.stock_user_id]
             );
             
+            // Clean up 0-share rows
+            db.run(
+              'DELETE FROM stocks WHERE owner_id = ? AND stock_user_id = ? AND shares <= 0',
+              [user.userId, stock.stock_user_id]
+            );
+            
+            // Consume from stock_purchases for capital gains tracking
+            try {
+              const { consumePurchaseShares } = require('./market');
+              consumePurchaseShares(guildId, user.userId, stock.stock_user_id, sharesToSell);
+            } catch (e) {}
+            
             // Calculate actual proceeds from the shares sold
             const proceeds = sharesToSell * stock.currentPrice;
             
