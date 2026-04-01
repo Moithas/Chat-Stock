@@ -948,7 +948,15 @@ module.exports = {
     const components = [menu];
     const linkRow = buildLinkButtons(interaction.guildId);
     if (linkRow) components.push(linkRow);
-    
+
+    // Preserve dismiss button - find the owner from the existing dismiss button
+    const existingDismiss = interaction.message.components.flatMap(r => r.components).find(c => c.customId?.startsWith('help_dismiss_u_'));
+    if (existingDismiss) {
+      components.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(existingDismiss.customId).setLabel('Dismiss').setEmoji('❌').setStyle(ButtonStyle.Danger)
+      ));
+    }
+
     await interaction.update({ embeds: [embed], components });
     return true;
   }
