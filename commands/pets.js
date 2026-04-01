@@ -575,11 +575,11 @@ async function handleFeedMenu(interaction, guildId, userId, settings) {
     .setTitle(`🍖 Feed ${pet.name}`)
     .setDescription(
       `🍖 **Basic Food** — **${basicCost.toLocaleString()}** ${currency}\n` +
-      `+20 hunger\n\n` +
+      `+10 hunger\n\n` +
       `🥩 **Premium Food** — **${premiumCost.toLocaleString()}** ${currency}\n` +
-      `+40 hunger, +5 happiness\n\n` +
+      `+20 hunger, +5 happiness\n\n` +
       `🍰 **Treat** — **${treatCost.toLocaleString()}** ${currency}\n` +
-      `+2 hunger, +15 happiness\n\n` +
+      `+2 hunger, +8 happiness\n\n` +
       `Current: ❤️ ${effective.happiness}/100 | 🍖 ${effective.hunger}/100`
     );
 

@@ -51,9 +51,9 @@ const PHASES = {
 
 // ============ FOOD TYPES ============
 const FOOD_TYPES = {
-  basic:   { name: 'Basic Food',   emoji: '🍖', costMult: 1.0,  hunger: 20, happiness: 0  },
-  premium: { name: 'Premium Food', emoji: '🥩', costMult: 4.0,  hunger: 40, happiness: 5  },
-  treat:   { name: 'Treat',        emoji: '🍰', costMult: 2.0,  hunger: 2,  happiness: 15 },
+  basic:   { name: 'Basic Food',   emoji: '🍖', costMult: 1.0,  hunger: 10, happiness: 0  },
+  premium: { name: 'Premium Food', emoji: '🥩', costMult: 4.0,  hunger: 20, happiness: 5  },
+  treat:   { name: 'Treat',        emoji: '🍰', costMult: 2.0,  hunger: 2,  happiness: 8  },
 };
 
 // ============ PET IMAGES ============
@@ -103,8 +103,8 @@ const DEFAULT_SETTINGS = {
   renameCost: 25000,
   playCooldown: 7200,           // 2 hours in seconds
   trainCooldown: 7200,          // 2 hours in seconds
-  hungerDecayPerDay: 10,
-  happinessDecayPerDay: 5,
+  hungerDecayPerDay: 60,
+  happinessDecayPerDay: 48,
   feedHungerRestore: 30,
   playHappinessGain: 15,
   trainHappinessGain: 8,
@@ -141,8 +141,8 @@ function initPets(database) {
       rename_cost INTEGER DEFAULT 25000,
       play_cooldown INTEGER DEFAULT 7200,
       train_cooldown INTEGER DEFAULT 7200,
-      hunger_decay_per_day INTEGER DEFAULT 10,
-      happiness_decay_per_day INTEGER DEFAULT 5,
+      hunger_decay_per_day INTEGER DEFAULT 60,
+      happiness_decay_per_day INTEGER DEFAULT 48,
       feed_hunger_restore INTEGER DEFAULT 30,
       play_happiness_gain INTEGER DEFAULT 15,
       train_happiness_gain INTEGER DEFAULT 8,
