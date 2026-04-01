@@ -613,10 +613,9 @@ function feedPet(petId, settings) {
   };
 }
 
-// ============ PLAY ============
-function playWithPet(petId, settings) {
+// ============ PRECHECK (shared) ============
+function precheckPlay(petId, settings) {
   if (!db) return { success: false, error: 'Database not available' };
-
   const pet = getPet(petId);
   if (!pet) return { success: false, error: 'Pet not found' };
   if (!settings) settings = getSettings(pet.guild_id);
@@ -626,21 +625,58 @@ function playWithPet(petId, settings) {
     deletePet(petId);
     return { success: false, error: 'ran_away', pet };
   }
-
   const phase = getPhase(pet.level);
-  if (!phase.canPlay) {
-    return { success: false, error: 'phase_locked', pet };
-  }
+  if (!phase.canPlay) return { success: false, error: 'phase_locked', pet };
 
-  // Check cooldown
   const now = Date.now();
   if (pet.last_played && (now - pet.last_played) < settings.playCooldown * 1000) {
     const readyAt = pet.last_played + settings.playCooldown * 1000;
     return { success: false, error: 'cooldown', readyAt, pet };
   }
+  return { success: true, pet, effective };
+}
 
-  const newHappiness = Math.min(100, effective.happiness + settings.playHappinessGain);
-  const xpGain = settings.playXp;
+function precheckTrain(petId, settings) {
+  if (!db) return { success: false, error: 'Database not available' };
+  const pet = getPet(petId);
+  if (!pet) return { success: false, error: 'Pet not found' };
+  if (!settings) settings = getSettings(pet.guild_id);
+
+  const effective = getEffectiveStats(pet, settings);
+  if (effective.ranAway) {
+    deletePet(petId);
+    return { success: false, error: 'ran_away', pet };
+  }
+  const phase = getPhase(pet.level);
+  if (!phase.canTrain) return { success: false, error: 'phase_locked', pet };
+
+  const now = Date.now();
+  if (pet.last_trained && (now - pet.last_trained) < settings.trainCooldown * 1000) {
+    const readyAt = pet.last_trained + settings.trainCooldown * 1000;
+    return { success: false, error: 'cooldown', readyAt, pet };
+  }
+
+  const cost = getTrainCost(pet.level, settings);
+  return { success: true, pet, effective, cost };
+}
+
+function getTrainCost(level, settings) {
+  const base = Math.floor(settings.baseFoodCost * 0.25);
+  return Math.floor(base * (1 + 2 * (level - 1) / 49));
+}
+
+// ============ PLAY ============
+function playWithPet(petId, settings, miniGameWon = true) {
+  const pet = getPet(petId);
+  if (!pet) return { success: false, error: 'Pet not found' };
+  if (!settings) settings = getSettings(pet.guild_id);
+
+  const effective = getEffectiveStats(pet, settings);
+  const now = Date.now();
+
+  const happinessGain = miniGameWon ? settings.playHappinessGain : 5;
+  const xpGain = miniGameWon ? settings.playXp : Math.floor(settings.playXp / 5);
+  const newHappiness = Math.min(100, effective.happiness + happinessGain);
   const { newLevel, newXp, leveledUp, newPhase } = addXp(pet, xpGain);
 
   db.run(
@@ -649,7 +685,6 @@ function playWithPet(petId, settings) {
   );
   saveDatabase();
 
-  // Pick a random message
   const messages = PLAY_MESSAGES[pet.species] || PLAY_MESSAGES.cat;
   const message = messages[Math.floor(Math.random() * messages.length)];
 
@@ -662,38 +697,22 @@ function playWithPet(petId, settings) {
     leveledUp,
     newLevel,
     newPhase,
+    miniGameWon,
     pet: { ...pet, happiness: newHappiness, last_decay_time: now, last_played: now, xp: newXp, level: newLevel },
   };
 }
 
 // ============ TRAIN ============
-function trainPet(petId, settings) {
-  if (!db) return { success: false, error: 'Database not available' };
-
+function trainPet(petId, settings, miniGameWon = true) {
   const pet = getPet(petId);
   if (!pet) return { success: false, error: 'Pet not found' };
   if (!settings) settings = getSettings(pet.guild_id);
 
   const effective = getEffectiveStats(pet, settings);
-  if (effective.ranAway) {
-    deletePet(petId);
-    return { success: false, error: 'ran_away', pet };
-  }
-
-  const phase = getPhase(pet.level);
-  if (!phase.canTrain) {
-    return { success: false, error: 'phase_locked', pet };
-  }
-
-  // Check cooldown
   const now = Date.now();
-  if (pet.last_trained && (now - pet.last_trained) < settings.trainCooldown * 1000) {
-    const readyAt = pet.last_trained + settings.trainCooldown * 1000;
-    return { success: false, error: 'cooldown', readyAt, pet };
-  }
 
   const newHappiness = Math.min(100, effective.happiness + settings.trainHappinessGain);
-  const xpGain = settings.trainXp;
+  const xpGain = miniGameWon ? Math.floor(settings.trainXp * 1.5) : settings.trainXp;
   const { newLevel, newXp, leveledUp, newPhase } = addXp(pet, xpGain);
 
   db.run(
@@ -702,7 +721,6 @@ function trainPet(petId, settings) {
   );
   saveDatabase();
 
-  // Pick a random message
   const messages = TRAIN_MESSAGES[pet.species] || TRAIN_MESSAGES.cat;
   const message = messages[Math.floor(Math.random() * messages.length)];
 
@@ -715,6 +733,7 @@ function trainPet(petId, settings) {
     leveledUp,
     newLevel,
     newPhase,
+    miniGameWon,
     pet: { ...pet, happiness: newHappiness, last_decay_time: now, last_trained: now, xp: newXp, level: newLevel },
   };
 }
@@ -963,8 +982,11 @@ module.exports = {
   // Care
   calculateFoodCost,
   feedPet,
+  precheckPlay,
+  precheckTrain,
   playWithPet,
   trainPet,
+  getTrainCost,
   // Leveling
   xpToNextLevel,
   getPhase,

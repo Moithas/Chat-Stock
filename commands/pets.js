@@ -7,7 +7,8 @@ const {
   getSettings, SPECIES, SHOP_SPECIES, RARITIES, PHASES,
   getShopStock, getShopRestockTime, removeShopSlot,
   adoptPet, getPet, getUserPets, getUserPetCount, deletePet, renamePet,
-  getEffectiveStats, processDecay, calculateFoodCost, feedPet, playWithPet, trainPet,
+  getEffectiveStats, processDecay, calculateFoodCost, feedPet,
+  precheckPlay, precheckTrain, playWithPet, trainPet, getTrainCost,
   xpToNextLevel, getPhase, formatPetName, formatPetSummary, formatShopEntry,
   formatBonusType, getSpecialtyDisplay, getSinglePetBonus,
   getKennel, upgradeKennel, getKennelUpgradeCost, getMaxPetSlots,
@@ -496,7 +497,12 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
 
   // Food cost
   const foodCost = calculateFoodCost(pet, settings);
-  desc += `🍖 Feed Cost: **${foodCost.toLocaleString()}** ${currency}\n`;
+  desc += `🍖 Feed Cost: **${foodCost.toLocaleString()}** ${currency}`;
+  if (phase.canTrain) {
+    const trainCost = getTrainCost(pet.level, settings);
+    desc += ` | 📚 Train Cost: **${trainCost.toLocaleString()}** ${currency}`;
+  }
+  desc += '\n';
 
   // Cooldown info
   const playCd = pet.last_played ? Math.max(0, (pet.last_played + settings.playCooldown * 1000) - now) : 0;
@@ -582,27 +588,42 @@ async function handleFeed(interaction, guildId, userId, settings) {
 
 async function handlePlay(interaction, guildId, userId, settings) {
   const petId = parsePetIdFromCustomId(interaction.customId);
-  const result = playWithPet(petId, settings);
+  const check = precheckPlay(petId, settings);
 
-  if (!result.success) {
-    if (result.error === 'ran_away') {
-      return interaction.update({ content: `😢 **${result.pet?.name}** ran away!`, embeds: [], components: [] });
+  if (!check.success) {
+    if (check.error === 'ran_away') {
+      return interaction.update({ content: `😢 **${check.pet?.name}** ran away!`, embeds: [], components: [] });
     }
-    if (result.error === 'cooldown') {
-      return interaction.reply({ content: `⏳ Play available <t:${Math.floor(result.readyAt / 1000)}:R>.`, flags: 64 });
+    if (check.error === 'cooldown') {
+      return interaction.reply({ content: `⏳ Play available <t:${Math.floor(check.readyAt / 1000)}:R>.`, flags: 64 });
     }
-    if (result.error === 'phase_locked') {
+    if (check.error === 'phase_locked') {
       return interaction.reply({ content: `❌ This pet can't play yet.`, flags: 64 });
     }
-    return interaction.reply({ content: '❌ ' + result.error, flags: 64 });
+    return interaction.reply({ content: '❌ ' + check.error, flags: 64 });
   }
 
-  const pet = getPet(petId);
-  if (!pet) return;
-
-  // Build a quick embed showing the play result
+  const pet = check.pet;
   const speciesData = SPECIES[pet.species];
-  let desc = `${speciesData.emoji} **${pet.name}** ${result.message}\n\n`;
+
+  // Pick a random mini-game
+  const games = ['fetch', 'hideseek', 'trick'];
+  const game = games[Math.floor(Math.random() * games.length)];
+
+  await interaction.deferUpdate();
+
+  let won = false;
+  if (game === 'fetch') won = await runFetchGame(interaction, pet, speciesData, userId, petId);
+  else if (game === 'hideseek') won = await runHideSeekGame(interaction, pet, speciesData, userId, petId);
+  else won = await runTrickGame(interaction, pet, speciesData, userId, petId);
+
+  // Apply result
+  const result = playWithPet(petId, settings, won);
+  if (!result.success) return;
+
+  let desc = won
+    ? `${speciesData.emoji} **${pet.name}** had a blast! 🎉\n\n`
+    : `${speciesData.emoji} **${pet.name}** still had fun trying! 😊\n\n`;
   desc += `+${result.xpGain} XP | ❤️ ${result.happinessBefore} → ${result.happinessAfter}`;
   if (result.leveledUp) {
     desc += `\n🎉 **Leveled up to ${result.newLevel}!**`;
@@ -610,8 +631,8 @@ async function handlePlay(interaction, guildId, userId, settings) {
   }
 
   const embed = new EmbedBuilder()
-    .setColor(0x2ECC71)
-    .setTitle('🎮 Play Time!')
+    .setColor(won ? 0x2ECC71 : 0xF39C12)
+    .setTitle(won ? '🎮 Great Play!' : '🎮 Nice Try!')
     .setDescription(desc)
     .setTimestamp();
 
@@ -620,40 +641,68 @@ async function handlePlay(interaction, guildId, userId, settings) {
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Main Panel').setEmoji('◀️').setStyle(ButtonStyle.Danger),
   );
 
-  return interaction.update({ embeds: [embed], components: [row] });
+  return interaction.editReply({ embeds: [embed], components: [row], files: [] });
 }
 
 async function handleTrain(interaction, guildId, userId, settings) {
   const petId = parsePetIdFromCustomId(interaction.customId);
-  const result = trainPet(petId, settings);
+  const check = precheckTrain(petId, settings);
 
-  if (!result.success) {
-    if (result.error === 'ran_away') {
-      return interaction.update({ content: `😢 **${result.pet?.name}** ran away!`, embeds: [], components: [] });
+  if (!check.success) {
+    if (check.error === 'ran_away') {
+      return interaction.update({ content: `😢 **${check.pet?.name}** ran away!`, embeds: [], components: [] });
     }
-    if (result.error === 'cooldown') {
-      return interaction.reply({ content: `⏳ Training available <t:${Math.floor(result.readyAt / 1000)}:R>.`, flags: 64 });
+    if (check.error === 'cooldown') {
+      return interaction.reply({ content: `⏳ Training available <t:${Math.floor(check.readyAt / 1000)}:R>.`, flags: 64 });
     }
-    if (result.error === 'phase_locked') {
+    if (check.error === 'phase_locked') {
       return interaction.reply({ content: `❌ Training unlocks at 🌱 Juvenile (Level 11).`, flags: 64 });
     }
-    return interaction.reply({ content: '❌ ' + result.error, flags: 64 });
+    return interaction.reply({ content: '❌ ' + check.error, flags: 64 });
   }
 
-  const pet = getPet(petId);
-  if (!pet) return;
-
+  const pet = check.pet;
   const speciesData = SPECIES[pet.species];
-  let desc = `${speciesData.emoji} **${pet.name}** ${result.message}\n\n`;
-  desc += `+${result.xpGain} XP | ❤️ ${result.happinessBefore} → ${result.happinessAfter}`;
+  const currency = getCurrency(guildId);
+  const cost = check.cost;
+
+  // Check balance
+  const bal = getBalance(guildId, userId);
+  if (bal < cost) {
+    return interaction.reply({ content: `❌ Training costs **${cost.toLocaleString()}** ${currency} but you only have **${bal.toLocaleString()}** ${currency}.`, flags: 64 });
+  }
+
+  // Pick a random mini-game
+  const games = ['fetch', 'hideseek', 'trick'];
+  const game = games[Math.floor(Math.random() * games.length)];
+
+  await interaction.deferUpdate();
+
+  let won = false;
+  if (game === 'fetch') won = await runFetchGame(interaction, pet, speciesData, userId, petId);
+  else if (game === 'hideseek') won = await runHideSeekGame(interaction, pet, speciesData, userId, petId);
+  else won = await runTrickGame(interaction, pet, speciesData, userId, petId);
+
+  // Deduct cost
+  await removeFromTotal(guildId, userId, cost);
+
+  // Apply result
+  const result = trainPet(petId, settings, won);
+  if (!result.success) return;
+
+  let desc = won
+    ? `${speciesData.emoji} **${pet.name}** nailed it! Perfect training! 💪\n\n`
+    : `${speciesData.emoji} **${pet.name}** learned from the attempt! 📖\n\n`;
+  desc += `+${result.xpGain} XP${won ? ' *(+50% bonus!)*' : ''} | ❤️ ${result.happinessBefore} → ${result.happinessAfter}`;
+  desc += `\n💰 Cost: **${cost.toLocaleString()}** ${currency}`;
   if (result.leveledUp) {
     desc += `\n🎉 **Leveled up to ${result.newLevel}!**`;
     if (result.newPhase) desc += ` Now a **${result.newPhase.emoji} ${result.newPhase.name}**!`;
   }
 
   const embed = new EmbedBuilder()
-    .setColor(0x9B59B6)
-    .setTitle('📚 Training Session')
+    .setColor(won ? 0x9B59B6 : 0xF39C12)
+    .setTitle(won ? '📚 Perfect Training!' : '📚 Training Complete')
     .setDescription(desc)
     .setTimestamp();
 
@@ -662,7 +711,151 @@ async function handleTrain(interaction, guildId, userId, settings) {
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Main Panel').setEmoji('◀️').setStyle(ButtonStyle.Danger),
   );
 
-  return interaction.update({ embeds: [embed], components: [row] });
+  return interaction.editReply({ embeds: [embed], components: [row], files: [] });
+}
+
+// ================== MINI-GAMES ==================
+
+const TRICK_EMOJIS = ['🐾', '🎵', '💫', '🔥', '❄️', '⚡', '🌙', '🎪', '🎯', '💎'];
+
+async function runFetchGame(interaction, pet, speciesData, userId, petId) {
+  // Phase 1: "Get ready..."
+  const readyEmbed = new EmbedBuilder()
+    .setColor(0x3498DB)
+    .setTitle('🎾 Fetch!')
+    .setDescription(`${speciesData.emoji} **${pet.name}** wiggles excitedly...\n\n*Get ready to catch the ball!*`);
+
+  await interaction.editReply({ embeds: [readyEmbed], components: [], files: [] });
+
+  // Random delay 2-4 seconds
+  const delay = 2000 + Math.floor(Math.random() * 2000);
+  await new Promise(r => setTimeout(r, delay));
+
+  // Phase 2: Show catch button
+  const ts = Date.now();
+  const catchEmbed = new EmbedBuilder()
+    .setColor(0xE67E22)
+    .setTitle('🎾 CATCH!')
+    .setDescription(`${speciesData.emoji} **${pet.name}** threw the ball!\n\n**Quick, press Catch!** ⏱️ *5 seconds!*`);
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`mg_catch_${petId}_${ts}`).setLabel('Catch!').setEmoji('🎾').setStyle(ButtonStyle.Success),
+  );
+
+  const msg = await interaction.editReply({ embeds: [catchEmbed], components: [row] });
+
+  try {
+    const resp = await msg.awaitMessageComponent({
+      filter: i => i.user.id === userId && i.customId.startsWith(`mg_catch_${petId}_`),
+      time: 5000,
+    });
+    await resp.deferUpdate();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function runHideSeekGame(interaction, pet, speciesData, userId, petId) {
+  const spots = [
+    { emoji: '🌳', label: 'Tree', id: 'tree' },
+    { emoji: '🪨', label: 'Rock', id: 'rock' },
+    { emoji: '🌺', label: 'Flowers', id: 'flowers' },
+  ];
+  const correctIdx = Math.floor(Math.random() * 3);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x3498DB)
+    .setTitle('🙈 Hide & Seek!')
+    .setDescription(`${speciesData.emoji} **${pet.name}** scurries off and hides!\n\n🔍 *Where are they hiding?*`);
+
+  const ts = Date.now();
+  const row = new ActionRowBuilder().addComponents(
+    spots.map((spot, i) =>
+      new ButtonBuilder()
+        .setCustomId(`mg_hide_${petId}_${spot.id}_${ts}`)
+        .setLabel(spot.label)
+        .setEmoji(spot.emoji)
+        .setStyle(ButtonStyle.Primary)
+    )
+  );
+
+  const msg = await interaction.editReply({ embeds: [embed], components: [row], files: [] });
+
+  try {
+    const resp = await msg.awaitMessageComponent({
+      filter: i => i.user.id === userId && i.customId.startsWith(`mg_hide_${petId}_`),
+      time: 15000,
+    });
+    await resp.deferUpdate();
+    const parts = resp.customId.split('_');
+    const picked = parts[3]; // mg_hide_petId_spotId_ts
+    return picked === spots[correctIdx].id;
+  } catch {
+    return false;
+  }
+}
+
+async function runTrickGame(interaction, pet, speciesData, userId, petId) {
+  // Pick 3 random emojis for the sequence
+  const shuffled = [...TRICK_EMOJIS].sort(() => Math.random() - 0.5);
+  const sequence = shuffled.slice(0, 3);
+  const sequenceStr = sequence.join(' ');
+
+  // Show the sequence to memorize
+  const showEmbed = new EmbedBuilder()
+    .setColor(0x3498DB)
+    .setTitle('🎪 Trick Time!')
+    .setDescription(`${speciesData.emoji} **${pet.name}** performs a trick!\n\n**Memorize this:** ${sequenceStr}\n\n⏱️ *You have 4 seconds...*`);
+
+  await interaction.editReply({ embeds: [showEmbed], components: [], files: [] });
+
+  // Wait for memorizing
+  await new Promise(r => setTimeout(r, 4000));
+
+  // Generate 3 wrong answers
+  const options = [sequenceStr];
+  while (options.length < 4) {
+    const wrong = [
+      TRICK_EMOJIS[Math.floor(Math.random() * TRICK_EMOJIS.length)],
+      TRICK_EMOJIS[Math.floor(Math.random() * TRICK_EMOJIS.length)],
+      TRICK_EMOJIS[Math.floor(Math.random() * TRICK_EMOJIS.length)],
+    ].join(' ');
+    if (!options.includes(wrong)) options.push(wrong);
+  }
+
+  // Shuffle options, track correct index
+  const shuffledOpts = options.sort(() => Math.random() - 0.5);
+  const correctValue = shuffledOpts.indexOf(sequenceStr).toString();
+
+  const hiddenEmbed = new EmbedBuilder()
+    .setColor(0xE67E22)
+    .setTitle('🎪 What was the trick?')
+    .setDescription(`${speciesData.emoji} **${pet.name}** looks at you expectantly...\n\n**What was the sequence?**`);
+
+  const ts = Date.now();
+  const selectRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`mg_trick_${petId}_${ts}`)
+      .setPlaceholder('Pick the correct sequence...')
+      .addOptions(shuffledOpts.map((opt, i) => ({
+        label: opt,
+        value: i.toString(),
+      })))
+  );
+
+  const msg = await interaction.editReply({ embeds: [hiddenEmbed], components: [selectRow] });
+
+  try {
+    const resp = await msg.awaitMessageComponent({
+      filter: i => i.user.id === userId && i.customId.startsWith(`mg_trick_${petId}_`),
+      time: 15000,
+    });
+    await resp.deferUpdate();
+    return resp.values[0] === correctValue;
+  } catch {
+    return false;
+  }
 }
 
 async function handleSetActive(interaction, guildId, userId, settings) {
