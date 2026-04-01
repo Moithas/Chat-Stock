@@ -4,7 +4,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require('discord.js');
 const {
-  getSettings, SPECIES, SHOP_SPECIES, RARITIES, PHASES,
+  getSettings, SPECIES, SHOP_SPECIES, RARITIES, PHASES, FOOD_TYPES,
   getShopStock, getShopRestockTime, removeShopSlot,
   adoptPet, getPet, getUserPets, getUserPetCount, deletePet, renamePet,
   getEffectiveStats, processDecay, calculateFoodCost, feedPet,
@@ -71,8 +71,10 @@ module.exports = {
       if (action === 'kennel' || action.startsWith('kennel_u_')) return showKennelPanel(interaction, guildId, userId, settings);
     }
 
-    // Pet action buttons: pet_feed_<petId>_u_<userId>, pet_play_<petId>_u_<userId>, etc.
+    // Pet action buttons: pet_feed_<type>_<petId>_u_<userId>, pet_play_<petId>_u_<userId>, etc.
+    if (customId.startsWith('pet_feedmenu_')) return handleFeedMenu(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_feed_')) return handleFeed(interaction, guildId, userId, settings);
+
     if (customId.startsWith('pet_play_')) return handlePlay(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_train_')) return handleTrain(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_active_')) return handleSetActive(interaction, guildId, userId, settings);
@@ -502,14 +504,16 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
     desc += `*Bonuses unlock at ${PHASES.adult.emoji} Adult (Level 26)*\n\n`;
   }
 
-  // Food cost
-  const foodCost = calculateFoodCost(pet, settings);
-  desc += `🍖 Feed Cost: **${foodCost.toLocaleString()}** ${currency}`;
+  // Food cost display
+  const basicCost = calculateFoodCost(pet, settings, 'basic');
+  const premiumCost = calculateFoodCost(pet, settings, 'premium');
+  const treatCost = calculateFoodCost(pet, settings, 'treat');
+  desc += `🍖 Basic: **${basicCost.toLocaleString()}** (+20 hunger) | 🥩 Premium: **${premiumCost.toLocaleString()}** (+40 hunger, +5 happy) | 🍰 Treat: **${treatCost.toLocaleString()}** (+15 happy)`;
+  desc += ` ${currency}\n`;
   if (phase.canTrain) {
     const trainCost = getTrainCost(pet.level, settings);
-    desc += ` | 📚 Train Cost: **${trainCost.toLocaleString()}** ${currency}`;
+    desc += `📚 Train Cost: **${trainCost.toLocaleString()}** ${currency}\n`;
   }
-  desc += '\n';
 
   // Cooldown info
   const playCd = pet.last_played ? Math.max(0, (pet.last_played + settings.playCooldown * 1000) - now) : 0;
@@ -535,9 +539,10 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   // Action buttons
   const canPlay = phase.canPlay && playCd <= 0;
   const canTrain = phase.canTrain && trainCd <= 0;
+  const isFull = effective.hunger >= 100 && effective.happiness >= 100;
 
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`pet_feed_${pet.id}_u_${userId}`).setLabel('Feed').setEmoji('🍖').setStyle(ButtonStyle.Success).setDisabled(effective.hunger >= 100),
+    new ButtonBuilder().setCustomId(`pet_feedmenu_${pet.id}_u_${userId}`).setLabel('Feed').setEmoji('🍖').setStyle(ButtonStyle.Success).setDisabled(isFull),
     new ButtonBuilder().setCustomId(`pet_play_${pet.id}_u_${userId}`).setLabel('Play').setEmoji('🎮').setStyle(ButtonStyle.Primary).setDisabled(!canPlay),
     new ButtonBuilder().setCustomId(`pet_train_${pet.id}_u_${userId}`).setLabel('Train').setEmoji('📚').setStyle(ButtonStyle.Primary).setDisabled(!canTrain),
     new ButtonBuilder().setCustomId(`pet_active_${pet.id}_u_${userId}`).setLabel(isActive ? 'Active' : 'Set Active').setEmoji('⚔️').setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(isActive),
@@ -555,21 +560,65 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
 
 // ================== PET ACTIONS ==================
 
-async function handleFeed(interaction, guildId, userId, settings) {
+async function handleFeedMenu(interaction, guildId, userId, settings) {
   const petId = parsePetIdFromCustomId(interaction.customId);
   const pet = getPet(petId);
   if (!pet || pet.owner_id !== userId) return interaction.reply({ content: '❌ Not your pet.', flags: 64 });
 
-  const cost = calculateFoodCost(pet, settings);
+  const effective = getEffectiveStats(pet, settings);
+  if (effective.ranAway) {
+    deletePet(petId);
+    return interaction.update({ content: `😢 **${pet.name}** ran away!`, embeds: [], components: [] });
+  }
+
+  const currency = getCurrency(guildId);
+  const basicCost = calculateFoodCost(pet, settings, 'basic');
+  const premiumCost = calculateFoodCost(pet, settings, 'premium');
+  const treatCost = calculateFoodCost(pet, settings, 'treat');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ECC71)
+    .setTitle(`🍖 Feed ${pet.name}`)
+    .setDescription(
+      `🍖 **Basic Food** — **${basicCost.toLocaleString()}** ${currency}\n` +
+      `+20 hunger\n\n` +
+      `🥩 **Premium Food** — **${premiumCost.toLocaleString()}** ${currency}\n` +
+      `+40 hunger, +5 happiness\n\n` +
+      `🍰 **Treat** — **${treatCost.toLocaleString()}** ${currency}\n` +
+      `+2 hunger, +15 happiness\n\n` +
+      `Current: ❤️ ${effective.happiness}/100 | 🍖 ${effective.hunger}/100`
+    );
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_feed_basic_${pet.id}_u_${userId}`).setLabel('Basic').setEmoji('🍖').setStyle(ButtonStyle.Success).setDisabled(effective.hunger >= 100),
+    new ButtonBuilder().setCustomId(`pet_feed_premium_${pet.id}_u_${userId}`).setLabel('Premium').setEmoji('🥩').setStyle(ButtonStyle.Success).setDisabled(effective.hunger >= 100 && effective.happiness >= 100),
+    new ButtonBuilder().setCustomId(`pet_feed_treat_${pet.id}_u_${userId}`).setLabel('Treat').setEmoji('🍰').setStyle(ButtonStyle.Success).setDisabled(effective.happiness >= 100),
+    new ButtonBuilder().setCustomId(`pet_view_${pet.id}_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
+  );
+
+  return interaction.update({ embeds: [embed], components: [row], files: [] });
+}
+
+async function handleFeed(interaction, guildId, userId, settings) {
+  const customId = interaction.customId;
+  const petId = parsePetIdFromCustomId(customId);
+  // Parse food type: pet_feed_<type>_<petId>_u_<userId>
+  const foodType = customId.split('_')[2] || 'basic';
+  const pet = getPet(petId);
+  if (!pet || pet.owner_id !== userId) return interaction.reply({ content: '❌ Not your pet.', flags: 64 });
+
+  const food = FOOD_TYPES[foodType] || FOOD_TYPES.basic;
+  const cost = calculateFoodCost(pet, settings, foodType);
+  const currency = getCurrency(guildId);
   const balance = await getBalance(guildId, userId);
   if (balance.total < cost) {
     return interaction.reply({
-      content: `❌ Feeding costs **${cost.toLocaleString()}** ${getCurrency(guildId)} but you only have **${Math.round(balance.total).toLocaleString()}**.`,
+      content: `❌ ${food.emoji} ${food.name} costs **${cost.toLocaleString()}** ${currency} but you only have **${Math.round(balance.total).toLocaleString()}**.`,
       flags: 64,
     });
   }
 
-  const result = feedPet(petId, settings);
+  const result = feedPet(petId, settings, foodType);
   if (!result.success) {
     if (result.error === 'ran_away') {
       return interaction.update({
@@ -580,16 +629,18 @@ async function handleFeed(interaction, guildId, userId, settings) {
     if (result.error === 'not_hungry') {
       return interaction.reply({ content: `❌ **${pet.name}** is already full!`, flags: 64 });
     }
+    if (result.error === 'already_happy') {
+      return interaction.reply({ content: `❌ **${pet.name}** is already at max happiness!`, flags: 64 });
+    }
     return interaction.reply({ content: '❌ ' + result.error, flags: 64 });
   }
 
-  await removeFromTotal(guildId, userId, cost, `Fed pet: ${pet.name}`);
+  await removeFromTotal(guildId, userId, cost, `Fed pet ${food.name}: ${pet.name}`);
 
   // Refresh the pet detail view
   const updatedPet = getPet(petId);
   if (!updatedPet) return interaction.update({ content: 'Pet not found after feeding.', embeds: [], components: [] });
 
-  // Quick feedback then show updated detail
   return showPetDetail(interaction, guildId, userId, settings, updatedPet);
 }
 

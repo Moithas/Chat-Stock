@@ -1202,7 +1202,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   // Handle pet panel buttons
-  if (interaction.isButton() && (interaction.customId.startsWith('pet_panel_') || interaction.customId.startsWith('pet_feed_') || interaction.customId.startsWith('pet_play_') || interaction.customId.startsWith('pet_train_') || interaction.customId.startsWith('pet_active_') || interaction.customId.startsWith('pet_dismiss_') || interaction.customId.startsWith('pet_view_') || interaction.customId.startsWith('pet_release_') || interaction.customId.startsWith('pet_rename_') || interaction.customId.startsWith('pet_buy_') || interaction.customId.startsWith('pet_kennel_') || interaction.customId.startsWith('pet_shop_page_'))) {
+  if (interaction.isButton() && (interaction.customId.startsWith('pet_panel_') || interaction.customId.startsWith('pet_feed_') || interaction.customId.startsWith('pet_feedmenu_') || interaction.customId.startsWith('pet_play_') || interaction.customId.startsWith('pet_train_') || interaction.customId.startsWith('pet_active_') || interaction.customId.startsWith('pet_dismiss_') || interaction.customId.startsWith('pet_view_') || interaction.customId.startsWith('pet_release_') || interaction.customId.startsWith('pet_rename_') || interaction.customId.startsWith('pet_buy_') || interaction.customId.startsWith('pet_kennel_') || interaction.customId.startsWith('pet_shop_page_'))) {
     try {
       const { handleButton } = require('./commands/pets');
       await handleButton(interaction);

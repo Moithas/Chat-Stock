@@ -49,6 +49,13 @@ const PHASES = {
   elder:    { name: 'Elder',    emoji: '👑', minLevel: 41, maxLevel: 50,  bonusMult: 1.25, canPlay: true,  canTrain: true,  canBreed: true  },
 };
 
+// ============ FOOD TYPES ============
+const FOOD_TYPES = {
+  basic:   { name: 'Basic Food',   emoji: '🍖', costMult: 1.0,  hunger: 20, happiness: 0  },
+  premium: { name: 'Premium Food', emoji: '🥩', costMult: 4.0,  hunger: 40, happiness: 5  },
+  treat:   { name: 'Treat',        emoji: '🍰', costMult: 2.0,  hunger: 2,  happiness: 15 },
+};
+
 // ============ PET IMAGES ============
 const PET_IMAGES_DIR = path.join(__dirname, 'assets', 'pets');
 const PHASE_NAMES = ['baby', 'juvenile', 'adult', 'elder'];
@@ -579,16 +586,17 @@ function processDecay(guildId, userId) {
 }
 
 // ============ FEEDING ============
-function calculateFoodCost(pet, settings) {
+function calculateFoodCost(pet, settings, foodType = 'basic') {
   if (!settings) settings = getSettings(pet.guild_id);
   const speciesData = SPECIES[pet.species];
   const rarityData = RARITIES[pet.rarity];
   const levelFactor = 1 + (pet.level - 1) * 0.03;
   const exoticFactor = speciesData.type === 'exotic' ? 1.5 : 1.0;
-  return Math.round(settings.baseFoodCost * levelFactor * rarityData.multiplier * exoticFactor);
+  const food = FOOD_TYPES[foodType] || FOOD_TYPES.basic;
+  return Math.round(settings.baseFoodCost * food.costMult * levelFactor * rarityData.multiplier * exoticFactor);
 }
 
-function feedPet(petId, settings) {
+function feedPet(petId, settings, foodType = 'basic') {
   if (!db) return { success: false, error: 'Database not available' };
 
   const pet = getPet(petId);
@@ -601,30 +609,104 @@ function feedPet(petId, settings) {
     return { success: false, error: 'ran_away', pet };
   }
 
-  if (effective.hunger >= 100) {
+  const food = FOOD_TYPES[foodType] || FOOD_TYPES.basic;
+
+  if (effective.hunger >= 100 && effective.happiness >= 100) {
     return { success: false, error: 'not_hungry', pet };
   }
+  if (food.hunger > 0 && effective.hunger >= 100 && food.happiness === 0) {
+    return { success: false, error: 'not_hungry', pet };
+  }
+  if (food.happiness > 0 && effective.happiness >= 100 && food.hunger === 0) {
+    return { success: false, error: 'already_happy', pet };
+  }
 
-  const cost = calculateFoodCost(pet, settings);
-  const newHunger = Math.min(100, effective.hunger + settings.feedHungerRestore);
+  const cost = calculateFoodCost(pet, settings, foodType);
+  const newHunger = Math.min(100, effective.hunger + food.hunger);
+  const newHappiness = Math.min(100, effective.happiness + food.happiness);
   const now = Date.now();
 
   const bondStreak = advanceBond(petId, pet);
 
   db.run(
-    'UPDATE pets SET hunger = ?, last_decay_time = ?, last_fed = ? WHERE id = ?',
-    [newHunger, now, now, petId]
+    'UPDATE pets SET hunger = ?, happiness = ?, last_decay_time = ?, last_fed = ? WHERE id = ?',
+    [newHunger, newHappiness, now, now, petId]
   );
   saveDatabase();
 
   return {
     success: true,
     cost,
+    foodType,
+    foodName: food.name,
+    foodEmoji: food.emoji,
     hungerBefore: effective.hunger,
     hungerAfter: newHunger,
+    happinessBefore: effective.happiness,
+    happinessAfter: newHappiness,
     bondStreak,
-    pet: { ...pet, hunger: newHunger, last_decay_time: now, last_fed: now, bond_streak: bondStreak },
+    pet: { ...pet, hunger: newHunger, happiness: newHappiness, last_decay_time: now, last_fed: now, bond_streak: bondStreak },
   };
+}
+
+function feedAllPets(guildId, userId, settings) {
+  if (!db) return { success: false, error: 'Database not available' };
+  if (!settings) settings = getSettings(guildId);
+
+  const pets = getUserPets(guildId, userId);
+  if (pets.length === 0) return { success: false, error: 'no_pets' };
+
+  let totalCost = 0;
+  const results = [];
+
+  for (const pet of pets) {
+    const effective = getEffectiveStats(pet, settings);
+    if (effective.ranAway) {
+      deletePet(pet.id);
+      results.push({ pet, status: 'ran_away' });
+      continue;
+    }
+    if (effective.hunger >= 100) {
+      results.push({ pet, status: 'full' });
+      continue;
+    }
+    const cost = calculateFoodCost(pet, settings, 'basic');
+    totalCost += cost;
+    results.push({ pet, status: 'fed', cost, hungerBefore: effective.hunger });
+  }
+
+  return { success: true, totalCost, results, petCount: pets.length };
+}
+
+function executeFeedAll(guildId, userId, settings) {
+  if (!db) return { success: false, error: 'Database not available' };
+  if (!settings) settings = getSettings(guildId);
+
+  const pets = getUserPets(guildId, userId);
+  const fed = [];
+  let totalCost = 0;
+  const now = Date.now();
+
+  for (const pet of pets) {
+    const effective = getEffectiveStats(pet, settings);
+    if (effective.ranAway) { deletePet(pet.id); continue; }
+    if (effective.hunger >= 100) continue;
+
+    const cost = calculateFoodCost(pet, settings, 'basic');
+    const food = FOOD_TYPES.basic;
+    const newHunger = Math.min(100, effective.hunger + food.hunger);
+    totalCost += cost;
+
+    advanceBond(pet.id, pet);
+    db.run(
+      'UPDATE pets SET hunger = ?, last_decay_time = ?, last_fed = ? WHERE id = ?',
+      [newHunger, now, now, pet.id]
+    );
+    fed.push({ name: pet.name, cost, hungerBefore: effective.hunger, hungerAfter: newHunger });
+  }
+
+  if (fed.length > 0) saveDatabase();
+  return { success: true, totalCost, fed };
 }
 
 // ============ PRECHECK (shared) ============
@@ -1008,6 +1090,7 @@ module.exports = {
   SHOP_SPECIES,
   RARITIES,
   PHASES,
+  FOOD_TYPES,
   // Settings
   getSettings,
   updateSettings,
@@ -1032,6 +1115,7 @@ module.exports = {
   // Care
   calculateFoodCost,
   feedPet,
+
   precheckPlay,
   precheckTrain,
   playWithPet,
