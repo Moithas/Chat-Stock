@@ -205,7 +205,7 @@ function initPets(database) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_pet_shop_guild ON pet_shop(guild_id)`);
 
   // Migration: add is_active column
-  migrateAddColumn('pets', 'is_active', 'INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'pets', 'is_active INTEGER DEFAULT 0');
 
   saveDatabase();
   console.log('🐾 Pet system initialized');
