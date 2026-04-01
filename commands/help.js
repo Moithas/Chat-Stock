@@ -693,6 +693,82 @@ const helpPages = {
     ]
   },
   
+  pets: {
+    title: '🐾 Pet System',
+    color: 0x2ECC71,
+    description: `Adopt, raise, and train pets for passive bonuses across the economy!`,
+    fields: [
+      {
+        name: '🛒 Adopting Pets',
+        value:
+          `Use \`/pets\` to open the **Pet Panel**.\n` +
+          `• Browse the **Pet Shop** — 18 random pets, restocks every 12h\n` +
+          `• 10 species: 🐱 Cat, 🐶 Dog, 🐦 Bird, 🕷️ Spider, 🐻 Bear, 🐼 Panda + 4 exotic\n` +
+          `• Rarities: Common, Uncommon, Rare (Epic & Legendary from breeding)\n` +
+          `• Each pet has a random sex (♂/♀) and 1% shiny chance (✨ +10% bonus)`,
+        inline: false
+      },
+      {
+        name: '📈 Growth Phases',
+        value:
+          `Pets level from 1–50 through play & training:\n` +
+          `• 🏒 **Baby** (1–10) — Can Play\n` +
+          `• 🌱 **Juvenile** (11–25) — Can Play + Train\n` +
+          `• ⭐ **Adult** (26–40) — **Bonuses activate!** Can breed\n` +
+          `• 👑 **Elder** (41–50) — Bonuses buffed 1.25×`,
+        inline: false
+      },
+      {
+        name: '🎮 Play & 📚 Train',
+        value:
+          `Both launch a random **mini-game**:\n` +
+          `• 🎾 **Fetch** — React fast to catch the ball (5s)\n` +
+          `• 🙈 **Hide & Seek** — Pick 1 of 3 hiding spots\n` +
+          `• 🎪 **Trick** — Memorize a 3-emoji sequence\n\n` +
+          `**Play** (free): Win → +15 ❤️ +50 XP | Lose → +5 ❤️ +10 XP\n` +
+          `**Train** (costs 💰): Win → +50% bonus XP | Lose → base XP, no penalty`,
+        inline: false
+      },
+      {
+        name: '⚔️ Active Pet & Bonuses',
+        value:
+          `Only your **active pet** provides bonuses (set in pet detail).\n` +
+          `• 🐱 Cat → +% Work payout\n` +
+          `• 🐶 Dog → +% Rob/Hack defense\n` +
+          `• 🐦 Bird → +% Rob/Hack offense\n` +
+          `• 🕷️ Spider → +% Vault earnings\n` +
+          `• 🐻 Bear → -% Property upgrade time\n` +
+          `• 🐼 Panda → +% Gambling payout\n` +
+          `Bonus scales with rarity, phase, happiness & shiny status.`,
+        inline: false
+      },
+      {
+        name: '🍖 Care & Decay',
+        value:
+          `• **Hunger** decays daily — feed your pet or it **runs away forever**\n` +
+          `• **Happiness** decays daily — affects bonus strength\n` +
+          `• Feed costs scale with level and rarity`,
+        inline: false
+      },
+      {
+        name: '🤝 Bond',
+        value:
+          `• Each day you care for your pet (feed/play/train) builds a **bond streak**\n` +
+          `• Missing a day **resets the streak to 0**\n` +
+          `• Bond multiplies bonuses: 1.0× at 0 days → **1.5×** at 30+ days`,
+        inline: false
+      },
+      {
+        name: '🏠 Kennel & Slots',
+        value:
+          `• Base 2 pet slots + prestige bonuses + kennel upgrades (max 10)\n` +
+          `• Upgrade your kennel in the Pet Panel for more slots\n` +
+          `• 📢 **Show Off** your pet with a public embed!`,
+        inline: false
+      }
+    ]
+  },
+
   admin: {
     title: '⚙️ Admin Commands',
     color: 0x607d8b,
@@ -786,7 +862,8 @@ function buildHelpMenu(currentPage = 'overview', isAdmin = false) {
     { label: 'Events & Leaderboard', description: 'Market events, vault & rankings', value: 'events', emoji: '🎪', default: currentPage === 'events' },
     { label: 'Infamy & Bounty', description: 'Criminal reputation system', value: 'infamy', emoji: '🏴‍☠️', default: currentPage === 'infamy' },
     { label: 'Player Profile', description: 'View detailed player stats', value: 'profile', emoji: '📋', default: currentPage === 'profile' },
-    { label: 'Prestige', description: 'Prestige tiers & permanent bonuses', value: 'prestige', emoji: '🎖️', default: currentPage === 'prestige' }
+    { label: 'Prestige', description: 'Prestige tiers & permanent bonuses', value: 'prestige', emoji: '🎖️', default: currentPage === 'prestige' },
+    { label: 'Pets', description: 'Adopt, raise & train pets for bonuses', value: 'pets', emoji: '🐾', default: currentPage === 'pets' }
   ];
   
   // Only show admin option to admins

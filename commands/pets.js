@@ -8,7 +8,7 @@ const {
   getShopStock, getShopRestockTime, removeShopSlot,
   adoptPet, getPet, getUserPets, getUserPetCount, deletePet, renamePet,
   getEffectiveStats, processDecay, calculateFoodCost, feedPet,
-  precheckPlay, precheckTrain, playWithPet, trainPet, getTrainCost,
+  precheckPlay, precheckTrain, playWithPet, trainPet, getTrainCost, getBondMultiplier,
   xpToNextLevel, getPhase, formatPetName, formatPetSummary, formatShopEntry,
   formatBonusType, getSpecialtyDisplay, getSinglePetBonus,
   getKennel, upgradeKennel, getKennelUpgradeCost, getMaxPetSlots,
@@ -482,7 +482,12 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   desc += makeXpBar(pet) + '\n\n';
 
   desc += makeMeter(effective.happiness, 100, '❤️') + '\n';
-  desc += makeMeter(effective.hunger, 100, '🍖') + '\n\n';
+  desc += makeMeter(effective.hunger, 100, '🍖') + '\n';
+
+  // Bond
+  const bondStreak = pet.bond_streak || 0;
+  const bondMult = getBondMultiplier(bondStreak);
+  desc += `🤝 Bond: **${bondStreak}** day streak (${bondMult.toFixed(2)}× bonus)\n\n`;
 
   // Bonuses
   const bonusTypes = Object.keys(speciesData.specialties);
@@ -892,7 +897,12 @@ async function handleShowOff(interaction, guildId, userId, settings) {
   desc += `${sexEmoji} **${rarityData.name} ${speciesData.name}** ${pet.shiny ? '✨ **Shiny**' : ''}\n`;
   desc += `${phase.emoji} **${phase.name}** — Level **${pet.level}**/50\n`;
   desc += makeMeter(effective.happiness, 100, '❤️') + '\n';
-  desc += makeMeter(effective.hunger, 100, '🍖') + '\n\n';
+  desc += makeMeter(effective.hunger, 100, '🍖') + '\n';
+
+  // Bond
+  const bondStreak = pet.bond_streak || 0;
+  const bondMult = getBondMultiplier(bondStreak);
+  desc += `🤝 Bond: **${bondStreak}** day streak (${bondMult.toFixed(2)}× bonus)\n\n`;
 
   // Bonuses
   const bonusTypes = Object.keys(speciesData.specialties);

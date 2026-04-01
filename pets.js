@@ -174,7 +174,9 @@ function initPets(database) {
       last_trained INTEGER,
       born_at INTEGER NOT NULL,
       source TEXT DEFAULT 'shop',
-      is_active INTEGER DEFAULT 0
+      is_active INTEGER DEFAULT 0,
+      bond_streak INTEGER DEFAULT 0,
+      last_care_day INTEGER DEFAULT 0
     )
   `);
 
@@ -206,6 +208,9 @@ function initPets(database) {
 
   // Migration: add is_active column
   migrateAddColumn(db, 'pets', 'is_active INTEGER DEFAULT 0');
+  // Migration: add bond columns
+  migrateAddColumn(db, 'pets', 'bond_streak INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'pets', 'last_care_day INTEGER DEFAULT 0');
 
   saveDatabase();
   console.log('🐾 Pet system initialized');
@@ -598,6 +603,8 @@ function feedPet(petId, settings) {
   const newHunger = Math.min(100, effective.hunger + settings.feedHungerRestore);
   const now = Date.now();
 
+  const bondStreak = advanceBond(petId, pet);
+
   db.run(
     'UPDATE pets SET hunger = ?, last_decay_time = ?, last_fed = ? WHERE id = ?',
     [newHunger, now, now, petId]
@@ -609,7 +616,8 @@ function feedPet(petId, settings) {
     cost,
     hungerBefore: effective.hunger,
     hungerAfter: newHunger,
-    pet: { ...pet, hunger: newHunger, last_decay_time: now, last_fed: now },
+    bondStreak,
+    pet: { ...pet, hunger: newHunger, last_decay_time: now, last_fed: now, bond_streak: bondStreak },
   };
 }
 
@@ -665,6 +673,37 @@ function getTrainCost(level, settings) {
   return Math.floor(base * (1 + 2 * (level - 1) / 49));
 }
 
+// ============ BOND ============
+function getDayNumber(timestamp) {
+  return Math.floor(timestamp / 86400000);
+}
+
+function advanceBond(petId, pet) {
+  const now = Date.now();
+  const today = getDayNumber(now);
+  const lastDay = pet.last_care_day || 0;
+
+  if (today === lastDay) return pet.bond_streak || 0; // Already cared today
+
+  let streak = pet.bond_streak || 0;
+  if (today === lastDay + 1) {
+    streak++; // Consecutive day
+  } else if (lastDay > 0) {
+    streak = 1; // Missed a day, reset
+  } else {
+    streak = 1; // First care ever
+  }
+
+  db.run('UPDATE pets SET bond_streak = ?, last_care_day = ? WHERE id = ?', [streak, today, petId]);
+  return streak;
+}
+
+function getBondMultiplier(bondStreak) {
+  // 1.0x at 0 days, scales to 1.5x at 30+ days
+  const capped = Math.min(bondStreak, 30);
+  return 1.0 + (capped / 30) * 0.5;
+}
+
 // ============ PLAY ============
 function playWithPet(petId, settings, miniGameWon = true) {
   const pet = getPet(petId);
@@ -673,6 +712,7 @@ function playWithPet(petId, settings, miniGameWon = true) {
 
   const effective = getEffectiveStats(pet, settings);
   const now = Date.now();
+  const bondStreak = advanceBond(petId, pet);
 
   const happinessGain = miniGameWon ? settings.playHappinessGain : 5;
   const xpGain = miniGameWon ? settings.playXp : Math.floor(settings.playXp / 5);
@@ -710,6 +750,7 @@ function trainPet(petId, settings, miniGameWon = true) {
 
   const effective = getEffectiveStats(pet, settings);
   const now = Date.now();
+  const bondStreak = advanceBond(petId, pet);
 
   const newHappiness = Math.min(100, effective.happiness + settings.trainHappinessGain);
   const xpGain = miniGameWon ? Math.floor(settings.trainXp * 1.5) : settings.trainXp;
@@ -832,12 +873,15 @@ function getSinglePetBonus(pet, bonusType, settings) {
   const rarityData = RARITIES[pet.rarity];
   if (!rarityData) return 0;
 
+  const bondMult = getBondMultiplier(pet.bond_streak || 0);
+
   return settings.baseBonusPercent
     * specialtyMult
     * rarityData.multiplier
     * phase.bonusMult
     * (effective.happiness / 100)
-    * (pet.shiny ? settings.shinyBonusMultiplier : 1.0);
+    * (pet.shiny ? settings.shinyBonusMultiplier : 1.0)
+    * bondMult;
 }
 
 // ============ PET SLOTS ============
@@ -987,6 +1031,7 @@ module.exports = {
   playWithPet,
   trainPet,
   getTrainCost,
+  getBondMultiplier,
   // Leveling
   xpToNextLevel,
   getPhase,
