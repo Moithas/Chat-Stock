@@ -504,12 +504,6 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
     desc += `*Bonuses unlock at ${PHASES.adult.emoji} Adult (Level 26)*\n\n`;
   }
 
-  // Food cost display
-  const basicCost = calculateFoodCost(pet, settings, 'basic');
-  const premiumCost = calculateFoodCost(pet, settings, 'premium');
-  const treatCost = calculateFoodCost(pet, settings, 'treat');
-  desc += `🍖 Basic: **${basicCost.toLocaleString()}** (+20 hunger) | 🥩 Premium: **${premiumCost.toLocaleString()}** (+40 hunger, +5 happy) | 🍰 Treat: **${treatCost.toLocaleString()}** (+15 happy)`;
-  desc += ` ${currency}\n`;
   if (phase.canTrain) {
     const trainCost = getTrainCost(pet.level, settings);
     desc += `📚 Train Cost: **${trainCost.toLocaleString()}** ${currency}\n`;
