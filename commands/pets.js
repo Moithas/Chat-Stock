@@ -23,7 +23,7 @@ module.exports = {
     .setDescription('Pet panel — adopt, care for, and manage your pets'),
 
   async execute(interaction) {
-    await interaction.deferReply({ flags: 64 });
+    await interaction.deferReply();
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     const settings = getSettings(guildId);
@@ -77,6 +77,7 @@ module.exports = {
     if (customId.startsWith('pet_train_')) return handleTrain(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_active_')) return handleSetActive(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_showoff_')) return handleShowOff(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_dismiss_')) return interaction.message.delete().catch(() => {});
     if (customId.startsWith('pet_view_')) return handleViewPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_release_')) return handleReleaseConfirm(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_release_yes_')) return handleReleaseExecute(interaction, guildId, userId, settings);
@@ -193,12 +194,13 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
     new ButtonBuilder().setCustomId(`pet_panel_shop_u_${userId}`).setLabel('Pet Shop').setEmoji('🛒').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('My Pets').setEmoji('🐾').setStyle(ButtonStyle.Primary).setDisabled(pets.length === 0),
     new ButtonBuilder().setCustomId(`pet_panel_kennel_u_${userId}`).setLabel('Kennel').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`pet_dismiss_u_${userId}`).setLabel('Dismiss').setEmoji('❌').setStyle(ButtonStyle.Danger),
   );
 
   const options = { embeds: [embed], components: [row1] };
   if (isDeferred) return interaction.editReply(options);
   if (isUpdate) return interaction.update(options);
-  return interaction.reply({ ...options, flags: 64 });
+  return interaction.reply(options);
 }
 
 // ================== SHOP PANEL ==================
@@ -335,7 +337,7 @@ async function handleNameModal(interaction, guildId, userId, settings) {
     return interaction.reply({ content: '❌ Pet name must be 1-24 characters.', flags: 64 });
   }
 
-  await interaction.deferReply({ flags: 64 });
+  await interaction.deferReply();
 
   const stock = getShopStock(guildId);
   const item = stock.find(s => s.slot_number === slotNumber);

@@ -781,7 +781,7 @@ function trainPet(petId, settings, miniGameWon = true) {
 
 // ============ XP & LEVELING ============
 function xpToNextLevel(level) {
-  return level * 15;
+  return level * 11;
 }
 
 function addXp(pet, amount) {
