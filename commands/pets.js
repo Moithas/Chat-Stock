@@ -76,7 +76,6 @@ module.exports = {
     if (customId.startsWith('pet_play_')) return handlePlay(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_train_')) return handleTrain(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_active_')) return handleSetActive(interaction, guildId, userId, settings);
-    if (customId.startsWith('pet_showoff_')) return handleShowOff(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_dismiss_')) return interaction.message.delete().catch(() => {});
     if (customId.startsWith('pet_view_')) return handleViewPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_release_')) return handleReleaseConfirm(interaction, guildId, userId, settings);
@@ -515,7 +514,7 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   // Cooldown info
   const playCd = pet.last_played ? Math.max(0, (pet.last_played + settings.playCooldown * 1000) - now) : 0;
   const trainCd = pet.last_trained ? Math.max(0, (pet.last_trained + settings.trainCooldown * 1000) - now) : 0;
-  desc += `🎮 Play: ${playCd > 0 ? formatCooldown(playCd) : '✅ Ready'} | 📚 Train: ${trainCd > 0 ? formatCooldown(trainCd) : '✅ Ready'}\n`;
+  desc += `🎮 Play: ${playCd > 0 ? formatCooldown(playCd) : '✅ Ready'} | 📚 Train: ${!phase.canTrain ? '🔒 Locked' : (trainCd > 0 ? formatCooldown(trainCd) : '✅ Ready')}\n`;
 
   // Source / age
   const ageMs = now - pet.born_at;
@@ -545,7 +544,6 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   );
 
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`pet_showoff_${pet.id}_u_${userId}`).setLabel('Show Off').setEmoji('📢').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`pet_rename_${pet.id}_u_${userId}`).setLabel('Rename').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`pet_release_${pet.id}_u_${userId}`).setLabel('Release').setEmoji('🔓').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('All Pets').setEmoji('🐾').setStyle(ButtonStyle.Secondary),
@@ -877,67 +875,6 @@ async function handleSetActive(interaction, guildId, userId, settings) {
   // Refresh detail view with updated active state
   const updatedPet = getPet(petId);
   return showPetDetail(interaction, guildId, userId, settings, updatedPet);
-}
-
-async function handleShowOff(interaction, guildId, userId, settings) {
-  const petId = parsePetIdFromCustomId(interaction.customId);
-  const pet = getPet(petId);
-  if (!pet || pet.owner_id !== userId) return interaction.reply({ content: '❌ Pet not found.', flags: 64 });
-
-  const effective = getEffectiveStats(pet, settings);
-  const speciesData = SPECIES[pet.species];
-  const rarityData = RARITIES[pet.rarity];
-  const phase = getPhase(pet.level);
-  const sexEmoji = pet.sex === 'M' ? '♂️' : '♀️';
-  const shinyStr = pet.shiny ? '✨ ' : '';
-  const isActive = pet.is_active === 1;
-
-  const now = Date.now();
-  const ageDays = Math.floor((now - pet.born_at) / 86400000);
-
-  let desc = `**Owner:** <@${userId}>\n`;
-  desc += `${sexEmoji} **${rarityData.name} ${speciesData.name}** ${pet.shiny ? '✨ **Shiny**' : ''}\n`;
-  desc += `${phase.emoji} **${phase.name}** — Level **${pet.level}**/50\n`;
-  desc += makeMeter(effective.happiness, 100, '❤️') + '\n';
-  desc += makeMeter(effective.hunger, 100, '🍖') + '\n';
-
-  // Bond
-  const bondStreak = pet.bond_streak || 0;
-  const bondMult = getBondMultiplier(bondStreak);
-  desc += `🤝 Bond: **${bondStreak}** day streak (${bondMult.toFixed(2)}× bonus)\n\n`;
-
-  // Bonuses
-  const bonusTypes = Object.keys(speciesData.specialties);
-  if (phase.bonusMult > 0) {
-    const bonusLines = bonusTypes.map(bt => {
-      const bonus = getSinglePetBonus(pet, bt, settings);
-      return `${formatBonusType(bt)}: **+${bonus.toFixed(1)}%**`;
-    });
-    desc += bonusLines.join(' | ') + '\n';
-  }
-
-  desc += `📅 Age: ${ageDays} day${ageDays !== 1 ? 's' : ''}`;
-  if (isActive) desc += ' | ⚔️ **Active Pet**';
-
-  const embed = new EmbedBuilder()
-    .setColor(rarityData.color)
-    .setTitle(`${shinyStr}${speciesData.emoji} ${pet.name}`)
-    .setDescription(desc)
-    .setFooter({ text: `${rarityData.name} ${speciesData.name} • Lv.${pet.level}` })
-    .setTimestamp();
-
-  // Attach pet image
-  let files = [];
-  const petImage = getPetImagePath(pet.species, phase.name.toLowerCase());
-  if (petImage) {
-    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
-    embed.setImage(`attachment://${petImage.fileName}`);
-    files.push(attachment);
-  }
-
-  // Send public message, then ack the button
-  await interaction.channel.send({ embeds: [embed], files });
-  return interaction.reply({ content: '📢 Showed off your pet!', flags: 64 });
 }
 
 async function handleViewPet(interaction, guildId, userId, settings) {

@@ -910,12 +910,27 @@ module.exports = {
     const components = [menu];
     const linkRow = buildLinkButtons(interaction.guildId);
     if (linkRow) components.push(linkRow);
+
+    const dismissRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`help_dismiss_u_${interaction.user.id}`).setLabel('Dismiss').setEmoji('❌').setStyle(ButtonStyle.Danger)
+    );
+    components.push(dismissRow);
     
     await interaction.reply({ embeds: [embed], components });
   },
   
   // Handle menu interactions
   async handleInteraction(interaction) {
+    // Handle dismiss button
+    if (interaction.isButton() && interaction.customId.startsWith('help_dismiss_u_')) {
+      const ownerId = interaction.customId.split('help_dismiss_u_')[1];
+      if (interaction.user.id !== ownerId) {
+        return interaction.reply({ content: '❌ Only the person who used /help can dismiss it.', flags: 64 });
+      }
+      await interaction.message.delete().catch(() => {});
+      return true;
+    }
+
     if (!interaction.isStringSelectMenu()) return false;
     if (interaction.customId !== 'help_menu') return false;
     
