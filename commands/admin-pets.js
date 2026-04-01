@@ -109,8 +109,8 @@ async function showPetsAdminPanel(interaction, guildId) {
 async function handleToggle(interaction, guildId) {
   const settings = getSettings(guildId);
   updateSettings(guildId, { enabled: !settings.enabled });
-  logAdminAction(guildId, interaction.user.id, `Pet system ${!settings.enabled ? 'enabled' : 'disabled'}`);
   await interaction.deferUpdate();
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Pet system ${!settings.enabled ? 'enabled' : 'disabled'}`);
   await showPetsAdminPanel(interaction, guildId);
 }
 
@@ -165,7 +165,7 @@ async function handleSettingsSubmit(interaction, guildId) {
     trainCooldown: Math.round(cooldownHours * 3600),
   });
 
-  logAdminAction(guildId, interaction.user.id, 'Updated pet core settings');
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'Updated pet core settings');
   await showPetsAdminPanel(interaction, guildId);
 }
 
@@ -223,7 +223,7 @@ async function handleEconomySubmit(interaction, guildId) {
     happinessDecayPerDay: Math.max(1, decayParts[1] || decayParts[0]),
   });
 
-  logAdminAction(guildId, interaction.user.id, 'Updated pet economy settings');
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'Updated pet economy settings');
   await showPetsAdminPanel(interaction, guildId);
 }
 
@@ -266,7 +266,7 @@ async function handleKennelSubmit(interaction, guildId) {
     eggPrismaticPrice: Math.max(0, eggParts[2]),
   });
 
-  logAdminAction(guildId, interaction.user.id, 'Updated kennel & egg prices');
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'Updated kennel & egg prices');
   await showPetsAdminPanel(interaction, guildId);
 }
 
@@ -274,7 +274,7 @@ async function handleKennelSubmit(interaction, guildId) {
 async function handleForceRestock(interaction, guildId) {
   await interaction.deferUpdate();
   generateShopStock(guildId);
-  logAdminAction(guildId, interaction.user.id, 'Force restocked pet shop');
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'Force restocked pet shop');
   await showPetsAdminPanel(interaction, guildId);
 }
 
