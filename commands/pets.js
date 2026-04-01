@@ -76,7 +76,7 @@ module.exports = {
     if (customId.startsWith('pet_play_')) return handlePlay(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_train_')) return handleTrain(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_active_')) return handleSetActive(interaction, guildId, userId, settings);
-    if (customId.startsWith('pet_dismiss_')) { await interaction.deferUpdate().catch(() => {}); return interaction.message.delete().catch(() => {}); }
+    if (customId.startsWith('pet_dismiss_')) { await interaction.update({ content: '✅ Dismissed', embeds: [], components: [], files: [] }).catch(() => {}); await interaction.deleteReply().catch(() => {}); return; }
     if (customId.startsWith('pet_view_')) return handleViewPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_release_')) return handleReleaseConfirm(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_release_yes_')) return handleReleaseExecute(interaction, guildId, userId, settings);
