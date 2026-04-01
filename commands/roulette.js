@@ -11,6 +11,7 @@ const {
   getRouletteStats
 } = require('../gambling');
 const { getCurrency } = require('../admin');
+const { applyGamblingBonus } = require('../pets');
 
 
 const BETTING_WINDOW = 30000; // 30 seconds to place bets
@@ -155,7 +156,7 @@ async function spinWheel(table) {
     const won = checkRouletteBet(bet.choice, number);
     
     if (won) {
-      const winnings = bet.amount * bet.payout;
+      const winnings = applyGamblingBonus(table.guildId, bet.userId, bet.amount * bet.payout);
       await addMoney(table.guildId, bet.userId, winnings, 'Roulette win');
       updateRouletteStats(bet.userId, true, winnings - bet.amount);
       totalWon += winnings - bet.amount;

@@ -18,6 +18,7 @@ const {
 } = require('../letitride');
 const { generateLetItRideImage } = require('../cardImages');
 const { getCurrency } = require('../admin');
+const { applyGamblingBonus } = require('../pets');
 
 
 
@@ -392,8 +393,9 @@ async function processResult(interaction, game) {
   const userId = game.userId;
   
   if (game.payout > 0) {
-    // Player won - pay out winnings + return remaining bets
-    const totalReturn = game.payout + (game.betAmount * game.betsRemaining);
+    // Player won - pay out winnings + return remaining bets (pet bonus on winnings only)
+    const boostedPayout = applyGamblingBonus(guildId, userId, game.payout);
+    const totalReturn = boostedPayout + (game.betAmount * game.betsRemaining);
     await addMoney(guildId, userId, totalReturn, 'Let It Ride winnings');
   }
   // If payout <= 0, bets were already deducted at start

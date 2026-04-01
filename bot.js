@@ -35,6 +35,7 @@ const { initLuckyPenny } = require('./luckypenny');
 const { initBumpReward, getBumpSettings, getBumpStats, isDisboardBump, extractBumperUserId, rollBumpReward, recordBump } = require('./bumpreward');
 const { initInfamy, decayAllInfamy } = require('./infamy');
 const { initPrestige } = require('./prestige');
+const { initPets } = require('./pets');
 const { initPremium } = require('./premium');
 const fs = require('fs');
 const path = require('path');
@@ -421,6 +422,9 @@ client.once('clientReady', async () => {
 
   // Initialize prestige system
   initPrestige(getDb());
+
+  // Initialize pet system
+  initPets(getDb());
 
   // Initialize premium tier system
   initPremium(getDb());
@@ -1197,6 +1201,57 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Handle pet panel buttons
+  if (interaction.isButton() && (interaction.customId.startsWith('pet_panel_') || interaction.customId.startsWith('pet_feed_') || interaction.customId.startsWith('pet_play_') || interaction.customId.startsWith('pet_train_') || interaction.customId.startsWith('pet_active_') || interaction.customId.startsWith('pet_view_') || interaction.customId.startsWith('pet_release_') || interaction.customId.startsWith('pet_rename_') || interaction.customId.startsWith('pet_buy_') || interaction.customId.startsWith('pet_kennel_') || interaction.customId.startsWith('pet_shop_page_'))) {
+    try {
+      const { handleButton } = require('./commands/pets');
+      await handleButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'pets button', error });
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) {}
+    }
+    return;
+  }
+
+  // Handle pet panel select menus
+  if (interaction.isStringSelectMenu() && (interaction.customId.startsWith('pet_select_') || interaction.customId.startsWith('pet_shop_select_'))) {
+    try {
+      const { handleSelectMenu } = require('./commands/pets');
+      await handleSelectMenu(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'pets select', error });
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) {}
+    }
+    return;
+  }
+
+  // Handle pet panel modals
+  if (interaction.isModalSubmit() && (interaction.customId.startsWith('modal_pet_name_') || interaction.customId.startsWith('modal_pet_rename_'))) {
+    try {
+      const { handleModal } = require('./commands/pets');
+      await handleModal(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'pets modal', error });
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) {}
+    }
+    return;
+  }
+
   // Handle profile user select menu
   if (interaction.isUserSelectMenu() && interaction.customId === 'profile_user_select') {
     try {
@@ -1604,6 +1659,10 @@ client.on('interactionCreate', async (interaction) => {
       // Prestige
       'admin_prestige', 'prestige_toggle', 'prestige_edit_settings', 'prestige_view_leaderboard', 'back_prestige',
       'modal_prestige_settings',
+      // Pets
+      'admin_pets_toggle', 'admin_pets_settings', 'admin_pets_restock',
+      'admin_pets_economy', 'admin_pets_kennel', 'back_admin_pets',
+      'modal_admin_pets_settings', 'modal_admin_pets_economy', 'modal_admin_pets_kennel',
     ];
     
     // Check for exact match OR dynamic card/property edit IDs

@@ -1150,7 +1150,15 @@ function startUpgradeStage(guildId, userId, ownedPropertyId, stage, propertyLeve
   
   // Calculate completion time
   const { times } = getUpgradeCosts(propertyLevel);
-  const hours = times[stage];
+  let hours = times[stage];
+  
+  // Apply pet property bonus (bear specialty — reduces upgrade time)
+  try {
+    const { getPetBonusDecimal } = require('./pets');
+    const propertyBonus = getPetBonusDecimal(guildId, userId, 'property');
+    if (propertyBonus > 0) hours = hours * (1 - Math.min(propertyBonus, 0.5));
+  } catch (e) { /* pets not loaded */ }
+  
   const completesAt = Date.now() + (hours * 60 * 60 * 1000);
   
   // Insert or update upgrade record

@@ -1054,7 +1054,15 @@ async function spawnVault(guildId) {
         }
       } else {
         // Normal reward
-        const reward = Math.floor(Math.random() * (vaultData.maxReward - vaultData.minReward + 1)) + vaultData.minReward;
+        let reward = Math.floor(Math.random() * (vaultData.maxReward - vaultData.minReward + 1)) + vaultData.minReward;
+        
+        // Apply pet vault bonus (spider specialty)
+        try {
+          const { getPetBonusDecimal } = require('./pets');
+          const vaultBonus = getPetBonusDecimal(guildId, interaction.user.id, 'vault');
+          if (vaultBonus > 0) reward = Math.floor(reward * (1 + vaultBonus));
+        } catch (e) { /* pets not loaded */ }
+        
         vaultData.rewards.push({ userId: interaction.user.id, username: interaction.user.username, reward, reactionMs, reactionDisplay });
         
         try {

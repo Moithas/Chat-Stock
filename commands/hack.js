@@ -30,6 +30,7 @@ const { getInfamySettings, getTierEffects, addInfamy, rollBountyCheck, createBou
 const { addMoney: addMoneyForBounty } = require('../economy');
 const { getCurrency, getAdminSettings } = require('../admin');
 const { applyIncomeMultiplier, getPrestigeEmoji } = require('../prestige');
+const { getPetBonusDecimal } = require('../pets');
 
 
 
@@ -298,12 +299,14 @@ module.exports = {
       });
     }
 
-    // Calculate success rate (with skill bonus, item bonus, LP buff, and target defense)
+    // Calculate success rate (with skill bonus, item bonus, LP buff, target defense, and pet bonuses)
     // Uses total balance (cash + bank) for both parties
     const itemSuccessBoost = getEffectValue(guildId, hackerId, EFFECT_TYPES.HACK_SUCCESS_BOOST);
     const lpHackSuccess = getLuckyPennyEffect(guildId, hackerId, LP_EFFECT_TYPES.HACK_SUCCESS);
     const targetHackDefense = getEffectValue(guildId, targetId, EFFECT_TYPES.HACK_DEFENSE);
-    const totalSuccessBonus = hackBonuses.successRateBonus + itemSuccessBoost + lpHackSuccess - targetHackDefense;
+    const petHackOffense = getPetBonusDecimal(guildId, hackerId, 'rob_offense') * 100;
+    const petHackDefense = getPetBonusDecimal(guildId, targetId, 'rob_defense') * 100;
+    const totalSuccessBonus = hackBonuses.successRateBonus + itemSuccessBoost + lpHackSuccess + petHackOffense - targetHackDefense - petHackDefense;
     const hackerTotal = hackerBalance.cash + hackerBalance.bank;
     const targetTotal = targetBalance.cash + targetBalance.bank;
     const successRate = calculateSuccessRate(targetTotal, hackerTotal, totalSuccessBonus);

@@ -23,6 +23,7 @@ const {
   CARD_CONFIGS
 } = require('../scratchcard');
 const { getCurrency } = require('../admin');
+const { applyGamblingBonus } = require('../pets');
 
 
 
@@ -325,7 +326,8 @@ async function finishCard(interaction, ticket, guildId, userId) {
   
   // Pay out winnings
   if (winnings > 0) {
-    await addMoney(guildId, userId, winnings, `Scratch card win: ${config.name} - ${winType}`);
+    const boostedWinnings = applyGamblingBonus(guildId, userId, winnings);
+    await addMoney(guildId, userId, boostedWinnings, `Scratch card win: ${config.name} - ${winType}`);
   }
   
   // Handle FREE TICKET - generate a new ticket automatically (marked as free)

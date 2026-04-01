@@ -24,6 +24,7 @@ const {
 } = require('../inbetween');
 const { generateInBetweenImage } = require('../cardImages');
 const { getCurrency } = require('../admin');
+const { applyGamblingBonus } = require('../pets');
 
 
 
@@ -702,8 +703,9 @@ async function processResult(interaction, game) {
   const userId = game.userId;
   
   if (game.result === 'win' || game.result === 'win_highlow') {
-    // Pay out winnings: return bet + winnings + ante (ante was deducted at start)
-    await addMoney(guildId, userId, game.bet + game.payout + game.ante, 'In Between winnings');
+    // Pay out winnings: return bet + boosted payout + ante (ante was deducted at start)
+    const boostedPayout = applyGamblingBonus(guildId, userId, game.payout);
+    await addMoney(guildId, userId, game.bet + boostedPayout + game.ante, 'In Between winnings');
   } else if (game.result === 'pole_hit' || game.result === 'pole_hit_highlow') {
     // Player owes double their bet/ante (payout is negative)
     // The bet was already placed, so they owe an additional bet amount

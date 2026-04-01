@@ -8,6 +8,7 @@ const { getInfamySettings, getTierEffects, addInfamy, rollBountyCheck, createBou
 const { addMoney: addMoneyForBounty } = require('../economy');
 const { getCurrency, getAdminSettings } = require('../admin');
 const { applyIncomeMultiplier, getPrestigeEmoji } = require('../prestige');
+const { getPetBonusDecimal } = require('../pets');
 
 
 
@@ -346,11 +347,13 @@ module.exports = {
       });
     }
 
-    // Calculate success rate (with skill bonus, item bonus, LP buff, and target defense)
+    // Calculate success rate (with skill bonus, item bonus, LP buff, target defense, and pet bonuses)
     const itemSuccessBoost = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_SUCCESS_BOOST);
     const lpRobSuccess = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_SUCCESS);
     const targetRobDefense = getEffectValue(guildId, targetId, EFFECT_TYPES.ROB_DEFENSE);
-    const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost + lpRobSuccess - targetRobDefense;
+    const petRobOffense = getPetBonusDecimal(guildId, robberId, 'rob_offense') * 100;
+    const petRobDefense = getPetBonusDecimal(guildId, targetId, 'rob_defense') * 100;
+    const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost + lpRobSuccess + petRobOffense - targetRobDefense - petRobDefense;
     const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, totalSuccessBonus);
 
     // Get infamy tier effects for success buff
@@ -629,7 +632,9 @@ module.exports = {
 async function processDefense(interaction, guildId, robberId, targetId, targetUser, targetBalance, robberBalance, defenseType, elapsedSeconds, settings, robBonuses, awardsXp, robProtectionValue = 0) {
   const itemSuccessBoost = getEffectValue(guildId, robberId, EFFECT_TYPES.ROB_SUCCESS_BOOST);
   const lpRobSuccessDef = getLuckyPennyEffect(guildId, robberId, LP_EFFECT_TYPES.ROB_SUCCESS);
-  const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost + lpRobSuccessDef;
+  const petRobOffenseDef = getPetBonusDecimal(guildId, robberId, 'rob_offense') * 100;
+  const petRobDefenseDef = getPetBonusDecimal(guildId, targetId, 'rob_defense') * 100;
+  const totalSuccessBonus = robBonuses.successRateBonus + itemSuccessBoost + lpRobSuccessDef + petRobOffenseDef - petRobDefenseDef;
   const successRate = calculateSuccessRate(targetBalance.cash, robberBalance.total, totalSuccessBonus);
   
   // Get infamy tier effects

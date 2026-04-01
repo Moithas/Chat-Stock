@@ -23,6 +23,7 @@ const {
 const { isEnabled, getBalance, removeFromBank, addMoney } = require('../economy');
 const { generateThreeCardPokerImage } = require('../cardImages');
 const { getCurrency } = require('../admin');
+const { applyGamblingBonus } = require('../pets');
 
 
 
@@ -568,8 +569,9 @@ async function handlePlay(interaction, game) {
   const netResult = result.results.totalResult;
   
   if (netResult >= 0) {
-    // Return original bets plus winnings to cash balance
-    await addMoney(guildId, userId, totalBet + netResult);
+    // Return original bets plus winnings to cash balance (pet bonus on winnings)
+    const boostedResult = netResult > 0 ? applyGamblingBonus(guildId, userId, netResult) : 0;
+    await addMoney(guildId, userId, totalBet + boostedResult);
   } else {
     // Return any partial wins (side bets that won) to cash balance
     const partialReturn = totalBet + netResult; // netResult is negative

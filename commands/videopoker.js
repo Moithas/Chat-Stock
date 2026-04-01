@@ -19,6 +19,7 @@ const {
 } = require('../videopoker');
 const { generateVideoPokerImage } = require('../cardImages');
 const { getCurrency } = require('../admin');
+const { applyGamblingBonus } = require('../pets');
 
 // Prevent double-click processing
 const processingUsers = new Set();
@@ -469,8 +470,9 @@ async function handleButton(interaction) {
 
 async function processResult(interaction, game) {
   if (game.payout > 0) {
-    // Win — return bet + winnings
-    const totalReturn = game.payout + game.betAmount;
+    // Win — return bet + boosted winnings
+    const boostedPayout = applyGamblingBonus(game.guildId, game.userId, game.payout);
+    const totalReturn = boostedPayout + game.betAmount;
     await addMoney(game.guildId, game.userId, totalReturn, 'Video Poker winnings');
   }
   // If payout <= 0, bet was already deducted at start
@@ -485,7 +487,8 @@ async function handleTimeout(client, guildId, userId) {
 
   // Process payouts
   if (result.payout > 0) {
-    const totalReturn = result.payout + result.betAmount;
+    const boostedPayout = applyGamblingBonus(result.guildId, userId, result.payout);
+    const totalReturn = boostedPayout + result.betAmount;
     await addMoney(result.guildId, userId, totalReturn, 'Video Poker winnings (timeout)');
   }
 

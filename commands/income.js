@@ -8,6 +8,7 @@ const { getEffectValue, EFFECT_TYPES, getHuntEligibleItems, addToInventory } = r
 const { getLuckyPennyEffect, LP_EFFECT_TYPES, getLuckyPennySettings, canUseLuckyPenny, recordLuckyPennyUse, rollLuckyPenny, applyBuff: applyLpBuff, getActiveLuckyPennyBuffs, LP_EFFECT_EMOJI, INVERSE_EFFECTS } = require('../luckypenny');
 const { getCurrency } = require('../admin');
 const { applyIncomeMultiplier, getPrestigeEmoji } = require('../prestige');
+const { getPetBonusDecimal } = require('../pets');
 
 
 
@@ -318,10 +319,11 @@ async function executeWork(interaction, guildId, userId) {
   const baseAmount = calculateWorkReward(settings);
   const flavorText = getRandomFlavorText(settings);
   
-  // Apply item boost + Lucky Penny payout buff
+  // Apply item boost + Lucky Penny payout buff + pet bonus
   const workBoost = getEffectValue(guildId, userId, EFFECT_TYPES.WORK_BOOST);
   const lpWorkBoost = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.WORK_PAYOUT);
-  const totalBoost = workBoost + lpWorkBoost;
+  const petWorkBoost = getPetBonusDecimal(guildId, userId, 'work') * 100;
+  const totalBoost = workBoost + lpWorkBoost + petWorkBoost;
   const amount = totalBoost > 0 
     ? Math.floor(baseAmount * (1 + totalBoost / 100))
     : totalBoost < 0
