@@ -35,9 +35,9 @@ const RARITIES = {
 
 // Shop rarity weights (only common/uncommon/rare in shop)
 const SHOP_RARITY_WEIGHTS = [
-  { rarity: 'common',   weight: 60 },
-  { rarity: 'uncommon', weight: 30 },
-  { rarity: 'rare',     weight: 10 },
+  { rarity: 'common',   weight: 80 },
+  { rarity: 'uncommon', weight: 15 },
+  { rarity: 'rare',     weight: 5 },
 ];
 const SHOP_MAX_RARES = 2;
 
@@ -405,6 +405,12 @@ function getShopStock(guildId) {
     stock.push(stmt.getAsObject());
   }
   stmt.free();
+
+  // Sort by species order, then rarity tier
+  const speciesOrder = SHOP_SPECIES.reduce((m, s, i) => { m[s] = i; return m; }, {});
+  const rarityOrder = Object.keys(RARITIES).reduce((m, r, i) => { m[r] = i; return m; }, {});
+  stock.sort((a, b) => (speciesOrder[a.species] ?? 99) - (speciesOrder[b.species] ?? 99) || (rarityOrder[a.rarity] ?? 99) - (rarityOrder[b.rarity] ?? 99));
+
   return stock;
 }
 
