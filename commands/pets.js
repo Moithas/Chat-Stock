@@ -80,9 +80,9 @@ module.exports = {
     if (customId.startsWith('pet_active_')) return handleSetActive(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_dismiss_')) { await interaction.update({ content: '✅ Dismissed', embeds: [], components: [], files: [] }).catch(() => {}); await interaction.deleteReply().catch(() => {}); return; }
     if (customId.startsWith('pet_view_')) return handleViewPet(interaction, guildId, userId, settings);
-    if (customId.startsWith('pet_release_')) return handleReleaseConfirm(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_release_yes_')) return handleReleaseExecute(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_release_no_')) return showMyPetsPanel(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_release_')) return handleReleaseConfirm(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_rename_')) return handleRenameButton(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_buy_')) return handleBuyFromShop(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_kennel_buy_')) return handleKennelUpgrade(interaction, guildId, userId, settings);
