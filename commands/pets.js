@@ -658,15 +658,15 @@ async function handlePlay(interaction, guildId, userId, settings) {
   const pet = check.pet;
   const speciesData = SPECIES[pet.species];
 
-  // Pick a random mini-game
-  const games = ['fetch', 'hideseek', 'trick'];
+  // Pick a random play mini-game
+  const games = ['fetch', 'hotcold', 'trick'];
   const game = games[Math.floor(Math.random() * games.length)];
 
   await interaction.deferUpdate();
 
   let won = false;
   if (game === 'fetch') won = await runFetchGame(interaction, pet, speciesData, userId, petId);
-  else if (game === 'hideseek') won = await runHideSeekGame(interaction, pet, speciesData, userId, petId);
+  else if (game === 'hotcold') won = await runHotColdGame(interaction, pet, speciesData, userId, petId);
   else won = await runTrickGame(interaction, pet, speciesData, userId, petId);
 
   // Apply result
@@ -724,16 +724,16 @@ async function handleTrain(interaction, guildId, userId, settings) {
     return interaction.reply({ content: `❌ Training costs **${cost.toLocaleString()}** ${currency} but you only have **${bal.toLocaleString()}** ${currency}.`, flags: 64 });
   }
 
-  // Pick a random mini-game
-  const games = ['fetch', 'hideseek', 'trick'];
+  // Pick a random training mini-game (harder than play games)
+  const games = ['catchpet', 'copycat', 'spotdiff'];
   const game = games[Math.floor(Math.random() * games.length)];
 
   await interaction.deferUpdate();
 
   let won = false;
-  if (game === 'fetch') won = await runFetchGame(interaction, pet, speciesData, userId, petId);
-  else if (game === 'hideseek') won = await runHideSeekGame(interaction, pet, speciesData, userId, petId);
-  else won = await runTrickGame(interaction, pet, speciesData, userId, petId);
+  if (game === 'catchpet') won = await runCatchPetGame(interaction, pet, speciesData, userId, petId);
+  else if (game === 'copycat') won = await runCopyCatGame(interaction, pet, speciesData, userId, petId);
+  else won = await runSpotDiffGame(interaction, pet, speciesData, userId, petId);
 
   // Deduct cost
   await removeFromTotal(guildId, userId, cost);
@@ -808,41 +808,84 @@ async function runFetchGame(interaction, pet, speciesData, userId, petId) {
   }
 }
 
-async function runHideSeekGame(interaction, pet, speciesData, userId, petId) {
+async function runHotColdGame(interaction, pet, speciesData, userId, petId) {
   const spots = [
     { emoji: '🌳', label: 'Tree', id: 'tree' },
     { emoji: '🪨', label: 'Rock', id: 'rock' },
     { emoji: '🌺', label: 'Flowers', id: 'flowers' },
+    { emoji: '🏠', label: 'House', id: 'house' },
+    { emoji: '🌊', label: 'Pond', id: 'pond' },
   ];
-  const correctIdx = Math.floor(Math.random() * 3);
-
-  const embed = new EmbedBuilder()
-    .setColor(0x3498DB)
-    .setTitle('🙈 Hide & Seek!')
-    .setDescription(`${speciesData.emoji} **${pet.name}** scurries off and hides!\n\n🔍 *Where are they hiding?*`);
-
+  const correctIdx = Math.floor(Math.random() * 5);
   const ts = Date.now();
-  const row = new ActionRowBuilder().addComponents(
-    spots.map((spot, i) =>
+
+  // Round 1: pick from 5 spots
+  const embed1 = new EmbedBuilder()
+    .setColor(0x3498DB)
+    .setTitle('🔥 Hot & Cold!')
+    .setDescription(`${speciesData.emoji} **${pet.name}** scurries off and hides!\n\n🔍 *Where should you search first?*`);
+
+  const row1 = new ActionRowBuilder().addComponents(
+    spots.map(spot =>
       new ButtonBuilder()
-        .setCustomId(`mg_hide_${petId}_${spot.id}_${ts}`)
+        .setCustomId(`mg_hc1_${petId}_${spot.id}_${ts}`)
         .setLabel(spot.label)
         .setEmoji(spot.emoji)
         .setStyle(ButtonStyle.Primary)
     )
   );
 
-  const msg = await interaction.editReply({ embeds: [embed], components: [row], files: [] });
+  const msg = await interaction.editReply({ embeds: [embed1], components: [row1], files: [] });
 
+  let firstPick;
   try {
     const resp = await msg.awaitMessageComponent({
-      filter: i => i.user.id === userId && i.customId.startsWith(`mg_hide_${petId}_`),
+      filter: i => i.user.id === userId && i.customId.startsWith(`mg_hc1_${petId}_`),
       time: 15000,
     });
     await resp.deferUpdate();
-    const parts = resp.customId.split('_');
-    const picked = parts[3]; // mg_hide_petId_spotId_ts
-    return picked === spots[correctIdx].id;
+    firstPick = resp.customId.split('_')[3];
+  } catch {
+    return false;
+  }
+
+  const firstIdx = spots.findIndex(s => s.id === firstPick);
+  const dist = Math.abs(firstIdx - correctIdx);
+
+  // Determine hint
+  let hint, hintColor;
+  if (dist === 0) return true; // Found on first try!
+  if (dist === 1) { hint = '🔥 **Burning hot!** They\'re RIGHT next to you!'; hintColor = 0xE74C3C; }
+  else if (dist === 2) { hint = '🌡️ **Warm...** Getting closer!'; hintColor = 0xE67E22; }
+  else { hint = '❄️ **Cold!** Try somewhere else!'; hintColor = 0x3498DB; }
+
+  // Round 2: pick again (excluding first pick)
+  const remaining = spots.filter(s => s.id !== firstPick);
+  const embed2 = new EmbedBuilder()
+    .setColor(hintColor)
+    .setTitle('🔥 Hot & Cold!')
+    .setDescription(`You checked the ${spots[firstIdx].emoji} ${spots[firstIdx].label}...\n\n${hint}\n\n🔍 *Try again!*`);
+
+  const row2 = new ActionRowBuilder().addComponents(
+    remaining.map(spot =>
+      new ButtonBuilder()
+        .setCustomId(`mg_hc2_${petId}_${spot.id}_${ts}`)
+        .setLabel(spot.label)
+        .setEmoji(spot.emoji)
+        .setStyle(ButtonStyle.Primary)
+    )
+  );
+
+  await interaction.editReply({ embeds: [embed2], components: [row2] });
+
+  try {
+    const resp2 = await msg.awaitMessageComponent({
+      filter: i => i.user.id === userId && i.customId.startsWith(`mg_hc2_${petId}_`),
+      time: 15000,
+    });
+    await resp2.deferUpdate();
+    const secondPick = resp2.customId.split('_')[3];
+    return secondPick === spots[correctIdx].id;
   } catch {
     return false;
   }
@@ -905,6 +948,170 @@ async function runTrickGame(interaction, pet, speciesData, userId, petId) {
     });
     await resp.deferUpdate();
     return resp.values[0] === correctValue;
+  } catch {
+    return false;
+  }
+}
+
+// ================== TRAINING MINI-GAMES ==================
+
+async function runCatchPetGame(interaction, pet, speciesData, userId, petId) {
+  const grid = ['⬜','⬜','⬜','⬜','⬜','⬜','⬜','⬜','⬜'];
+  const correctIdx = Math.floor(Math.random() * 9);
+  const showGrid = [...grid];
+  showGrid[correctIdx] = speciesData.emoji;
+
+  // Flash the pet's position
+  const flashEmbed = new EmbedBuilder()
+    .setColor(0x3498DB)
+    .setTitle('🎯 Catch the Pet!')
+    .setDescription(`${speciesData.emoji} **${pet.name}** is darting around!\n\n**Spot them!**\n${showGrid.slice(0,3).join(' ')}\n${showGrid.slice(3,6).join(' ')}\n${showGrid.slice(6,9).join(' ')}`);
+
+  await interaction.editReply({ embeds: [flashEmbed], components: [], files: [] });
+
+  // Show for 1.5s then hide
+  await new Promise(r => setTimeout(r, 1500));
+
+  const ts = Date.now();
+  const hiddenEmbed = new EmbedBuilder()
+    .setColor(0xE67E22)
+    .setTitle('🎯 Where were they?')
+    .setDescription(`${speciesData.emoji} **${pet.name}** vanished! **Click where they were!**`);
+
+  const rows = [];
+  for (let r = 0; r < 3; r++) {
+    const row = new ActionRowBuilder();
+    for (let c = 0; c < 3; c++) {
+      const idx = r * 3 + c;
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`mg_catch_g_${petId}_${idx}_${ts}`)
+          .setLabel('⬜')
+          .setStyle(ButtonStyle.Secondary)
+      );
+    }
+    rows.push(row);
+  }
+
+  const msg = await interaction.editReply({ embeds: [hiddenEmbed], components: rows });
+
+  try {
+    const resp = await msg.awaitMessageComponent({
+      filter: i => i.user.id === userId && i.customId.startsWith(`mg_catch_g_${petId}_`),
+      time: 10000,
+    });
+    await resp.deferUpdate();
+    const picked = parseInt(resp.customId.split('_')[4]);
+    return picked === correctIdx;
+  } catch {
+    return false;
+  }
+}
+
+async function runCopyCatGame(interaction, pet, speciesData, userId, petId) {
+  const actions = [
+    { emoji: '🐾', label: 'Paw' },
+    { emoji: '🎵', label: 'Sing' },
+    { emoji: '💫', label: 'Spin' },
+    { emoji: '🔥', label: 'Roar' },
+    { emoji: '❄️', label: 'Shake' },
+  ];
+
+  // Pick 3 random actions for the sequence
+  const shuffled = [...actions].sort(() => Math.random() - 0.5);
+  const sequence = shuffled.slice(0, 3);
+  const seqDisplay = sequence.map(a => a.emoji).join(' → ');
+
+  // Show the sequence
+  const showEmbed = new EmbedBuilder()
+    .setColor(0x9B59B6)
+    .setTitle('🐾 Copy Cat!')
+    .setDescription(`${speciesData.emoji} **${pet.name}** performs a routine!\n\n**Memorize the order:** ${seqDisplay}\n\n⏱️ *You have 3 seconds...*`);
+
+  await interaction.editReply({ embeds: [showEmbed], components: [], files: [] });
+  await new Promise(r => setTimeout(r, 3000));
+
+  const ts = Date.now();
+  const picks = [];
+
+  // Collect 3 picks one at a time
+  for (let step = 0; step < 3; step++) {
+    const promptEmbed = new EmbedBuilder()
+      .setColor(0xE67E22)
+      .setTitle('🐾 Copy Cat!')
+      .setDescription(`**Step ${step + 1}/3:** What comes next?\n\n${picks.map(p => p.emoji).join(' → ')}${picks.length ? ' → ❓' : '❓'}`);
+
+    const row = new ActionRowBuilder().addComponents(
+      actions.map(a =>
+        new ButtonBuilder()
+          .setCustomId(`mg_cc_${petId}_${a.label}_${step}_${ts}`)
+          .setLabel(a.label)
+          .setEmoji(a.emoji)
+          .setStyle(ButtonStyle.Primary)
+      )
+    );
+
+    const msg = await interaction.editReply({ embeds: [promptEmbed], components: [row] });
+
+    try {
+      const resp = await msg.awaitMessageComponent({
+        filter: i => i.user.id === userId && i.customId.startsWith(`mg_cc_${petId}_`) && i.customId.includes(`_${step}_`),
+        time: 10000,
+      });
+      await resp.deferUpdate();
+      const picked = resp.customId.split('_')[3];
+      const pickedAction = actions.find(a => a.label === picked);
+      picks.push(pickedAction);
+
+      // Wrong pick = immediate fail
+      if (picked !== sequence[step].label) return false;
+    } catch {
+      return false;
+    }
+  }
+
+  return true; // All 3 correct
+}
+
+async function runSpotDiffGame(interaction, pet, speciesData, userId, petId) {
+  const pool = ['🍎','🍊','🍋','🍇','🍓','🍑','🍒','🥝','🍌','🫐'];
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  const baseRow = shuffled.slice(0, 5);
+
+  // Pick which position changes and what it changes to
+  const changeIdx = Math.floor(Math.random() * 5);
+  const remaining = pool.filter(e => !baseRow.includes(e));
+  const replacement = remaining[Math.floor(Math.random() * remaining.length)];
+
+  const changedRow = [...baseRow];
+  changedRow[changeIdx] = replacement;
+
+  const ts = Date.now();
+  const embed = new EmbedBuilder()
+    .setColor(0x2ECC71)
+    .setTitle('🔎 Spot the Difference!')
+    .setDescription(`${speciesData.emoji} **${pet.name}** swapped a fruit! Which one changed?\n\n**Before:** ${baseRow.join('  ')}\n**After:**  ${changedRow.join('  ')}`);
+
+  const row = new ActionRowBuilder().addComponents(
+    changedRow.map((emoji, i) =>
+      new ButtonBuilder()
+        .setCustomId(`mg_spot_${petId}_${i}_${ts}`)
+        .setLabel(`${i + 1}`)
+        .setEmoji(emoji)
+        .setStyle(ButtonStyle.Primary)
+    )
+  );
+
+  const msg = await interaction.editReply({ embeds: [embed], components: [row], files: [] });
+
+  try {
+    const resp = await msg.awaitMessageComponent({
+      filter: i => i.user.id === userId && i.customId.startsWith(`mg_spot_${petId}_`),
+      time: 15000,
+    });
+    await resp.deferUpdate();
+    const picked = parseInt(resp.customId.split('_')[3]);
+    return picked === changeIdx;
   } catch {
     return false;
   }
