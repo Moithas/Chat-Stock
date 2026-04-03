@@ -10,16 +10,16 @@ let db = null;
 
 // ============ SPECIES DEFINITIONS ============
 const SPECIES = {
-  cat:     { name: 'Cat',     emoji: '🐱', type: 'shop',   baseCost: 50000,   specialties: { work: 1.0 } },
-  dog:     { name: 'Dog',     emoji: '🐶', type: 'shop',   baseCost: 75000,   specialties: { rob_defense: 1.0 } },
-  bird:    { name: 'Bird',    emoji: '🐦', type: 'shop',   baseCost: 75000,   specialties: { rob_offense: 1.0 } },
-  spider:  { name: 'Spider',  emoji: '🕷️', type: 'shop',   baseCost: 100000,  specialties: { vault: 1.0 } },
-  bear:    { name: 'Bear',    emoji: '🐻', type: 'shop',   baseCost: 100000,  specialties: { property: 1.0 } },
-  panda:   { name: 'Panda',   emoji: '🐼', type: 'shop',   baseCost: 250000,  specialties: { gambling: 1.0 } },
-  wolf:    { name: 'Wolf',    emoji: '🐺', type: 'exotic',  baseCost: 0,       specialties: { rob_defense: 1.0, rob_offense: 1.0 } },
-  dragon:  { name: 'Dragon',  emoji: '🐉', type: 'exotic',  baseCost: 0,       specialties: { vault: 1.0, gambling: 1.0 } },
-  alien:   { name: 'Alien',   emoji: '👽', type: 'exotic',  baseCost: 0,       specialties: { work: 1.0, property: 1.0 } },
-  unicorn: { name: 'Unicorn', emoji: '🦄', type: 'exotic',  baseCost: 0,       specialties: { work: 0.4, rob_defense: 0.4, rob_offense: 0.4, vault: 0.4, property: 0.4, gambling: 0.4 } },
+  cat:     { name: 'Cat',     emoji: '🐱', type: 'shop',   baseCost: 50000,   variants: 3, specialties: { work: 1.0 } },
+  dog:     { name: 'Dog',     emoji: '🐶', type: 'shop',   baseCost: 75000,   variants: 5, specialties: { rob_defense: 1.0 } },
+  bird:    { name: 'Bird',    emoji: '🐦', type: 'shop',   baseCost: 75000,   variants: 5, specialties: { rob_offense: 1.0 } },
+  spider:  { name: 'Spider',  emoji: '🕷️', type: 'shop',   baseCost: 100000,  variants: 2, specialties: { vault: 1.0 } },
+  bear:    { name: 'Bear',    emoji: '🐻', type: 'shop',   baseCost: 100000,  variants: 4, specialties: { property: 1.0 } },
+  panda:   { name: 'Panda',   emoji: '🐼', type: 'shop',   baseCost: 250000,  variants: 2, specialties: { gambling: 1.0 } },
+  wolf:    { name: 'Wolf',    emoji: '🐺', type: 'exotic',  baseCost: 0,       variants: 1, specialties: { rob_defense: 1.0, rob_offense: 1.0 } },
+  dragon:  { name: 'Dragon',  emoji: '🐉', type: 'exotic',  baseCost: 0,       variants: 1, specialties: { vault: 1.0, gambling: 1.0 } },
+  alien:   { name: 'Alien',   emoji: '👽', type: 'exotic',  baseCost: 0,       variants: 1, specialties: { work: 1.0, property: 1.0 } },
+  unicorn: { name: 'Unicorn', emoji: '🦄', type: 'exotic',  baseCost: 0,       variants: 5, specialties: { work: 0.4, rob_defense: 0.4, rob_offense: 0.4, vault: 0.4, property: 0.4, gambling: 0.4 } },
 };
 
 const SHOP_SPECIES = ['cat', 'dog', 'bird', 'spider', 'bear', 'panda'];
@@ -61,8 +61,8 @@ const PET_IMAGES_DIR = path.join(__dirname, 'assets', 'pets');
 const PHASE_NAMES = ['baby', 'juvenile', 'adult', 'elder'];
 const ALL_SPECIES = Object.keys(SPECIES);
 
-function getPetImagePath(species, phaseName) {
-  const file = `${species}_${phaseName}.png`;
+function getPetImagePath(species, phaseName, variant = 1) {
+  const file = `${species}_${phaseName}_${variant}.png`;
   const filePath = path.join(PET_IMAGES_DIR, file);
   if (fs.existsSync(filePath)) return { filePath, fileName: file };
   return null;
@@ -218,6 +218,7 @@ function initPets(database) {
   // Migration: add bond columns
   migrateAddColumn(db, 'pets', 'bond_streak INTEGER DEFAULT 0');
   migrateAddColumn(db, 'pets', 'last_care_day INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'pets', 'variant INTEGER DEFAULT 1');
 
   saveDatabase();
   console.log('🐾 Pet system initialized');
@@ -447,11 +448,13 @@ function removeShopSlot(guildId, slotNumber) {
 function adoptPet(guildId, userId, species, name, rarity, sex, shiny, source = 'shop') {
   if (!db) return null;
   const now = Date.now();
+  const speciesData = SPECIES[species];
+  const variant = Math.ceil(Math.random() * (speciesData?.variants || 1));
 
   db.run(
-    `INSERT INTO pets (guild_id, owner_id, species, name, rarity, sex, shiny, level, xp, hunger, happiness, last_decay_time, born_at, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 100, 100, ?, ?, ?)`,
-    [guildId, userId, species, name, rarity, sex, shiny, now, now, source]
+    `INSERT INTO pets (guild_id, owner_id, species, name, rarity, sex, shiny, level, xp, hunger, happiness, last_decay_time, born_at, source, variant)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 100, 100, ?, ?, ?, ?)`,
+    [guildId, userId, species, name, rarity, sex, shiny, now, now, source, variant]
   );
 
   // Get the inserted pet

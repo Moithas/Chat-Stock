@@ -522,7 +522,7 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   embed.setDescription(desc);
 
   // Attach pet phase image if available
-  const petImage = getPetImagePath(pet.species, phase.name.toLowerCase());
+  const petImage = getPetImagePath(pet.species, phase.name.toLowerCase(), pet.variant || 1);
   let files = [];
   if (petImage) {
     const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
