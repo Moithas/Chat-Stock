@@ -445,11 +445,11 @@ function removeShopSlot(guildId, slotNumber) {
 }
 
 // ============ PET CRUD ============
-function adoptPet(guildId, userId, species, name, rarity, sex, shiny, source = 'shop') {
+function adoptPet(guildId, userId, species, name, rarity, sex, shiny, source = 'shop', forcedVariant = null) {
   if (!db) return null;
   const now = Date.now();
   const speciesData = SPECIES[species];
-  const variant = Math.ceil(Math.random() * (speciesData?.variants || 1));
+  const variant = forcedVariant || Math.ceil(Math.random() * (speciesData?.variants || 1));
 
   db.run(
     `INSERT INTO pets (guild_id, owner_id, species, name, rarity, sex, shiny, level, xp, hunger, happiness, last_decay_time, born_at, source, variant)

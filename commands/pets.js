@@ -84,6 +84,7 @@ module.exports = {
     if (customId.startsWith('pet_release_no_')) return showMyPetsPanel(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_release_')) return handleReleaseConfirm(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_rename_')) return handleRenameButton(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_namebuy_')) return handleNameBuyButton(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_buy_')) return handleBuyFromShop(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_kennel_buy_')) return handleKennelUpgrade(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_shop_page_')) return handleShopPage(interaction, guildId, userId, settings);
@@ -309,9 +310,56 @@ async function handleShopSelectPet(interaction, guildId, userId, settings) {
     return interaction.reply({ content: `❌ You already have **${petCount}/${maxSlots}** pets! Upgrade your kennel or release a pet.`, flags: 64 });
   }
 
-  // Show naming modal
+  // Show preview with variant image before naming
+  const speciesData = SPECIES[item.species];
+  const variant = Math.ceil(Math.random() * (speciesData.variants || 1));
+  const rarityData = RARITIES[item.rarity];
+  const sexEmoji = item.sex === 'M' ? '♂️' : '♀️';
+  const shinyStr = item.shiny ? '✨ **SHINY!** ' : '';
+
+  const embed = new EmbedBuilder()
+    .setColor(rarityData.color)
+    .setTitle(`${speciesData.emoji} Meet Your New Pet!`)
+    .setDescription(
+      `${shinyStr}${sexEmoji} **${rarityData.name} ${speciesData.name}**\n` +
+      `${PHASES.baby.emoji} Baby — Level 1\n\n` +
+      `**Specialty:** ${getSpecialtyDisplay(item.species)}\n` +
+      `💰 Cost: **${item.price.toLocaleString()}** ${getCurrency(guildId)}\n\n` +
+      `*Give them a name to bring them home!*`
+    )
+    .setTimestamp();
+
+  const petImage = getPetImagePath(item.species, 'baby', variant);
+  let files = [];
+  if (petImage) {
+    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
+    embed.setImage(`attachment://${petImage.fileName}`);
+    files.push(attachment);
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_namebuy_${slotNumber}_v_${variant}_u_${userId}`).setLabel('Name This Pet').setEmoji('✏️').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`pet_shop_page_0_u_${userId}`).setLabel('Back to Shop').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+  );
+
+  return interaction.update({ embeds: [embed], components: [row], files });
+}
+
+async function handleNameBuyButton(interaction, guildId, userId, settings) {
+  const parts = interaction.customId.split('_');
+  // pet_namebuy_<slotNumber>_v_<variant>_u_<userId>
+  const slotNumber = parseInt(parts[2]);
+  const vIdx = parts.indexOf('v');
+  const variant = parseInt(parts[vIdx + 1]);
+
+  const stock = getShopStock(guildId);
+  const item = stock.find(s => s.slot_number === slotNumber);
+  if (!item) {
+    return interaction.update({ content: '❌ That pet was already adopted!', embeds: [], components: [], files: [] });
+  }
+
   const modal = new ModalBuilder()
-    .setCustomId(`modal_pet_name_${slotNumber}_u_${userId}`)
+    .setCustomId(`modal_pet_name_${slotNumber}_v_${variant}_u_${userId}`)
     .setTitle('Name Your New Pet');
 
   const nameInput = new TextInputBuilder()
@@ -329,9 +377,11 @@ async function handleShopSelectPet(interaction, guildId, userId, settings) {
 
 async function handleNameModal(interaction, guildId, userId, settings) {
   const parts = interaction.customId.split('_');
-  // modal_pet_name_<slotNumber>_u_<userId>
+  // modal_pet_name_<slotNumber>_v_<variant>_u_<userId>
   const nameIdx = parts.indexOf('name');
   const slotNumber = parseInt(parts[nameIdx + 1]);
+  const vIdx = parts.indexOf('v');
+  const variant = vIdx !== -1 ? parseInt(parts[vIdx + 1]) : null;
   const petName = interaction.fields.getTextInputValue('pet_name').trim();
 
   if (!petName || petName.length > 24) {
@@ -359,7 +409,7 @@ async function handleNameModal(interaction, guildId, userId, settings) {
 
   // Deduct and adopt
   await removeFromTotal(guildId, userId, item.price, `Adopted pet: ${petName}`);
-  const pet = adoptPet(guildId, userId, item.species, petName, item.rarity, item.sex, item.shiny, 'shop');
+  const pet = adoptPet(guildId, userId, item.species, petName, item.rarity, item.sex, item.shiny, 'shop', variant);
   removeShopSlot(guildId, slotNumber);
 
   const speciesData = SPECIES[item.species];
@@ -379,6 +429,13 @@ async function handleNameModal(interaction, guildId, userId, settings) {
     )
     .setFooter({ text: 'Use /pets to manage your new companion!' })
     .setTimestamp();
+
+  const petImage = getPetImagePath(item.species, 'baby', pet?.variant || 1);
+  if (petImage) {
+    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
+    embed.setImage(`attachment://${petImage.fileName}`);
+    return interaction.editReply({ embeds: [embed], files: [attachment] });
+  }
 
   return interaction.editReply({ embeds: [embed] });
 }
