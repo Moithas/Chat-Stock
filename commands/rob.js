@@ -479,7 +479,7 @@ module.exports = {
               .setDescription(flavorText)
               .addFields(
                 { name: '💵 Stolen', value: `${robPrestigeAmount.toLocaleString()} ${getCurrency(guildId)} (${stealPercent}% of their cash)${protectionNote}${robberTierEffects.earningsCut > 0 ? `\n🏴‍☠️ Earnings cut: -${robberTierEffects.earningsCut}%` : ''}${prestigeNoteTimeout}`, inline: true },
-                { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}${petRobOffense > 0 ? ` (🐾 +${petRobOffense.toFixed(1)}%)` : ''}`, inline: true },
+                { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}${petRobOffense > 0 ? ` (🐾 +${petRobOffense.toFixed(1)}%)` : ''}${petRobDefense > 0 ? `\n🛡️ Target pet: -${petRobDefense.toFixed(1)}%` : ''}`, inline: true },
                 { name: '💼 Your New Balance', value: `${(robberBalance.cash + robPrestigeAmount).toLocaleString()} ${getCurrency(guildId)}${infamyResult.bountyClaimed ? `\n🏆 +${infamyResult.bountyClaimed.bounty_amount.toLocaleString()} bounty` : ''}`, inline: false }
               )
               .setFooter({ text: xpFooter });
@@ -510,7 +510,7 @@ module.exports = {
               .setDescription(flavorText)
               .addFields(
                 { name: '💸 Fine', value: `${fine.toLocaleString()} ${getCurrency(guildId)} (${finePercent}% of your balance)${robberTierEffects.fineModifier > 0 ? `\n🏴‍☠️ Fine modifier: +${robberTierEffects.fineModifier}%` : ''}`, inline: true },
-                { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}${petRobOffense > 0 ? ` (🐾 +${petRobOffense.toFixed(1)}%)` : ''}`, inline: true },
+                { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}${petRobOffense > 0 ? ` (🐾 +${petRobOffense.toFixed(1)}%)` : ''}${petRobDefense > 0 ? `\n🛡️ Target pet: -${petRobDefense.toFixed(1)}%` : ''}`, inline: true },
                 { name: '💼 Your New Balance', value: `${(robberBalance.total - fine).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
               )
               .setFooter({ text: xpFooter });
@@ -581,7 +581,7 @@ module.exports = {
         .setDescription(flavorText)
         .addFields(
           { name: '💵 Stolen', value: `${robPrestigeAmount2.toLocaleString()} ${getCurrency(guildId)} (${stealPercent}% of their cash)${protectionNote}${robberTierEffects.earningsCut > 0 ? `\n🏴‍☠️ Earnings cut: -${robberTierEffects.earningsCut}%` : ''}${prestigeNote2}`, inline: true },
-          { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}${petRobOffense > 0 ? ` (🐾 +${petRobOffense.toFixed(1)}%)` : ''}`, inline: true },
+          { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}${petRobOffense > 0 ? ` (🐾 +${petRobOffense.toFixed(1)}%)` : ''}${petRobDefense > 0 ? `\n🛡️ Target pet: -${petRobDefense.toFixed(1)}%` : ''}`, inline: true },
           { name: '💼 Your New Balance', value: `${(robberBalance.cash + robPrestigeAmount2).toLocaleString()} ${getCurrency(guildId)}${infamyResult.bountyClaimed ? `\n🏆 +${infamyResult.bountyClaimed.bounty_amount.toLocaleString()} bounty` : ''}`, inline: false }
         )
         .setFooter({ text: xpFooter });
@@ -619,7 +619,7 @@ module.exports = {
         .setDescription(flavorText)
         .addFields(
           { name: '💸 Fine', value: `${fine.toLocaleString()} ${getCurrency(guildId)} (${finePercent}% of your balance)${robberTierEffects.fineModifier > 0 ? `\n🏴‍☠️ Fine modifier: +${robberTierEffects.fineModifier}%` : ''}`, inline: true },
-          { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}${petRobOffense > 0 ? ` (🐾 +${petRobOffense.toFixed(1)}%)` : ''}`, inline: true },
+          { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}${petRobOffense > 0 ? ` (🐾 +${petRobOffense.toFixed(1)}%)` : ''}${petRobDefense > 0 ? `\n🛡️ Target pet: -${petRobDefense.toFixed(1)}%` : ''}`, inline: true },
           { name: '💼 Your New Balance', value: `${(robberBalance.total - fine).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
         )
         .setFooter({ text: xpFooter });
@@ -726,7 +726,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           .addFields(
             { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNote}${prestigeNoteHide}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
-            { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${petRobOffenseDef > 0 ? ` (🐾 +${petRobOffenseDef.toFixed(1)}%)` : ''}`, inline: true },
+            { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${petRobOffenseDef > 0 ? ` (🐾 +${petRobOffenseDef.toFixed(1)}%)` : ''}${petRobDefenseDef > 0 ? `\n🛡️ Target pet: -${petRobDefenseDef.toFixed(1)}%` : ''}`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
             { name: '💼 Your Balance', value: `${(targetBalance.cash - actualStolen).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
           );
@@ -804,7 +804,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           .addFields(
             { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNoteDodge}${prestigeNoteDodge}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
-            { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${petRobOffenseDef > 0 ? ` (🐾 +${petRobOffenseDef.toFixed(1)}%)` : ''}`, inline: true },
+            { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${petRobOffenseDef > 0 ? ` (🐾 +${petRobOffenseDef.toFixed(1)}%)` : ''}${petRobDefenseDef > 0 ? `\n🛡️ Target pet: -${petRobDefenseDef.toFixed(1)}%` : ''}`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
             { name: '💼 Your Balance', value: `${(targetBalance.cash - actualStolen).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
           );
@@ -883,7 +883,7 @@ async function processDefense(interaction, guildId, robberId, targetId, targetUs
           .addFields(
             { name: '💵 Money Stolen', value: `${actualStolen.toLocaleString()} ${getCurrency(guildId)}${protectionNoteFight}${prestigeNoteFight}`, inline: true },
             { name: '📊 Defense Failed', value: `${timeScaledRate.toFixed(1)}%`, inline: true },
-            { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${petRobOffenseDef > 0 ? ` (🐾 +${petRobOffenseDef.toFixed(1)}%)` : ''}`, inline: true },
+            { name: '📊 Rob Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${petRobOffenseDef > 0 ? ` (🐾 +${petRobOffenseDef.toFixed(1)}%)` : ''}${petRobDefenseDef > 0 ? `\n🛡️ Target pet: -${petRobDefenseDef.toFixed(1)}%` : ''}`, inline: true },
             { name: '⏱️ Reaction Time', value: `${elapsedSeconds} seconds`, inline: true },
             { name: '💼 Your Balance', value: `${(targetBalance.cash - actualStolen).toLocaleString()} ${getCurrency(guildId)}`, inline: false }
           );
