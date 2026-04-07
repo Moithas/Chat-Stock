@@ -873,13 +873,25 @@ async function handleUpgradeSelect(interaction) {
     benefitText = nextProp ? `Upgrades to ${nextProp.name}` : 'Unknown';
   }
   
+  // Calculate pet property bonus for display (mirrors startUpgradeStage logic)
+  let displayTime = time;
+  let petPropertyBoost = 0;
+  try {
+    const { getPetBonusDecimal } = require('../pets');
+    const propertyBonus = getPetBonusDecimal(guildId, userId, 'property');
+    if (propertyBonus > 0) {
+      petPropertyBoost = Math.round(Math.min(propertyBonus, 0.5) * 100);
+      displayTime = time * (1 - Math.min(propertyBonus, 0.5));
+    }
+  } catch (e) { /* pets not loaded */ }
+  
   const embed = new EmbedBuilder()
     .setColor(0xf39c12)
     .setTitle(`${getStageEmoji(stage)} ${getStageName(stage)} Started!`)
     .setDescription(`**${property.name}** is now being upgraded.`)
     .addFields(
       { name: '💰 Cost', value: `${cost.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '⏱️ Time', value: formatUpgradeTime(time), inline: true },
+      { name: '⏱️ Time', value: `${formatUpgradeTime(displayTime)}${petPropertyBoost > 0 ? ` (🐾 -${petPropertyBoost}%)` : ''}`, inline: true },
       { name: '✨ Benefit', value: benefitText, inline: true }
     )
     .setFooter({ text: `Completes at: ${new Date(result.completesAt).toLocaleString()}` })

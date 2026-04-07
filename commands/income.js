@@ -357,7 +357,9 @@ async function executeWork(interaction, guildId, userId) {
       value: (() => {
         let text = `**+${prestigeAmount.toLocaleString()}** ${getCurrency(guildId)}`;
         const tags = [];
-        if (boosted) tags.push(`⚡ +${workBoost}% boost`);
+        if (workBoost > 0) tags.push(`⚡ +${workBoost}% item`);
+        if (lpWorkBoost > 0) tags.push(`🪙 +${lpWorkBoost}% LP`);
+        if (petWorkBoost > 0) tags.push(`🐾 +${petWorkBoost.toFixed(1)}% pet`);
         if (prestigeAmount > amount) tags.push(`${getPrestigeEmoji(guildId, userId)} +${Math.round((prestigeAmount / amount - 1) * 100)}% prestige`);
         if (tags.length) text += ` (${tags.join(', ')})`;
         return text;

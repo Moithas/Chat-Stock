@@ -1057,10 +1057,14 @@ async function spawnVault(guildId) {
         let reward = Math.floor(Math.random() * (vaultData.maxReward - vaultData.minReward + 1)) + vaultData.minReward;
         
         // Apply pet vault bonus (spider specialty)
+        let petVaultBoost = 0;
         try {
           const { getPetBonusDecimal } = require('./pets');
           const vaultBonus = getPetBonusDecimal(guildId, interaction.user.id, 'vault');
-          if (vaultBonus > 0) reward = Math.floor(reward * (1 + vaultBonus));
+          if (vaultBonus > 0) {
+            petVaultBoost = Math.round(vaultBonus * 100);
+            reward = Math.floor(reward * (1 + vaultBonus));
+          }
         } catch (e) { /* pets not loaded */ }
         
         vaultData.rewards.push({ userId: interaction.user.id, username: interaction.user.username, reward, reactionMs, reactionDisplay });
@@ -1087,11 +1091,11 @@ async function spawnVault(guildId) {
         
         if (vaultDelayed) {
           await interaction.editReply({ 
-            content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${getCurrency(guildId)} from the vault! ⏱️ **${reactionDisplay}** *(delayed ${delaySeconds}s by infamy)*`
+            content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${getCurrency(guildId)} from the vault!${petVaultBoost > 0 ? ` (🐾 +${petVaultBoost}%)` : ''} ⏱️ **${reactionDisplay}** *(delayed ${delaySeconds}s by infamy)*`
           });
         } else {
           await interaction.reply({ 
-            content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${getCurrency(guildId)} from the vault! ⏱️ **${reactionDisplay}**`
+            content: `💰 **${interaction.user.username}** claimed **${reward.toLocaleString()}** ${getCurrency(guildId)} from the vault!${petVaultBoost > 0 ? ` (🐾 +${petVaultBoost}%)` : ''} ⏱️ **${reactionDisplay}**`
           });
         }
       }

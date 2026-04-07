@@ -23,7 +23,7 @@ const {
 const { isEnabled, getBalance, removeFromBank, addMoney } = require('../economy');
 const { generateThreeCardPokerImage } = require('../cardImages');
 const { getCurrency } = require('../admin');
-const { applyGamblingBonus } = require('../pets');
+const { applyGamblingBonus, getPetBonusDecimal } = require('../pets');
 
 
 
@@ -185,6 +185,15 @@ async function createResultEmbed(game, results, playerName) {
   const isWin = results.totalResult > 0;
   const isTie = results.totalResult === 0;
   
+  // Calculate pet gambling bonus tag for wins
+  let petTag = '';
+  if (isWin) {
+    try {
+      const bonus = getPetBonusDecimal(game.guildId, game.userId, 'gambling') * 100;
+      if (bonus > 0) petTag = ` (🐾 +${bonus.toFixed(1)}%)`;
+    } catch (e) {}
+  }
+  
   let color = 0xE74C3C; // Red for loss
   let title = '❌ You Lose!';
   
@@ -210,7 +219,7 @@ async function createResultEmbed(game, results, playerName) {
       { name: '⭐ Ante Bonus', value: formatResult(game.guildId, results.anteBonusResult, results.anteBonusOutcome), inline: true },
       { name: '🎲 Pair Plus', value: formatResult(game.guildId, results.pairPlusResult, results.pairPlusOutcome), inline: true },
       { name: '🎯 6-Card', value: formatResult(game.guildId, results.sixCardResult, results.sixCardOutcome), inline: true },
-      { name: '💰 Total', value: formatTotal(game.guildId, results.totalResult), inline: true }
+      { name: '💰 Total', value: `${formatTotal(game.guildId, results.totalResult)}${petTag}`, inline: true }
     );
   
   if (results.sixCardHand) {

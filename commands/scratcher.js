@@ -22,7 +22,7 @@ const {
   CARD_CONFIGS
 } = require('../scratchcard');
 const { getCurrency } = require('../admin');
-const { applyGamblingBonus } = require('../pets');
+const { applyGamblingBonus, getPetBonusDecimal } = require('../pets');
 
 
 
@@ -700,9 +700,14 @@ async function finishCard(interaction, ticket, guildId, userId, isEphemeral = fa
   updateScratchStats(guildId, userId, ticket.card_type, spentAmount, wonAmount, winType === 'JACKPOT' || winType === 'MEGA JACKPOT');
   
   // Pay out winnings
+  let petScratchTag = '';
   if (winnings > 0) {
     const boostedWinnings = applyGamblingBonus(guildId, userId, winnings);
     await addMoney(guildId, userId, boostedWinnings, `Scratch card win: ${config.name} - ${winType}`);
+    if (boostedWinnings > winnings) {
+      const bonus = Math.round(getPetBonusDecimal(guildId, userId, 'gambling') * 100);
+      petScratchTag = ` (🐾 +${bonus}%)`;
+    }
   }
   
   // Handle FREE TICKET - generate a new ticket automatically (marked as free)
@@ -722,15 +727,15 @@ async function finishCard(interaction, ticket, guildId, userId, isEphemeral = fa
   if (winType === 'JACKPOT' || winType === 'MEGA JACKPOT') {
     resultColor = 0xFFD700;
     resultTitle = `🎉 ${winType}! ${config.emoji} ${config.name}`;
-    resultDesc = `${interaction.user} hit the **${winType}**!\n\n💎 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
+    resultDesc = `${interaction.user} hit the **${winType}**!\n\n💎 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}${petScratchTag}`;
   } else if (winType === 'MEGA WIN') {
     resultColor = 0xE91E63;
     resultTitle = `🎊 MEGA WIN! ${config.emoji} ${config.name}`;
-    resultDesc = `${interaction.user} got a **MEGA WIN**!\n\n🏆 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
+    resultDesc = `${interaction.user} got a **MEGA WIN**!\n\n🏆 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}${petScratchTag}`;
   } else if (winType === 'WIN') {
     resultColor = 0x4CAF50;
     resultTitle = `✨ Winner! ${config.emoji} ${config.name}`;
-    resultDesc = `${interaction.user} matched 3!\n\n💰 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
+    resultDesc = `${interaction.user} matched 3!\n\n💰 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}${petScratchTag}`;
   } else if (winType === 'FREE_TICKET') {
     resultColor = 0x9C27B0;
     resultTitle = `🎟️ Free Ticket! ${config.emoji} ${config.name}`;

@@ -22,7 +22,7 @@ const {
 } = require('../gambling');
 const { generateBlackjackImage } = require('../cardImages');
 const { getCurrency } = require('../admin');
-const { applyGamblingBonus } = require('../pets');
+const { applyGamblingBonus, getPetBonusDecimal } = require('../pets');
 
 
 const DEALER_CARD_DELAY = 1200; // milliseconds between dealer cards
@@ -121,6 +121,15 @@ async function createGameEmbed(game, user, gameOver, winnings = 0, guildId) {
   const playerValue = calculateHandValue(game.playerHand);
   const dealerValue = calculateHandValue(game.dealerHand);
   
+  // Calculate pet gambling bonus tag for win display
+  let petTag = '';
+  if (gameOver && winnings > 0) {
+    try {
+      const bonus = getPetBonusDecimal(guildId, user.id, 'gambling') * 100;
+      if (bonus > 0) petTag = ` (🐾 +${bonus.toFixed(1)}%)`;
+    } catch (e) {}
+  }
+  
   let color = 0x3498db; // Blue for in progress
   let title = '🃏 Blackjack';
   let description = '';
@@ -130,15 +139,15 @@ async function createGameEmbed(game, user, gameOver, winnings = 0, guildId) {
       case 'blackjack':
         color = 0xf1c40f; // Gold
         title = '🎰 BLACKJACK!';
-        description = `You got a natural blackjack! **+${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
+        description = `You got a natural blackjack! **+${winnings.toLocaleString()}** ${getCurrency(guildId)}${petTag}`;
         break;
       case 'playerWin':
       case 'dealerBust':
         color = 0x2ecc71; // Green
         title = '🎉 You Win!';
         description = game.status === 'dealerBust' 
-          ? `Dealer busts! **+${winnings.toLocaleString()}** ${getCurrency(guildId)}`
-          : `You beat the dealer! **+${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
+          ? `Dealer busts! **+${winnings.toLocaleString()}** ${getCurrency(guildId)}${petTag}`
+          : `You beat the dealer! **+${winnings.toLocaleString()}** ${getCurrency(guildId)}${petTag}`;
         break;
       case 'dealerWin':
       case 'playerBust':

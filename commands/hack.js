@@ -649,7 +649,7 @@ module.exports = {
             .setDescription(flavorText)
             .addFields(
               { name: '💰 Stolen', value: `${hackPrestigeAmount.toLocaleString()} ${getCurrency(guildId)}${protectionNote}${earningsCut > 0 ? ` (−${earningsCut}% cut)` : ''}${prestigeNoteHack}`, inline: true },
-              { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}%)` : ''}`, inline: true },
+              { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${infamySuccessBuff > 0 ? ` (+${infamySuccessBuff}% infamy)` : ''}${petHackOffense > 0 ? ` (🐾 +${petHackOffense.toFixed(1)}%)` : ''}`, inline: true },
               { name: '🎲 Roll', value: `${hackRoll.toFixed(1)}%`, inline: true }
             )
             .setFooter({ text: xpFooter })
@@ -696,7 +696,7 @@ module.exports = {
             .setDescription(flavorText)
             .addFields(
               { name: '💸 Fine', value: `${fine.toLocaleString()} ${getCurrency(guildId)}${infamyFineModifier > 0 ? ` (+${infamyFineModifier}%)` : ''}`, inline: true },
-              { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%`, inline: true },
+              { name: '📊 Success Rate', value: `${adjustedSuccessRate.toFixed(1)}%${petHackOffense > 0 ? ` (🐾 +${petHackOffense.toFixed(1)}%)` : ''}`, inline: true },
               { name: '🎲 Roll', value: `${hackRoll.toFixed(1)}%`, inline: true }
             )
             .setFooter({ text: xpFooter })

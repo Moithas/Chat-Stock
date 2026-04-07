@@ -19,7 +19,7 @@ const {
 } = require('../videopoker');
 const { generateVideoPokerImage } = require('../cardImages');
 const { getCurrency } = require('../admin');
-const { applyGamblingBonus } = require('../pets');
+const { applyGamblingBonus, getPetBonusDecimal } = require('../pets');
 
 // Prevent double-click processing
 const processingUsers = new Set();
@@ -163,6 +163,19 @@ function buildResultEmbed(game, user, attachment) {
   const handRank = game.result.rank;
   const payout = game.payout;
 
+  // Calculate pet gambling bonus tag for win display
+  let petGamblingBoost = 0;
+  let boostedPayout = payout;
+  if (payout > 0) {
+    try {
+      const bonus = getPetBonusDecimal(game.guildId, game.userId, 'gambling');
+      if (bonus > 0) {
+        petGamblingBoost = Math.round(bonus * 100);
+        boostedPayout = Math.floor(payout * (1 + bonus));
+      }
+    } catch (e) {}
+  }
+
   let color, title, description;
 
   if (payout > 0) {
@@ -172,7 +185,8 @@ function buildResultEmbed(game, user, attachment) {
     description =
       `**${handRank}** pays **${multiplier}:1**!\n\n` +
       `Bet: **${game.betAmount.toLocaleString()}** ${getCurrency(game.guildId)}\n` +
-      `Payout: **${multiplier}x** × ${game.betAmount.toLocaleString()} = **+${payout.toLocaleString()}** ${getCurrency(game.guildId)}!`;
+      `Payout: **${multiplier}x** × ${game.betAmount.toLocaleString()} = **+${payout.toLocaleString()}** ${getCurrency(game.guildId)}!` +
+      (petGamblingBoost > 0 ? `\n🐾 Pet bonus: +${petGamblingBoost}% → **+${boostedPayout.toLocaleString()}** ${getCurrency(game.guildId)}` : '');
   } else {
     color = 0xF44336;
     title = '😔 No Winning Hand';

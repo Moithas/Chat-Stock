@@ -18,7 +18,7 @@ const {
 } = require('../letitride');
 const { generateLetItRideImage } = require('../cardImages');
 const { getCurrency } = require('../admin');
-const { applyGamblingBonus } = require('../pets');
+const { applyGamblingBonus, getPetBonusDecimal } = require('../pets');
 
 
 
@@ -181,6 +181,19 @@ function buildResultEmbed(game, user, attachment) {
   const activeBets = game.betsRemaining;
   const totalWagered = game.betAmount * activeBets;
   
+  // Calculate pet gambling bonus for display
+  let petGamblingBoost = 0;
+  let boostedPayout = payout;
+  if (payout > 0) {
+    try {
+      const gamblingBonus = getPetBonusDecimal(game.guildId, game.userId, 'gambling');
+      if (gamblingBonus > 0) {
+        petGamblingBoost = Math.round(gamblingBonus * 100);
+        boostedPayout = Math.floor(payout * (1 + gamblingBonus));
+      }
+    } catch (e) { /* pets not loaded */ }
+  }
+  
   let color, title, description;
   
   if (payout > 0) {
@@ -189,7 +202,8 @@ function buildResultEmbed(game, user, attachment) {
     const multiplier = PAYOUT_TABLE[handRank];
     description = `**${handRank}** pays **${multiplier}:1**!\n\n` +
       `Bets remaining: **${activeBets}** × ${game.betAmount.toLocaleString()} = **${totalWagered.toLocaleString()}** ${getCurrency(game.guildId)}\n` +
-      `Payout: **${multiplier}x** × ${totalWagered.toLocaleString()} = **+${payout.toLocaleString()}** ${getCurrency(game.guildId)}!`;
+      `Payout: **${multiplier}x** × ${totalWagered.toLocaleString()} = **+${payout.toLocaleString()}** ${getCurrency(game.guildId)}!` +
+      (petGamblingBoost > 0 ? `\n🐾 Pet bonus: +${petGamblingBoost}% → **+${boostedPayout.toLocaleString()}** ${getCurrency(game.guildId)}` : '');
   } else {
     color = 0xF44336;
     title = '😔 No Winning Hand';

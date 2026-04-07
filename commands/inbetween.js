@@ -24,7 +24,7 @@ const {
 } = require('../inbetween');
 const { generateInBetweenImage } = require('../cardImages');
 const { getCurrency } = require('../admin');
-const { applyGamblingBonus } = require('../pets');
+const { applyGamblingBonus, getPetBonusDecimal } = require('../pets');
 
 
 
@@ -277,12 +277,21 @@ function buildResultEmbed(game, user, attachment) {
   let color, title, description;
   const thirdVal = game.thirdCard ? getCardValue(game.thirdCard) : null;
   
+  // Calculate pet gambling bonus tag for win display
+  let petTag = '';
+  if (game.payout > 0) {
+    try {
+      const bonus = getPetBonusDecimal(game.guildId, game.userId, 'gambling') * 100;
+      if (bonus > 0) petTag = ` (🐾 +${bonus.toFixed(1)}%)`;
+    } catch (e) {}
+  }
+  
   switch (game.result) {
     case 'win':
       color = 0x57F287;
       title = '🎉 Winner!';
       const totalWin = game.payout + game.ante;
-      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) landed between your poles!\n\n**You won ${totalWin.toLocaleString()}** ${getCurrency(game.guildId)} *(${game.payout.toLocaleString()} + ${game.ante.toLocaleString()} ante)*!`;
+      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) landed between your poles!\n\n**You won ${totalWin.toLocaleString()}** ${getCurrency(game.guildId)}${petTag} *(${game.payout.toLocaleString()} + ${game.ante.toLocaleString()} ante)*!`;
       break;
     
     case 'lose':
@@ -301,7 +310,7 @@ function buildResultEmbed(game, user, attachment) {
       color = 0x57F287;
       title = '🎉 Correct Guess!';
       const totalWinHL = game.payout + game.ante;
-      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) - you guessed right!\n\n**You won ${totalWinHL.toLocaleString()}** ${getCurrency(game.guildId)} *(${game.payout.toLocaleString()} + ${game.ante.toLocaleString()} ante)*!`;
+      description = `The third card **${formatCard(game.thirdCard)}** (${thirdVal}) - you guessed right!\n\n**You won ${totalWinHL.toLocaleString()}** ${getCurrency(game.guildId)}${petTag} *(${game.payout.toLocaleString()} + ${game.ante.toLocaleString()} ante)*!`;
       break;
     
     case 'lose_highlow':

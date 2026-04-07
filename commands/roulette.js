@@ -11,7 +11,7 @@ const {
   getRouletteStats
 } = require('../gambling');
 const { getCurrency } = require('../admin');
-const { applyGamblingBonus } = require('../pets');
+const { applyGamblingBonus, getPetBonusDecimal } = require('../pets');
 
 
 const BETTING_WINDOW = 30000; // 30 seconds to place bets
@@ -217,9 +217,18 @@ async function spinWheel(table) {
       ? `+${data.netWinnings.toLocaleString()}` 
       : data.netWinnings.toLocaleString();
     
+    // Pet gambling bonus tag for winners
+    let playerPetTag = '';
+    if (data.netWinnings > 0) {
+      try {
+        const bonus = getPetBonusDecimal(table.guildId, odId, 'gambling') * 100;
+        if (bonus > 0) playerPetTag = ` (🐾 +${bonus.toFixed(1)}%)`;
+      } catch (e) {}
+    }
+    
     resultEmbed.addFields({
       name: `${netIcon} ${data.name}`,
-      value: `${resultLines}\n**Net: ${netText}** ${getCurrency(table.guildId)}`,
+      value: `${resultLines}\n**Net: ${netText}${playerPetTag}** ${getCurrency(table.guildId)}`,
       inline: true
     });
   }
