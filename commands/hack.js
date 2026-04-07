@@ -318,6 +318,7 @@ module.exports = {
     console.log(`   hackBonuses object:`, JSON.stringify(hackBonuses));
     console.log(`   Skill Bonus: ${hackBonuses.successRateBonus}% (level ${hackBonuses.level}), Item Boost: ${itemSuccessBoost}%`);
     console.log(`   LP Hack Success: ${lpHackSuccess}%, Target Hack Defense: ${targetHackDefense}%`);
+    console.log(`   Pet Offense: ${petHackOffense.toFixed(2)}%, Pet Defense: ${petHackDefense.toFixed(2)}%`);
     console.log(`   Total Success Bonus: ${totalSuccessBonus}%`);
     // Apply infamy tier success buff
     const hackerTierEffects = getTierEffects(guildId, hackerId);
