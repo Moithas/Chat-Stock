@@ -473,7 +473,7 @@ function snapshotPortfolio(guildId, eventName) {
   try {
     // Get all users with stock holdings
     const holdings = db.exec(`
-      SELECT s.user_id as holder_id, s.stock_user_id, s.shares
+      SELECT s.owner_id as holder_id, s.stock_user_id, s.shares
       FROM stocks s
       WHERE s.shares > 0
     `);
