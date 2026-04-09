@@ -13,6 +13,7 @@ const {
   formatBonusType, getSpecialtyDisplay, getSinglePetBonus,
   getKennel, upgradeKennel, getKennelUpgradeCost, getMaxPetSlots,
   generateShopStock, getPetImagePath, setActivePet, getActivePet,
+  EGG_TYPES, getEggPrice, getUserEggs, getUserEggCount, getEgg, buyEgg, warmEgg, hatchEgg, deleteEgg,
 } = require('../pets');
 const { getBalance, removeFromTotal, addMoney } = require('../economy');
 const { getCurrency } = require('../admin');
@@ -88,6 +89,13 @@ module.exports = {
     if (customId.startsWith('pet_buy_')) return handleBuyFromShop(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_kennel_buy_')) return handleKennelUpgrade(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_shop_page_')) return handleShopPage(interaction, guildId, userId, settings);
+    // Egg buttons
+    if (customId.startsWith('pet_egg_shop_')) return showEggShopPanel(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_egg_buy_')) return handleEggBuy(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_egg_warm_')) return handleEggWarm(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_egg_hatch_')) return handleEggHatch(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_egg_name_')) return handleEggNameButton(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_myeggs_')) return showMyEggsPanel(interaction, guildId, userId, settings);
   },
 
   async handleSelectMenu(interaction) {
@@ -108,6 +116,7 @@ module.exports = {
 
     if (customId.startsWith('modal_pet_name_')) return handleNameModal(interaction, guildId, userId, settings);
     if (customId.startsWith('modal_pet_rename_')) return handleRenameModal(interaction, guildId, userId, settings);
+    if (customId.startsWith('modal_egg_name_')) return handleEggNameModal(interaction, guildId, userId, settings);
   },
 };
 
@@ -162,6 +171,7 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
   const kennel = getKennel(guildId, userId);
   const balance = await getBalance(guildId, userId);
   const currency = getCurrency(guildId);
+  const eggs = getUserEggs(guildId, userId);
 
   const embed = new EmbedBuilder()
     .setColor(0xE67E22)
@@ -169,8 +179,11 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .setTimestamp();
 
+  const usedSlots = pets.length + eggs.length;
   let desc = `Welcome, **${interaction.user.displayName}**!\n\n`;
-  desc += `🐾 **Pets:** ${pets.length}/${maxSlots} slots\n`;
+  desc += `🐾 **Pets:** ${pets.length}/${maxSlots} slots`;
+  if (eggs.length > 0) desc += ` (🥚 ${eggs.length} incubating)`;
+  desc += `\n`;
   desc += `🏠 **Kennel:** ${kennel.level > 0 ? `Level ${kennel.level}` : 'None'}\n`;
   desc += `💰 **Balance:** ${Math.round(balance.total).toLocaleString()} ${currency}\n`;
 
@@ -189,12 +202,24 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
     desc += '\n*You have no pets yet! Visit the shop to adopt one.*';
   }
 
+  if (eggs.length > 0) {
+    desc += '\n**Your Eggs:**\n';
+    for (const egg of eggs) {
+      const eggData = EGG_TYPES[egg.egg_type];
+      const now = Date.now();
+      const ready = now >= egg.hatch_time;
+      const timeStr = ready ? '✅ Ready to hatch!' : `⏳ <t:${Math.floor(egg.hatch_time / 1000)}:R>`;
+      desc += `${eggData.emoji} **${eggData.name}** — ${timeStr}\n`;
+    }
+  }
+
   desc += extraMsg;
   embed.setDescription(desc);
 
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`pet_panel_shop_u_${userId}`).setLabel('Pet Shop').setEmoji('🛒').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('My Pets').setEmoji('🐾').setStyle(ButtonStyle.Primary).setDisabled(pets.length === 0),
+    new ButtonBuilder().setCustomId(`pet_myeggs_u_${userId}`).setLabel('My Eggs').setEmoji('🥚').setStyle(ButtonStyle.Primary).setDisabled(eggs.length === 0),
     new ButtonBuilder().setCustomId(`pet_panel_kennel_u_${userId}`).setLabel('Kennel').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`pet_dismiss_u_${userId}`).setLabel('Dismiss').setEmoji('❌').setStyle(ButtonStyle.Danger),
   );
@@ -275,6 +300,7 @@ async function showShopPanel(interaction, guildId, userId, settings, page = 0) {
     );
   }
   navRow.addComponents(
+    new ButtonBuilder().setCustomId(`pet_egg_shop_u_${userId}`).setLabel('Eggs').setEmoji('🥚').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
   );
   components.push(navRow);
@@ -305,9 +331,10 @@ async function handleShopSelectPet(interaction, guildId, userId, settings) {
   }
 
   const petCount = getUserPetCount(guildId, userId);
+  const eggCount = getUserEggCount(guildId, userId);
   const maxSlots = getMaxPetSlots(guildId, userId);
-  if (petCount >= maxSlots) {
-    return interaction.reply({ content: `❌ You already have **${petCount}/${maxSlots}** pets! Upgrade your kennel or release a pet.`, flags: 64 });
+  if (petCount + eggCount >= maxSlots) {
+    return interaction.reply({ content: `❌ You already have **${petCount} pets + ${eggCount} eggs** using **${petCount + eggCount}/${maxSlots}** slots! Upgrade your kennel or release a pet.`, flags: 64 });
   }
 
   // Show preview with variant image before naming
@@ -402,8 +429,9 @@ async function handleNameModal(interaction, guildId, userId, settings) {
   }
 
   const petCount = getUserPetCount(guildId, userId);
+  const eggCount2 = getUserEggCount(guildId, userId);
   const maxSlots = getMaxPetSlots(guildId, userId);
-  if (petCount >= maxSlots) {
+  if (petCount + eggCount2 >= maxSlots) {
     return interaction.editReply({ content: '❌ You have no pet slots available!' });
   }
 
@@ -1371,4 +1399,399 @@ async function handleKennelUpgrade(interaction, guildId, userId, settings) {
 
   // Refresh kennel panel
   return showKennelPanel(interaction, guildId, userId, settings);
+}
+
+// ================== EGG SHOP PANEL ==================
+
+async function showEggShopPanel(interaction, guildId, userId, settings) {
+  const balance = await getBalance(guildId, userId);
+  const currency = getCurrency(guildId);
+  const petCount = getUserPetCount(guildId, userId);
+  const eggCount = getUserEggCount(guildId, userId);
+  const maxSlots = getMaxPetSlots(guildId, userId);
+  const usedSlots = petCount + eggCount;
+
+  const embed = new EmbedBuilder()
+    .setColor(0xF39C12)
+    .setTitle('🥚 Egg Shop')
+    .setDescription(
+      `💰 **Balance:** ${Math.round(balance.total).toLocaleString()} ${currency}\n` +
+      `🐾 **Slots:** ${usedSlots}/${maxSlots} used (${petCount} pets, ${eggCount} eggs)\n\n` +
+      `Purchase an egg to hatch a random pet!\nEggs take **72 hours** to hatch. Use **Warm** to speed it up!\n` +
+      `Eggs occupy a pet slot while incubating.`
+    )
+    .setTimestamp();
+
+  const eggTypes = ['mystery', 'golden', 'prismatic'];
+  for (const type of eggTypes) {
+    const eggData = EGG_TYPES[type];
+    const price = getEggPrice(guildId, type);
+    let speciesInfo;
+    if (type === 'mystery') {
+      speciesInfo = '🐺 Wolf 25% · 👽 Alien 25% · 🐱🐶🐦🕷️🐻🐼 50%';
+    } else if (type === 'golden') {
+      speciesInfo = 'All 10 species (🦄 Unicorn 5.5%, others 10.5% each)';
+    } else {
+      speciesInfo = '🐺 Wolf 31% · 👽 Alien 31% · 🐉 Dragon 31% · 🦄 Unicorn 7%';
+    }
+    embed.addFields({
+      name: `${eggData.emoji} ${eggData.name} — ${price.toLocaleString()} ${currency}`,
+      value: `${speciesInfo}\n🌡️ Warm cost: **${eggData.warmCost.toLocaleString()}** · ✨ Shiny: **${Math.round(eggData.shinyChance * 100)}%**`,
+    });
+  }
+
+  const slotsAvailable = usedSlots < maxSlots;
+  const components = [];
+  const buyRow = new ActionRowBuilder().addComponents(
+    ...eggTypes.map(type => {
+      const eggData = EGG_TYPES[type];
+      const price = getEggPrice(guildId, type);
+      const canAfford = balance.total >= price && slotsAvailable;
+      return new ButtonBuilder()
+        .setCustomId(`pet_egg_buy_${type}_u_${userId}`)
+        .setLabel(`${eggData.name} (${abbreviateNumber(price)})`)
+        .setEmoji(eggData.emoji)
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!canAfford);
+    }),
+  );
+  components.push(buyRow);
+
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_panel_shop_u_${userId}`).setLabel('Pet Shop').setEmoji('🛒').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`pet_myeggs_u_${userId}`).setLabel('My Eggs').setEmoji('🥚').setStyle(ButtonStyle.Primary).setDisabled(eggCount === 0),
+    new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
+  );
+  components.push(navRow);
+
+  return interaction.update({ embeds: [embed], components });
+}
+
+function abbreviateNumber(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 0) + 'k';
+  return n.toLocaleString();
+}
+
+async function handleEggBuy(interaction, guildId, userId, settings) {
+  const parts = interaction.customId.split('_');
+  // pet_egg_buy_<type>_u_<userId>
+  const eggType = parts[3];
+  const eggData = EGG_TYPES[eggType];
+  if (!eggData) return interaction.reply({ content: '❌ Invalid egg type.', flags: 64 });
+
+  const price = getEggPrice(guildId, eggType);
+  const balance = await getBalance(guildId, userId);
+  if (balance.total < price) {
+    return interaction.reply({ content: `❌ You need **${price.toLocaleString()}** ${getCurrency(guildId)} to buy a ${eggData.name}.`, flags: 64 });
+  }
+
+  const petCount = getUserPetCount(guildId, userId);
+  const eggCount = getUserEggCount(guildId, userId);
+  const maxSlots = getMaxPetSlots(guildId, userId);
+  if (petCount + eggCount >= maxSlots) {
+    return interaction.reply({ content: `❌ No available slots! You have **${petCount} pets + ${eggCount} eggs** using **${petCount + eggCount}/${maxSlots}** slots.`, flags: 64 });
+  }
+
+  await removeFromTotal(guildId, userId, price, `Bought ${eggData.name}`);
+  const egg = buyEgg(guildId, userId, eggType);
+
+  const currency = getCurrency(guildId);
+  const embed = new EmbedBuilder()
+    .setColor(eggData.color)
+    .setTitle(`${eggData.emoji} Egg Purchased!`)
+    .setDescription(
+      `You bought a **${eggData.name}** for **${price.toLocaleString()}** ${currency}!\n\n` +
+      `⏳ **Hatches:** <t:${Math.floor(egg.hatch_time / 1000)}:F>\n` +
+      `🌡️ Use **Warm** to speed up hatching (${eggData.warmCost.toLocaleString()} ${currency} per warm)\n\n` +
+      `*Check your eggs from the main panel or the egg shop!*`
+    )
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_myeggs_u_${userId}`).setLabel('My Eggs').setEmoji('🥚').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`pet_egg_shop_u_${userId}`).setLabel('Buy Another').setEmoji('🛒').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
+  );
+
+  return interaction.update({ embeds: [embed], components: [row], files: [] });
+}
+
+// ================== MY EGGS PANEL ==================
+
+async function showMyEggsPanel(interaction, guildId, userId, settings) {
+  const eggs = getUserEggs(guildId, userId);
+  const currency = getCurrency(guildId);
+  const now = Date.now();
+
+  if (eggs.length === 0) {
+    const embed = new EmbedBuilder()
+      .setColor(0x95a5a6)
+      .setTitle('🥚 My Eggs')
+      .setDescription('You have no eggs! Visit the egg shop to buy one.')
+      .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`pet_egg_shop_u_${userId}`).setLabel('Egg Shop').setEmoji('🥚').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
+    );
+
+    return interaction.update({ embeds: [embed], components: [row], files: [] });
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(0xF39C12)
+    .setTitle('🥚 My Eggs')
+    .setTimestamp();
+
+  let desc = '';
+  for (const egg of eggs) {
+    const eggData = EGG_TYPES[egg.egg_type];
+    const ready = now >= egg.hatch_time;
+    const warmCooldownDone = !egg.last_warm_time || (now - egg.last_warm_time) >= 3 * 3600000;
+
+    desc += `${eggData.emoji} **${eggData.name}** (ID: ${egg.id})\n`;
+    if (ready) {
+      desc += `✅ **Ready to hatch!**\n`;
+    } else {
+      desc += `⏳ Hatches <t:${Math.floor(egg.hatch_time / 1000)}:R>\n`;
+      desc += `🌡️ Warmed ${egg.warm_count}x`;
+      if (!warmCooldownDone) {
+        const remaining = (3 * 3600000) - (now - egg.last_warm_time);
+        desc += ` · Next warm: ${formatCooldown(remaining)}`;
+      } else {
+        desc += ` · Warm ready!`;
+      }
+      desc += `\n`;
+    }
+    desc += `\n`;
+  }
+  embed.setDescription(desc);
+
+  // Build action buttons for each egg (max 5 per row, max 5 rows)
+  const components = [];
+  for (const egg of eggs) {
+    const eggData = EGG_TYPES[egg.egg_type];
+    const ready = now >= egg.hatch_time;
+    const warmCooldownDone = !egg.last_warm_time || (now - egg.last_warm_time) >= 3 * 3600000;
+
+    const row = new ActionRowBuilder();
+    if (ready) {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`pet_egg_hatch_${egg.id}_u_${userId}`)
+          .setLabel(`Hatch ${eggData.name}`)
+          .setEmoji('🐣')
+          .setStyle(ButtonStyle.Success),
+      );
+    } else {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`pet_egg_warm_${egg.id}_u_${userId}`)
+          .setLabel(`Warm (${eggData.warmCost.toLocaleString()} ${currency.replace(/<:[^:]+:\d+>/g, '').trim() || 'coins'})`)
+          .setEmoji('🌡️')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!warmCooldownDone),
+      );
+    }
+    components.push(row);
+    if (components.length >= 4) break; // Reserve last row for navigation
+  }
+
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_egg_shop_u_${userId}`).setLabel('Egg Shop').setEmoji('🥚').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
+  );
+  components.push(navRow);
+
+  return interaction.update({ embeds: [embed], components, files: [] });
+}
+
+// ================== EGG WARM ==================
+
+async function handleEggWarm(interaction, guildId, userId, settings) {
+  const parts = interaction.customId.split('_');
+  // pet_egg_warm_<eggId>_u_<userId>
+  const eggId = parseInt(parts[3]);
+  const egg = getEgg(eggId);
+  if (!egg || egg.owner_id !== userId) {
+    return interaction.reply({ content: '❌ Egg not found.', flags: 64 });
+  }
+
+  const eggData = EGG_TYPES[egg.egg_type];
+  const currency = getCurrency(guildId);
+  const balance = await getBalance(guildId, userId);
+
+  if (balance.total < eggData.warmCost) {
+    return interaction.reply({ content: `❌ You need **${eggData.warmCost.toLocaleString()}** ${currency} to warm this egg.`, flags: 64 });
+  }
+
+  const result = warmEgg(guildId, userId, eggId);
+  if (!result.success) {
+    if (result.reason === 'cooldown') {
+      return interaction.reply({ content: `❌ This egg was recently warmed! Next warm: ${formatCooldown(result.remaining)}`, flags: 64 });
+    }
+    return interaction.reply({ content: `❌ ${result.reason}`, flags: 64 });
+  }
+
+  await removeFromTotal(guildId, userId, result.cost, `Warmed ${eggData.name}`);
+
+  const hours = Math.floor(result.reduction / 3600000);
+  const mins = Math.floor((result.reduction % 3600000) / 60000);
+  const reductionStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+
+  if (result.ready) {
+    // Egg is now ready!
+    return showMyEggsPanel(interaction, guildId, userId, settings);
+  }
+
+  // Refresh the eggs panel
+  return showMyEggsPanel(interaction, guildId, userId, settings);
+}
+
+// ================== EGG HATCH ==================
+
+async function handleEggHatch(interaction, guildId, userId, settings) {
+  const parts = interaction.customId.split('_');
+  // pet_egg_hatch_<eggId>_u_<userId>
+  const eggId = parseInt(parts[3]);
+
+  const result = hatchEgg(guildId, userId, eggId);
+  if (!result.success) {
+    if (result.reason === 'not_ready') {
+      return interaction.reply({ content: `❌ This egg isn't ready yet! Hatches <t:${Math.floor(result.hatch_time / 1000)}:R>`, flags: 64 });
+    }
+    return interaction.reply({ content: `❌ ${result.reason}`, flags: 64 });
+  }
+
+  const { species, rarity, sex, shiny, variant } = result.result;
+  const speciesData = SPECIES[species];
+  const rarityData = RARITIES[rarity];
+  const sexEmoji = sex === 'M' ? '♂️' : '♀️';
+  const shinyStr = shiny ? '✨ **SHINY!** ' : '';
+  const eggData = result.eggData;
+
+  const embed = new EmbedBuilder()
+    .setColor(rarityData.color)
+    .setTitle(`🐣 Your ${eggData.name} hatched!`)
+    .setDescription(
+      `${shinyStr}${speciesData.emoji} A **${rarityData.name} ${speciesData.name}** ${sexEmoji} emerged!\n\n` +
+      `${PHASES.baby.emoji} Baby — Level 1\n` +
+      `**Specialty:** ${getSpecialtyDisplay(species)}\n\n` +
+      `*Give them a name to welcome them home!*`
+    )
+    .setTimestamp();
+
+  // Show baby image
+  const petImage = getPetImagePath(species, 'baby', variant);
+  let files = [];
+  if (petImage) {
+    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
+    embed.setImage(`attachment://${petImage.fileName}`);
+    files.push(attachment);
+  }
+
+  // Store hatch result in customId for the name button
+  // pet_egg_name_<species>_<rarity>_<sex>_<shiny>_<variant>_u_<userId>
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`pet_egg_name_${species}_${rarity}_${sex}_${shiny}_${variant}_u_${userId}`)
+      .setLabel('Name This Pet')
+      .setEmoji('✏️')
+      .setStyle(ButtonStyle.Success),
+  );
+
+  return interaction.update({ embeds: [embed], components: [row], files });
+}
+
+async function handleEggNameButton(interaction, guildId, userId, settings) {
+  const parts = interaction.customId.split('_');
+  // pet_egg_name_<species>_<rarity>_<sex>_<shiny>_<variant>_u_<userId>
+  const species = parts[3];
+  const rarity = parts[4];
+  const sex = parts[5];
+  const shiny = parts[6];
+  const variant = parts[7];
+
+  const speciesData = SPECIES[species];
+  if (!speciesData) return interaction.reply({ content: '❌ Invalid pet data.', flags: 64 });
+
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_egg_name_${species}_${rarity}_${sex}_${shiny}_${variant}_u_${userId}`)
+    .setTitle('Name Your Hatched Pet');
+
+  const nameInput = new TextInputBuilder()
+    .setCustomId('pet_name')
+    .setLabel(`Name your ${speciesData.name}`)
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(1)
+    .setMaxLength(24)
+    .setRequired(true)
+    .setPlaceholder('Enter a name...');
+
+  modal.addComponents(new ActionRowBuilder().addComponents(nameInput));
+  return interaction.showModal(modal);
+}
+
+async function handleEggNameModal(interaction, guildId, userId, settings) {
+  const parts = interaction.customId.split('_');
+  // modal_egg_name_<species>_<rarity>_<sex>_<shiny>_<variant>_u_<userId>
+  const species = parts[3];
+  const rarity = parts[4];
+  const sex = parts[5];
+  const shiny = parseInt(parts[6]);
+  const variant = parseInt(parts[7]);
+  const petName = interaction.fields.getTextInputValue('pet_name').trim();
+
+  if (!petName || petName.length > 24) {
+    return interaction.reply({ content: '❌ Pet name must be 1-24 characters.', flags: 64 });
+  }
+
+  await interaction.deferReply();
+
+  const speciesData = SPECIES[species];
+  if (!speciesData) return interaction.editReply({ content: '❌ Invalid pet data.' });
+
+  // Note: egg was already deleted during hatch. The pet just needs to be created.
+  const pet = adoptPet(guildId, userId, species, petName, rarity, sex, shiny, 'hatched', variant);
+
+  const rarityData = RARITIES[rarity];
+  const sexEmoji = sex === 'M' ? '♂️' : '♀️';
+  const shinyStr = shiny ? '✨ **SHINY!** ' : '';
+
+  const embed = new EmbedBuilder()
+    .setColor(rarityData.color)
+    .setTitle(`${speciesData.emoji} Welcome, ${petName}!`)
+    .setDescription(
+      `${shinyStr}${sexEmoji} **${rarityData.name} ${speciesData.name}**\n` +
+      `${PHASES.baby.emoji} Baby — Level 1\n\n` +
+      `**${petName}** has joined your family! Use **/pets** to manage them.`
+    )
+    .setTimestamp();
+
+  const petImage = getPetImagePath(species, 'baby', variant);
+  let files = [];
+  if (petImage) {
+    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
+    embed.setImage(`attachment://${petImage.fileName}`);
+    files.push(attachment);
+  }
+
+  // Check if server announcement needed (legendary or shiny)
+  let announcement = null;
+  if (rarity === 'legendary' || shiny) {
+    const announceEmoji = shiny ? '✨🐣' : '🐣🟡';
+    announcement = `${announceEmoji} **${interaction.user.displayName}** hatched a ${shiny ? '✨ **SHINY** ' : ''}**${rarityData.name} ${speciesData.name}** named **${petName}**!`;
+  }
+
+  await interaction.editReply({ embeds: [embed], files });
+
+  // Send announcement in same channel if applicable
+  if (announcement) {
+    try {
+      await interaction.channel.send({ content: announcement });
+    } catch (e) {
+      // Can't send announcement, ignore
+    }
+  }
 }

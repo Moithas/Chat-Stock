@@ -210,8 +210,31 @@ function initPets(database) {
     )
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS eggs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      egg_type TEXT NOT NULL,
+      purchased_at INTEGER NOT NULL,
+      hatch_time INTEGER NOT NULL,
+      warm_count INTEGER DEFAULT 0,
+      last_warm_time INTEGER DEFAULT 0
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS egg_pity (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      eggs_without_epic INTEGER DEFAULT 0,
+      PRIMARY KEY (guild_id, user_id)
+    )
+  `);
+
   db.run(`CREATE INDEX IF NOT EXISTS idx_pets_owner ON pets(guild_id, owner_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_pet_shop_guild ON pet_shop(guild_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_eggs_owner ON eggs(guild_id, owner_id)`);
 
   // Migration: add is_active column
   migrateAddColumn(db, 'pets', 'is_active INTEGER DEFAULT 0');
@@ -1085,6 +1108,322 @@ function getSpecialtyDisplay(species) {
   }).join('\n');
 }
 
+// ============ EGG SYSTEM ============
+const EGG_TYPES = {
+  mystery: {
+    name: 'Mystery Egg',
+    emoji: '🥚',
+    color: 0x95a5a6,
+    settingsKey: 'eggMysteryPrice',
+    warmCost: 1000,
+    shinyChance: 0.01,
+    hatchHours: 72,
+    speciesWeights: [
+      { species: 'wolf',   weight: 25 },
+      { species: 'alien',  weight: 25 },
+      { species: 'cat',    weight: 8.33 },
+      { species: 'dog',    weight: 8.33 },
+      { species: 'bird',   weight: 8.33 },
+      { species: 'spider', weight: 8.33 },
+      { species: 'bear',   weight: 8.33 },
+      { species: 'panda',  weight: 8.34 },
+    ],
+    // Rarity tables differ by species type
+    normalRarity: [
+      { rarity: 'rare',      weight: 70 },
+      { rarity: 'epic',      weight: 25 },
+      { rarity: 'legendary', weight: 5 },
+    ],
+    exoticRarity: [
+      { rarity: 'common',   weight: 80 },
+      { rarity: 'uncommon', weight: 15 },
+      { rarity: 'rare',     weight: 5 },
+    ],
+  },
+  golden: {
+    name: 'Golden Egg',
+    emoji: '🥇',
+    color: 0xf1c40f,
+    settingsKey: 'eggGoldenPrice',
+    warmCost: 3000,
+    shinyChance: 0.01,
+    hatchHours: 72,
+    speciesWeights: [
+      { species: 'wolf',    weight: 10.5 },
+      { species: 'alien',   weight: 10.5 },
+      { species: 'dragon',  weight: 10.5 },
+      { species: 'cat',     weight: 10.5 },
+      { species: 'dog',     weight: 10.5 },
+      { species: 'bird',    weight: 10.5 },
+      { species: 'spider',  weight: 10.5 },
+      { species: 'bear',    weight: 10.5 },
+      { species: 'panda',   weight: 10.5 },
+      { species: 'unicorn', weight: 5.5 },
+    ],
+    normalRarity: [
+      { rarity: 'rare',      weight: 45 },
+      { rarity: 'epic',      weight: 45 },
+      { rarity: 'legendary', weight: 10 },
+    ],
+    exoticRarity: [
+      { rarity: 'common',    weight: 15 },
+      { rarity: 'uncommon',  weight: 30 },
+      { rarity: 'rare',      weight: 30 },
+      { rarity: 'epic',      weight: 18 },
+      { rarity: 'legendary', weight: 7 },
+    ],
+  },
+  prismatic: {
+    name: 'Prismatic Egg',
+    emoji: '🌈',
+    color: 0x9b59b6,
+    settingsKey: 'eggPrismaticPrice',
+    warmCost: 5000,
+    shinyChance: 0.05,
+    hatchHours: 72,
+    speciesWeights: [
+      { species: 'wolf',    weight: 31 },
+      { species: 'alien',   weight: 31 },
+      { species: 'dragon',  weight: 31 },
+      { species: 'unicorn', weight: 7 },
+    ],
+    // Prismatic: all exotics, single rarity table (no commons)
+    normalRarity: [
+      { rarity: 'uncommon',  weight: 25 },
+      { rarity: 'rare',      weight: 35 },
+      { rarity: 'epic',      weight: 25 },
+      { rarity: 'legendary', weight: 15 },
+    ],
+    exoticRarity: [
+      { rarity: 'uncommon',  weight: 25 },
+      { rarity: 'rare',      weight: 35 },
+      { rarity: 'epic',      weight: 25 },
+      { rarity: 'legendary', weight: 15 },
+    ],
+  },
+};
+
+const EXOTIC_SPECIES = ['wolf', 'dragon', 'alien', 'unicorn'];
+
+function getEggPrice(guildId, eggType) {
+  const settings = getSettings(guildId);
+  const eggData = EGG_TYPES[eggType];
+  if (!eggData) return 0;
+  return settings[eggData.settingsKey] || 0;
+}
+
+function getUserEggs(guildId, userId) {
+  if (!db) return [];
+  const stmt = db.prepare('SELECT * FROM eggs WHERE guild_id = ? AND owner_id = ? ORDER BY purchased_at ASC');
+  stmt.bind([guildId, userId]);
+  const eggs = [];
+  while (stmt.step()) {
+    eggs.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return eggs;
+}
+
+function getUserEggCount(guildId, userId) {
+  if (!db) return 0;
+  const stmt = db.prepare('SELECT COUNT(*) as count FROM eggs WHERE guild_id = ? AND owner_id = ?');
+  stmt.bind([guildId, userId]);
+  let count = 0;
+  if (stmt.step()) {
+    count = stmt.getAsObject().count;
+  }
+  stmt.free();
+  return count;
+}
+
+function getEgg(eggId) {
+  if (!db) return null;
+  const stmt = db.prepare('SELECT * FROM eggs WHERE id = ?');
+  stmt.bind([eggId]);
+  let egg = null;
+  if (stmt.step()) {
+    egg = stmt.getAsObject();
+  }
+  stmt.free();
+  return egg;
+}
+
+function buyEgg(guildId, userId, eggType) {
+  if (!db) return null;
+  const eggData = EGG_TYPES[eggType];
+  if (!eggData) return null;
+
+  const now = Date.now();
+  const hatchTime = now + (eggData.hatchHours * 3600000);
+
+  db.run(
+    `INSERT INTO eggs (guild_id, owner_id, egg_type, purchased_at, hatch_time, warm_count, last_warm_time)
+     VALUES (?, ?, ?, ?, ?, 0, 0)`,
+    [guildId, userId, eggType, now, hatchTime]
+  );
+
+  // Retrieve the new egg
+  const stmt = db.prepare('SELECT * FROM eggs WHERE guild_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1');
+  stmt.bind([guildId, userId]);
+  let egg = null;
+  if (stmt.step()) {
+    egg = stmt.getAsObject();
+  }
+  stmt.free();
+  saveDatabase();
+  return egg;
+}
+
+function warmEgg(guildId, userId, eggId) {
+  if (!db) return { success: false, reason: 'Database not ready' };
+
+  const egg = getEgg(eggId);
+  if (!egg) return { success: false, reason: 'Egg not found' };
+  if (egg.owner_id !== userId || egg.guild_id !== guildId) return { success: false, reason: 'Not your egg' };
+
+  const now = Date.now();
+  const eggData = EGG_TYPES[egg.egg_type];
+  if (!eggData) return { success: false, reason: 'Invalid egg type' };
+
+  // Check if already hatched
+  if (now >= egg.hatch_time) return { success: false, reason: 'This egg is ready to hatch!' };
+
+  // Check cooldown (3 hours)
+  const warmCooldown = 3 * 3600000;
+  if (egg.last_warm_time && (now - egg.last_warm_time) < warmCooldown) {
+    const remaining = warmCooldown - (now - egg.last_warm_time);
+    return { success: false, reason: 'cooldown', remaining };
+  }
+
+  // Reduce hatch time by 1-3 hours
+  const reduction = (1 + Math.random() * 2) * 3600000; // 1-3 hours in ms
+  const newHatchTime = Math.max(now, egg.hatch_time - reduction);
+  const actualReduction = egg.hatch_time - newHatchTime;
+
+  db.run(
+    'UPDATE eggs SET hatch_time = ?, warm_count = warm_count + 1, last_warm_time = ? WHERE id = ?',
+    [newHatchTime, now, eggId]
+  );
+  saveDatabase();
+
+  return {
+    success: true,
+    cost: eggData.warmCost,
+    reduction: actualReduction,
+    newHatchTime,
+    ready: now >= newHatchTime,
+  };
+}
+
+function rollEggResult(eggType) {
+  const eggData = EGG_TYPES[eggType];
+  if (!eggData) return null;
+
+  // Roll species
+  const totalWeight = eggData.speciesWeights.reduce((sum, w) => sum + w.weight, 0);
+  let rand = Math.random() * totalWeight;
+  let species = eggData.speciesWeights[eggData.speciesWeights.length - 1].species;
+  for (const entry of eggData.speciesWeights) {
+    rand -= entry.weight;
+    if (rand <= 0) { species = entry.species; break; }
+  }
+
+  // Roll rarity based on species type
+  const isExotic = EXOTIC_SPECIES.includes(species);
+  const rarityTable = isExotic ? eggData.exoticRarity : eggData.normalRarity;
+  const rarityTotal = rarityTable.reduce((sum, w) => sum + w.weight, 0);
+  let rRand = Math.random() * rarityTotal;
+  let rarity = rarityTable[rarityTable.length - 1].rarity;
+  for (const entry of rarityTable) {
+    rRand -= entry.weight;
+    if (rRand <= 0) { rarity = entry.rarity; break; }
+  }
+
+  // Roll sex
+  const sex = Math.random() < 0.5 ? 'M' : 'F';
+
+  // Roll shiny
+  const shiny = Math.random() < eggData.shinyChance ? 1 : 0;
+
+  // Roll variant
+  const speciesData = SPECIES[species];
+  const variant = Math.ceil(Math.random() * (speciesData?.variants || 1));
+
+  return { species, rarity, sex, shiny, variant };
+}
+
+function applyPityProtection(guildId, userId, result) {
+  if (!db) return result;
+
+  // Get pity counter
+  const stmt = db.prepare('SELECT eggs_without_epic FROM egg_pity WHERE guild_id = ? AND user_id = ?');
+  stmt.bind([guildId, userId]);
+  let pityCount = 0;
+  if (stmt.step()) {
+    pityCount = stmt.getAsObject().eggs_without_epic;
+  }
+  stmt.free();
+
+  const isEpicPlus = result.rarity === 'epic' || result.rarity === 'legendary';
+
+  if (isEpicPlus) {
+    // Reset pity counter
+    db.run('INSERT OR REPLACE INTO egg_pity (guild_id, user_id, eggs_without_epic) VALUES (?, ?, 0)', [guildId, userId]);
+    saveDatabase();
+    return result;
+  }
+
+  // Increment pity counter
+  pityCount++;
+
+  if (pityCount >= 5) {
+    // Bad luck protection — guarantee at least Epic
+    result.rarity = 'epic';
+    pityCount = 0;
+  }
+
+  db.run('INSERT OR REPLACE INTO egg_pity (guild_id, user_id, eggs_without_epic) VALUES (?, ?, ?)', [guildId, userId, pityCount]);
+  saveDatabase();
+  return result;
+}
+
+function hatchEgg(guildId, userId, eggId) {
+  if (!db) return { success: false, reason: 'Database not ready' };
+
+  const egg = getEgg(eggId);
+  if (!egg) return { success: false, reason: 'Egg not found' };
+  if (egg.owner_id !== userId || egg.guild_id !== guildId) return { success: false, reason: 'Not your egg' };
+
+  const now = Date.now();
+  if (now < egg.hatch_time) return { success: false, reason: 'not_ready', hatch_time: egg.hatch_time };
+
+  // Roll the result
+  let result = rollEggResult(egg.egg_type);
+  if (!result) return { success: false, reason: 'Invalid egg type' };
+
+  // Apply pity protection
+  result = applyPityProtection(guildId, userId, result);
+
+  // Delete the egg
+  db.run('DELETE FROM eggs WHERE id = ?', [eggId]);
+  saveDatabase();
+
+  const eggData = EGG_TYPES[egg.egg_type];
+  return {
+    success: true,
+    result,
+    eggType: egg.egg_type,
+    eggData,
+    isAnnouncement: result.rarity === 'legendary' || result.shiny === 1,
+  };
+}
+
+function deleteEgg(eggId) {
+  if (!db) return;
+  db.run('DELETE FROM eggs WHERE id = ?', [eggId]);
+  saveDatabase();
+}
+
 // ============ EXPORTS ============
 module.exports = {
   initPets,
@@ -1147,4 +1486,15 @@ module.exports = {
   getSpecialtyDisplay,
   // Images
   getPetImagePath,
+  // Eggs
+  EGG_TYPES,
+  getEggPrice,
+  getUserEggs,
+  getUserEggCount,
+  getEgg,
+  buyEgg,
+  warmEgg,
+  hatchEgg,
+  deleteEgg,
+  rollEggResult,
 };
