@@ -1146,7 +1146,7 @@ const EGG_TYPES = {
     color: 0xf1c40f,
     settingsKey: 'eggGoldenPrice',
     warmCost: 3000,
-    shinyChance: 0.01,
+    shinyChance: 0.02,
     hatchHours: 72,
     speciesWeights: [
       { species: 'wolf',    weight: 10.5 },

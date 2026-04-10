@@ -1428,11 +1428,11 @@ async function showEggShopPanel(interaction, guildId, userId, settings) {
     const price = getEggPrice(guildId, type);
     let speciesInfo;
     if (type === 'mystery') {
-      speciesInfo = '🐺 Wolf 25% · 👽 Alien 25% · 🐱🐶🐦🕷️🐻🐼 50%';
+      speciesInfo = '🐺 Wolf · 👽 Alien · 🐱 Cat · 🐶 Dog · 🐦 Bird · 🕷️ Spider · 🐻 Bear · 🐼 Panda';
     } else if (type === 'golden') {
-      speciesInfo = 'All 10 species (🦄 Unicorn 5.5%, others 10.5% each)';
+      speciesInfo = '🐺 Wolf · 👽 Alien · 🐉 Dragon · 🦄 Unicorn · 🐱 Cat · 🐶 Dog · 🐦 Bird · 🕷️ Spider · 🐻 Bear · 🐼 Panda';
     } else {
-      speciesInfo = '🐺 Wolf 31% · 👽 Alien 31% · 🐉 Dragon 31% · 🦄 Unicorn 7%';
+      speciesInfo = '🐺 Wolf · 👽 Alien · 🐉 Dragon · 🦄 Unicorn';
     }
     embed.addFields({
       name: `${eggData.emoji} ${eggData.name} — ${price.toLocaleString()} ${currency}`,
