@@ -12,7 +12,7 @@ const {
   xpToNextLevel, getPhase, formatPetName, formatPetSummary, formatShopEntry,
   formatBonusType, getSpecialtyDisplay, getSinglePetBonus,
   getKennel, upgradeKennel, getKennelUpgradeCost, getMaxPetSlots,
-  generateShopStock, getPetImagePath, setActivePet, getActivePet,
+  generateShopStock, getPetImagePath, getPetImage, setActivePet, getActivePet,
   EGG_TYPES, getEggPrice, getUserEggs, getUserEggCount, getEgg, buyEgg, warmEgg, hatchEgg, deleteEgg,
 } = require('../pets');
 const { getBalance, removeFromTotal, addMoney } = require('../economy');
@@ -356,10 +356,10 @@ async function handleShopSelectPet(interaction, guildId, userId, settings) {
     )
     .setTimestamp();
 
-  const petImage = getPetImagePath(item.species, 'baby', variant);
+  const petImage = await getPetImage(item.species, 'baby', variant, item.shiny);
   let files = [];
   if (petImage) {
-    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
+    const attachment = new AttachmentBuilder(petImage.data, { name: petImage.fileName });
     embed.setImage(`attachment://${petImage.fileName}`);
     files.push(attachment);
   }
@@ -458,9 +458,9 @@ async function handleNameModal(interaction, guildId, userId, settings) {
     .setFooter({ text: 'Use /pets to manage your new companion!' })
     .setTimestamp();
 
-  const petImage = getPetImagePath(item.species, 'baby', pet?.variant || 1);
+  const petImage = await getPetImage(item.species, 'baby', pet?.variant || 1, item.shiny);
   if (petImage) {
-    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
+    const attachment = new AttachmentBuilder(petImage.data, { name: petImage.fileName });
     embed.setImage(`attachment://${petImage.fileName}`);
     return interaction.editReply({ embeds: [embed], files: [attachment] });
   }
@@ -607,10 +607,10 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   embed.setDescription(desc);
 
   // Attach pet phase image if available
-  const petImage = getPetImagePath(pet.species, phase.name.toLowerCase(), pet.variant || 1);
+  const petImage = await getPetImage(pet.species, phase.name.toLowerCase(), pet.variant || 1, pet.shiny);
   let files = [];
   if (petImage) {
-    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
+    const attachment = new AttachmentBuilder(petImage.data, { name: petImage.fileName });
     embed.setImage(`attachment://${petImage.fileName}`);
     files.push(attachment);
   }
@@ -1683,10 +1683,10 @@ async function handleEggHatch(interaction, guildId, userId, settings) {
     .setTimestamp();
 
   // Show baby image
-  const petImage = getPetImagePath(species, 'baby', variant);
+  const petImage = await getPetImage(species, 'baby', variant, shiny);
   let files = [];
   if (petImage) {
-    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
+    const attachment = new AttachmentBuilder(petImage.data, { name: petImage.fileName });
     embed.setImage(`attachment://${petImage.fileName}`);
     files.push(attachment);
   }
@@ -1769,10 +1769,10 @@ async function handleEggNameModal(interaction, guildId, userId, settings) {
     )
     .setTimestamp();
 
-  const petImage = getPetImagePath(species, 'baby', variant);
+  const petImage = await getPetImage(species, 'baby', variant, shiny);
   let files = [];
   if (petImage) {
-    const attachment = new AttachmentBuilder(petImage.filePath, { name: petImage.fileName });
+    const attachment = new AttachmentBuilder(petImage.data, { name: petImage.fileName });
     embed.setImage(`attachment://${petImage.fileName}`);
     files.push(attachment);
   }

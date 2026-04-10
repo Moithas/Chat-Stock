@@ -3,6 +3,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const { createCanvas, loadImage } = require('canvas');
 const { migrateAddColumn, saveDatabase } = require('./database');
 const { TTLCache } = require('./cache');
 
@@ -66,6 +67,154 @@ function getPetImagePath(species, phaseName, variant = 1) {
   const filePath = path.join(PET_IMAGES_DIR, file);
   if (fs.existsSync(filePath)) return { filePath, fileName: file };
   return null;
+}
+
+// Shiny holographic foil overlay cache
+const shinyCache = new Map();
+const SHINY_CACHE_TTL = 3600000; // 1 hour
+
+async function applyShinyOverlay(imagePath) {
+  // Check cache
+  const cached = shinyCache.get(imagePath);
+  if (cached && Date.now() - cached.time < SHINY_CACHE_TTL) return cached.buffer;
+
+  const img = await loadImage(imagePath);
+  const w = img.width;
+  const h = img.height;
+  const canvas = createCanvas(w, h);
+  const ctx = canvas.getContext('2d');
+
+  // Draw original image
+  ctx.drawImage(img, 0, 0, w, h);
+
+  // --- Layer 1: Diagonal rainbow gradient (overlay blend) ---
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = 0.45;
+  const rainbow = ctx.createLinearGradient(0, 0, w, h);
+  rainbow.addColorStop(0.00, '#ff0000');
+  rainbow.addColorStop(0.12, '#ff8800');
+  rainbow.addColorStop(0.25, '#ffff00');
+  rainbow.addColorStop(0.38, '#00ff00');
+  rainbow.addColorStop(0.50, '#00ffcc');
+  rainbow.addColorStop(0.62, '#0088ff');
+  rainbow.addColorStop(0.75, '#4400ff');
+  rainbow.addColorStop(0.88, '#ff00ff');
+  rainbow.addColorStop(1.00, '#ff0044');
+  ctx.fillStyle = rainbow;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  // --- Layer 2: Secondary shimmer bands (soft-light) ---
+  ctx.save();
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.globalAlpha = 0.32;
+  const shimmer = ctx.createLinearGradient(w, 0, 0, h);
+  shimmer.addColorStop(0.0, 'rgba(255,255,255,0.0)');
+  shimmer.addColorStop(0.2, 'rgba(255,255,255,0.9)');
+  shimmer.addColorStop(0.3, 'rgba(255,255,255,0.0)');
+  shimmer.addColorStop(0.5, 'rgba(255,255,255,0.0)');
+  shimmer.addColorStop(0.65, 'rgba(255,255,255,0.8)');
+  shimmer.addColorStop(0.75, 'rgba(255,255,255,0.0)');
+  shimmer.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+  ctx.fillStyle = shimmer;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  // --- Layer 3: Screen highlight streak ---
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = 0.20;
+  const streak = ctx.createLinearGradient(w * 0.2, 0, w * 0.8, h);
+  streak.addColorStop(0.0, 'rgba(255,200,255,0.0)');
+  streak.addColorStop(0.35, 'rgba(200,255,255,0.6)');
+  streak.addColorStop(0.5, 'rgba(255,255,200,0.8)');
+  streak.addColorStop(0.65, 'rgba(200,200,255,0.6)');
+  streak.addColorStop(1.0, 'rgba(255,200,255,0.0)');
+  ctx.fillStyle = streak;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  // --- Layer 4: Sparkle dots ---
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  // Seed sparkle positions deterministically from image path so they're consistent
+  let seed = 0;
+  for (let i = 0; i < imagePath.length; i++) seed = ((seed << 5) - seed + imagePath.charCodeAt(i)) | 0;
+  const pseudoRandom = () => { seed = (seed * 16807 + 0) % 2147483647; return (seed & 0x7fffffff) / 2147483647; };
+
+  const sparkleCount = 18;
+  for (let i = 0; i < sparkleCount; i++) {
+    const sx = pseudoRandom() * w;
+    const sy = pseudoRandom() * h;
+    const size = 1.5 + pseudoRandom() * 3;
+    const alpha = 0.4 + pseudoRandom() * 0.5;
+
+    // 4-pointed star sparkle
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    // Vertical line
+    ctx.moveTo(sx, sy - size * 2);
+    ctx.lineTo(sx + size * 0.3, sy);
+    ctx.lineTo(sx, sy + size * 2);
+    ctx.lineTo(sx - size * 0.3, sy);
+    ctx.closePath();
+    ctx.fill();
+    // Horizontal line
+    ctx.beginPath();
+    ctx.moveTo(sx - size * 2, sy);
+    ctx.lineTo(sx, sy - size * 0.3);
+    ctx.lineTo(sx + size * 2, sy);
+    ctx.lineTo(sx, sy + size * 0.3);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // --- Layer 5: Gold border glow ---
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  const borderWidth = 4;
+  // Outer glow
+  ctx.shadowColor = 'rgba(255, 215, 0, 0.8)';
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = 'rgba(255, 215, 0, 0.7)';
+  ctx.lineWidth = borderWidth;
+  ctx.strokeRect(borderWidth / 2, borderWidth / 2, w - borderWidth, h - borderWidth);
+  // Inner bright edge
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255, 255, 200, 0.4)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(borderWidth + 1, borderWidth + 1, w - (borderWidth + 1) * 2, h - (borderWidth + 1) * 2);
+  ctx.restore();
+
+  const buffer = canvas.toBuffer('image/png');
+  shinyCache.set(imagePath, { buffer, time: Date.now() });
+  return buffer;
+}
+
+/**
+ * Get pet image data for display. Returns { data, fileName, isBuffer } 
+ * - For normal pets: data = filePath, isBuffer = false
+ * - For shiny pets: data = PNG buffer with holographic overlay, isBuffer = true
+ */
+async function getPetImage(species, phaseName, variant = 1, shiny = false) {
+  const imageInfo = getPetImagePath(species, phaseName, variant);
+  if (!imageInfo) return null;
+
+  if (!shiny) {
+    return { data: imageInfo.filePath, fileName: imageInfo.fileName, isBuffer: false };
+  }
+
+  try {
+    const buffer = await applyShinyOverlay(imageInfo.filePath);
+    const shinyFileName = `shiny_${imageInfo.fileName}`;
+    return { data: buffer, fileName: shinyFileName, isBuffer: true };
+  } catch (e) {
+    console.error('Error applying shiny overlay:', e);
+    return { data: imageInfo.filePath, fileName: imageInfo.fileName, isBuffer: false };
+  }
 }
 
 // ============ PLAY/TRAIN MESSAGES ============
@@ -1486,6 +1635,7 @@ module.exports = {
   getSpecialtyDisplay,
   // Images
   getPetImagePath,
+  getPetImage,
   // Eggs
   EGG_TYPES,
   getEggPrice,
