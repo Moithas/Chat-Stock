@@ -1,6 +1,8 @@
 // /pets — Main pet panel command
 // All pet interactions go through this single panel
 
+const path = require('path');
+const fs = require('fs');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require('discord.js');
 const {
@@ -1519,6 +1521,21 @@ async function handleEggBuy(interaction, guildId, userId, settings) {
 
 // ================== MY EGGS PANEL ==================
 
+function getEggImageStage(egg) {
+  const now = Date.now();
+  const remaining = egg.hatch_time - now;
+  if (remaining <= 24 * 3600000) return 3; // <1 day remaining (or ready)
+  if (remaining <= 48 * 3600000) return 2; // <2 days remaining
+  return 1; // first day
+}
+
+function getEggImagePath(eggType, stage) {
+  const file = `${eggType}_egg_${stage}.png`;
+  const filePath = path.join(__dirname, '..', 'assets', 'pets', file);
+  if (fs.existsSync(filePath)) return { filePath, fileName: file };
+  return null;
+}
+
 async function showMyEggsPanel(interaction, guildId, userId, settings) {
   const eggs = getUserEggs(guildId, userId);
   const currency = getCurrency(guildId);
@@ -1604,7 +1621,18 @@ async function showMyEggsPanel(interaction, guildId, userId, settings) {
   );
   components.push(navRow);
 
-  return interaction.update({ embeds: [embed], components, files: [] });
+  // Attach egg image for the first egg based on incubation stage
+  let files = [];
+  const firstEgg = eggs[0];
+  const stage = getEggImageStage(firstEgg);
+  const eggImage = getEggImagePath(firstEgg.egg_type, stage);
+  if (eggImage) {
+    const attachment = new AttachmentBuilder(eggImage.filePath, { name: eggImage.fileName });
+    embed.setThumbnail(`attachment://${eggImage.fileName}`);
+    files.push(attachment);
+  }
+
+  return interaction.update({ embeds: [embed], components, files });
 }
 
 // ================== EGG WARM ==================
