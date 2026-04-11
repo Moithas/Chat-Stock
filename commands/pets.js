@@ -1536,7 +1536,7 @@ function getEggImagePath(eggType, stage) {
   return null;
 }
 
-async function showMyEggsPanel(interaction, guildId, userId, settings) {
+async function showMyEggsPanel(interaction, guildId, userId, settings, focusEggId = null) {
   const eggs = getUserEggs(guildId, userId);
   const currency = getCurrency(guildId);
   const now = Date.now();
@@ -1621,11 +1621,11 @@ async function showMyEggsPanel(interaction, guildId, userId, settings) {
   );
   components.push(navRow);
 
-  // Attach egg image for the first egg based on incubation stage
+  // Attach egg image based on focused egg (just warmed) or first egg
   let files = [];
-  const firstEgg = eggs[0];
-  const stage = getEggImageStage(firstEgg);
-  const eggImage = getEggImagePath(firstEgg.egg_type, stage);
+  const displayEgg = (focusEggId && eggs.find(e => e.id === focusEggId)) || eggs[0];
+  const stage = getEggImageStage(displayEgg);
+  const eggImage = getEggImagePath(displayEgg.egg_type, stage);
   if (eggImage) {
     const attachment = new AttachmentBuilder(eggImage.filePath, { name: eggImage.fileName });
     embed.setImage(`attachment://${eggImage.fileName}`);
@@ -1670,11 +1670,11 @@ async function handleEggWarm(interaction, guildId, userId, settings) {
 
   if (result.ready) {
     // Egg is now ready!
-    return showMyEggsPanel(interaction, guildId, userId, settings);
+    return showMyEggsPanel(interaction, guildId, userId, settings, eggId);
   }
 
   // Refresh the eggs panel
-  return showMyEggsPanel(interaction, guildId, userId, settings);
+  return showMyEggsPanel(interaction, guildId, userId, settings, eggId);
 }
 
 // ================== EGG HATCH ==================
