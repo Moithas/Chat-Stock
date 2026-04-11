@@ -703,7 +703,8 @@ const helpPages = {
         value:
           `Use \`/pets\` to open the **Pet Panel**.\n` +
           `• Browse the **Pet Shop** — 18 random pets, restocks every 12h\n` +
-          `• 10 species: 🐱 Cat, 🐶 Dog, 🐦 Bird, 🕷️ Spider, 🐻 Bear, 🐼 Panda + 4 exotic\n` +
+          `• 10 species: 🐱 Cat, 🐶 Dog, 🐦 Bird, 🕷️ Spider, 🐻 Bear, 🐼 Panda in shop\n` +
+          `• 4 exotics (🐺 Wolf, 🐉 Dragon, 👽 Alien, 🦄 Unicorn) — **egg-exclusive**\n` +
           `• Rarities: Common, Uncommon, Rare (Epic & Legendary from breeding)\n` +
           `• Each pet has a random sex (♂/♀) and 1% shiny chance (✨ +10% bonus)`,
         inline: false
@@ -763,7 +764,20 @@ const helpPages = {
         value:
           `• Base 2 pet slots + prestige bonuses + kennel upgrades (max 10)\n` +
           `• Upgrade your kennel in the Pet Panel for more slots\n` +
+          `• Eggs take up pet slots too!\n` +
           `• 📢 **Show Off** your pet with a public embed!`,
+        inline: false
+      },
+      {
+        name: '🥚 Eggsotics',
+        value:
+          `Hatch **exotic pets** from eggs! Open the Egg Shop from the Pet Panel.\n` +
+          `• 🥚 **Mystery Egg** (250k) — Wolf, Alien, or a shop species\n` +
+          `• 🥇 **Golden Egg** (1M) — All species incl. Dragon, better rarities\n` +
+          `• 🌈 **Prismatic Egg** (5M) — Exotics only (Wolf/Alien/Dragon/Unicorn)\n\n` +
+          `**Incubation:** 72h hatch timer. **Warm** your egg to speed it up!\n` +
+          `• Warming costs a small fee, 3h cooldown, reduces hatch by 1–3h\n` +
+          `• 🐣 Legendary & ✨ Shiny hatches get a server announcement`,
         inline: false
       }
     ]
