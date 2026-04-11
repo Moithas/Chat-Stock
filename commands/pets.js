@@ -1628,7 +1628,7 @@ async function showMyEggsPanel(interaction, guildId, userId, settings) {
   const eggImage = getEggImagePath(firstEgg.egg_type, stage);
   if (eggImage) {
     const attachment = new AttachmentBuilder(eggImage.filePath, { name: eggImage.fileName });
-    embed.setThumbnail(`attachment://${eggImage.fileName}`);
+    embed.setImage(`attachment://${eggImage.fileName}`);
     files.push(attachment);
   }
 
