@@ -914,12 +914,12 @@ function recordCreditEvent(guildId, userId, event, loanPrincipal = 0, paymentAmo
   switch (event) {
     case 'completed':
       updates.loansCompleted = current.loansCompleted + 1;
-      updates.totalRepaid = current.totalRepaid + paymentAmount;
+      // totalRepaid is tracked by individual on_time_payment events, not here
       scoreChange = qualifiesForCredit ? Math.round(SCORE_CHANGES.LOAN_COMPLETED * loanScale) : 0;
       break;
     case 'completed_early':
       updates.loansCompleted = current.loansCompleted + 1;
-      updates.totalRepaid = current.totalRepaid + paymentAmount;
+      // totalRepaid is tracked by individual on_time_payment events, not here
       scoreChange = qualifiesForCredit ? Math.round((SCORE_CHANGES.LOAN_COMPLETED + SCORE_CHANGES.EARLY_PAYOFF_BONUS) * loanScale) : 0;
       break;
     case 'defaulted':
@@ -1184,7 +1184,7 @@ async function processLoanPayments() {
         const newPaid = loan.amount_paid + actualCharge;
         if (newPaid >= loan.total_owed) {
           completeLoan(loan.id);
-          recordCreditEvent(loan.guild_id, loan.user_id, 'completed', loan.principal, actualCharge);
+          recordCreditEvent(loan.guild_id, loan.user_id, 'completed', loan.principal, 0);
           console.log(`✅ Loan ${loan.id} completed for user ${loan.user_id}`);
         } else {
           // Schedule next payment
@@ -1217,12 +1217,14 @@ async function processLoanPayments() {
             }
           }
         } else {
-          // Add penalty to total owed
-          const penalty = Math.floor(remaining * (settings.loanMissedPaymentPenalty / 100));
-          db.run('UPDATE loans SET total_owed = total_owed + ? WHERE id = ?', [penalty, loan.id]);
+          // Add penalty to total owed only on the first miss (not on retries)
+          if (loan.missed_payments === 0) {
+            const penalty = Math.floor(remaining * (settings.loanMissedPaymentPenalty / 100));
+            db.run('UPDATE loans SET total_owed = total_owed + ? WHERE id = ?', [penalty, loan.id]);
+          }
           
-          // Schedule retry in 1 hour
-          updateLoanNextPayment(loan.id, Date.now() + 60 * 60 * 1000);
+          // Schedule retry in 24 hours
+          updateLoanNextPayment(loan.id, Date.now() + 24 * 60 * 60 * 1000);
         }
       }
       
@@ -1258,6 +1260,44 @@ async function processExpiredBonds() {
   }
 }
 
+// ============ LOAN WARNING HELPER ============
+
+function getLoanWarning(guildId, userId, currency) {
+  const loan = getUserActiveLoan(guildId, userId);
+  if (!loan) return null;
+
+  const now = Date.now();
+  const timeUntilPayment = loan.next_payment_time - now;
+  const missed = loan.missed_payments || 0;
+  const settings = getBankSettings(guildId);
+  const maxMissed = settings.loanMaxMissedPayments || 3;
+  const remaining = loan.total_owed - loan.amount_paid;
+  const effectivePayment = getEffectiveNextPayment(loan);
+
+  // Missed payment warning (highest priority)
+  if (missed > 0) {
+    return `\n\n🚨🚨🚨 **LOAN PAYMENT MISSED** 🚨🚨🚨\n` +
+      `> ⚠️ You have **${missed}/${maxMissed}** missed payments!\n` +
+      `> 💸 Next auto-draft: <t:${Math.floor(loan.next_payment_time / 1000)}:R>\n` +
+      `> 💰 Amount due: **${effectivePayment.toLocaleString()}** ${currency}\n` +
+      `> 🏦 Deposit funds in your bank or use \`/bank\` → Pay Loan\n` +
+      `> ❌ **${maxMissed - missed} more miss${maxMissed - missed !== 1 ? 'es' : ''} = DEFAULT + credit destroyed**`;
+  }
+
+  // Due within 24 hours warning
+  if (timeUntilPayment > 0 && timeUntilPayment <= 24 * 60 * 60 * 1000) {
+    const hours = Math.floor(timeUntilPayment / 3600000);
+    const mins = Math.floor((timeUntilPayment % 3600000) / 60000);
+    const timeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+    return `\n\n⏰💸 **LOAN PAYMENT DUE SOON** 💸⏰\n` +
+      `> 📅 Auto-draft in **${timeStr}** (<t:${Math.floor(loan.next_payment_time / 1000)}:R>)\n` +
+      `> 💰 Amount: **${effectivePayment.toLocaleString()}** ${currency}\n` +
+      `> 🏦 Make sure you have funds in your bank!`;
+  }
+
+  return null;
+}
+
 module.exports = {
   initBank,
   getBankSettings,
@@ -1266,6 +1306,7 @@ module.exports = {
   // Loans
   getUserActiveLoan,
   getUserLoanHistory,
+  getLoanWarning,
   createLoan,
   recordLoanPayment,
   getEffectiveNextPayment,

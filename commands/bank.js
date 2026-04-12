@@ -23,6 +23,7 @@ const {
   formatCreditScore,
   createCreditBar,
   recordCreditEvent,
+  getLoanWarning,
   MAX_CREDIT_SCORE
 } = require('../bank');
 const { getUserProperties } = require('../property');
@@ -62,10 +63,12 @@ async function showBankPanel(interaction, guildId, userId, isUpdate = false) {
   const activeLoan = getUserActiveLoan(guildId, userId);
   const activeBonds = getUserActiveBonds(guildId, userId);
   
+  const loanWarning = getLoanWarning(guildId, userId, getCurrency(guildId));
+  
   const embed = new EmbedBuilder()
-    .setColor(0x3498db)
+    .setColor(loanWarning ? 0xE74C3C : 0x3498db)
     .setTitle('🏦 Bank Services')
-    .setDescription(`Welcome to the bank, **${interaction.user.displayName}**!`)
+    .setDescription(`Welcome to the bank, **${interaction.user.displayName}**!${loanWarning || ''}`)
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }));
   
   // Bank Balance Section
@@ -1145,6 +1148,7 @@ async function processPayment(interaction, guildId, userId, loan, amount) {
   try {
     await removeFromBank(guildId, userId, amount, 'Loan payment');
     recordLoanPayment(loan.id, guildId, userId, amount, 'manual');
+    recordCreditEvent(guildId, userId, 'on_time_payment', loan.principal, amount);
     
     const remaining = loan.total_owed - loan.amount_paid;
     const newRemaining = remaining - amount;
@@ -1159,7 +1163,7 @@ async function processPayment(interaction, guildId, userId, loan, amount) {
       const elapsedPayments = Math.floor(loanAge / intervalMs);
       const isEarly = elapsedPayments < expectedPayments - 1;
       
-      recordCreditEvent(guildId, userId, isEarly ? 'completed_early' : 'completed', loan.principal, amount);
+      recordCreditEvent(guildId, userId, isEarly ? 'completed_early' : 'completed', loan.principal, 0);
       
       const creditInfo = getUserCreditScore(guildId, userId);
       

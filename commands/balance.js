@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getBalance, getAllBalances } = require('../economy');
 const { getCurrency } = require('../admin');
+const { getLoanWarning } = require('../bank');
 
 
 
@@ -26,8 +27,11 @@ module.exports = {
     const rank = allBalances.findIndex(b => b.userId === userId) + 1;
     const totalUsers = allBalances.length;
 
+    // Only show loan warning when checking own balance
+    const loanWarning = (userId === interaction.user.id) ? getLoanWarning(guildId, userId, getCurrency(guildId)) : null;
+
     const embed = new EmbedBuilder()
-      .setColor(0x3498db)
+      .setColor(loanWarning ? 0xE74C3C : 0x3498db)
       .setTitle(`💰 ${targetUser.username}'s Balance`)
       .addFields(
         { name: '💵 Cash', value: `${balance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
@@ -36,6 +40,10 @@ module.exports = {
       )
       .setFooter({ text: rank > 0 ? `Rank #${rank} of ${totalUsers}` : 'Unranked' })
       .setTimestamp();
+
+    if (loanWarning) {
+      embed.setDescription(loanWarning.trim());
+    }
 
     await interaction.editReply({ embeds: [embed] });
   }

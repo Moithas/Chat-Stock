@@ -9,6 +9,7 @@ const { getLuckyPennyEffect, LP_EFFECT_TYPES, getLuckyPennySettings, canUseLucky
 const { getCurrency } = require('../admin');
 const { applyIncomeMultiplier, getPrestigeEmoji } = require('../prestige');
 const { getPetBonusDecimal } = require('../pets');
+const { getLoanWarning } = require('../bank');
 
 
 
@@ -192,6 +193,13 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
   }
   
   embed.addFields(fields);
+
+  // Loan warning
+  const loanWarning = getLoanWarning(guildId, userId, getCurrency(guildId));
+  if (loanWarning) {
+    embed.addFields({ name: '\u200B', value: loanWarning.trim(), inline: false });
+    embed.setColor(0xE74C3C);
+  }
   
   // Build buttons
   const row1 = new ActionRowBuilder();
