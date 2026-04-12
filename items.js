@@ -52,6 +52,9 @@ const EFFECT_TYPES = {
   // Access keys (consumed on use, grants entry)
   DUNGEON_KEY: 'dungeon_key',             // Required to enter dungeon (effect_value = tier level)
   
+  // Pet discount (consumed on next pet/egg purchase)
+  PET_DISCOUNT: 'pet_discount',           // % discount on next pet or egg purchase (single-use coupon)
+  
   // Cosmetic (no effect, just collectible)
   COSMETIC: 'cosmetic',                   // No effect, just a collectible/trophy
 };
@@ -873,6 +876,27 @@ function getTotalEffectValue(guildId, userId, effectType) {
   return result[0].values[0][0] || 0;
 }
 
+// Consume (delete) one active effect of a type — used for single-use coupons
+function consumeEffect(guildId, userId, effectType) {
+  if (!db) return false;
+  
+  const now = Date.now();
+  
+  // Get the ID of the highest-value active effect of this type
+  const result = db.exec(
+    'SELECT id FROM active_effects WHERE guild_id = ? AND user_id = ? AND effect_type = ? AND expires_at > ? ORDER BY effect_value DESC LIMIT 1',
+    [guildId, userId, effectType, now]
+  );
+  
+  if (result.length === 0 || result[0].values.length === 0) return false;
+  
+  const effectId = result[0].values[0][0];
+  db.run('DELETE FROM active_effects WHERE id = ?', [effectId]);
+  const { saveDatabase } = require('./database');
+  saveDatabase();
+  return true;
+}
+
 // ===== EFFECT COOLDOWN FUNCTIONS =====
 
 // Check if user is on cooldown for a specific effect type
@@ -1535,6 +1559,7 @@ module.exports = {
   hasActiveEffect,
   getEffectValue,
   getTotalEffectValue,
+  consumeEffect,
   activateEffect,
   useItem,
   

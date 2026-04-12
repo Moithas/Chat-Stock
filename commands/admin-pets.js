@@ -237,7 +237,7 @@ async function handleKennelModal(interaction, guildId) {
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('kennel_prices').setLabel('Kennel L1, L2, L3 prices (comma sep.)').setStyle(TextInputStyle.Short).setValue(`${settings.kennelL1Price}, ${settings.kennelL2Price}, ${settings.kennelL3Price}`).setRequired(true)
+      new TextInputBuilder().setCustomId('kennel_prices').setLabel('Kennel prices (comma sep., any count)').setStyle(TextInputStyle.Short).setValue(settings.kennelPrices.join(', ')).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('egg_prices').setLabel('Mystery, Golden, Prismatic prices').setStyle(TextInputStyle.Short).setValue(`${settings.eggMysteryPrice}, ${settings.eggGoldenPrice}, ${settings.eggPrismaticPrice}`).setRequired(true)
@@ -250,17 +250,15 @@ async function handleKennelModal(interaction, guildId) {
 async function handleKennelSubmit(interaction, guildId) {
   await interaction.deferUpdate();
 
-  const kennelParts = interaction.fields.getTextInputValue('kennel_prices').split(',').map(s => parseInt(s.trim()));
+  const kennelParts = interaction.fields.getTextInputValue('kennel_prices').split(',').map(s => parseInt(s.trim())).filter(v => !isNaN(v) && v >= 0);
   const eggParts = interaction.fields.getTextInputValue('egg_prices').split(',').map(s => parseInt(s.trim()));
 
-  if ([...kennelParts, ...eggParts].some(v => isNaN(v)) || kennelParts.length < 3 || eggParts.length < 3) {
-    return interaction.followUp({ content: '❌ Need 3 comma-separated values for each field.', flags: 64 });
+  if (kennelParts.length < 1 || eggParts.some(v => isNaN(v)) || eggParts.length < 3) {
+    return interaction.followUp({ content: '❌ Need at least 1 kennel price and 3 egg prices (comma-separated).', flags: 64 });
   }
 
   updateSettings(guildId, {
-    kennelL1Price: Math.max(0, kennelParts[0]),
-    kennelL2Price: Math.max(0, kennelParts[1]),
-    kennelL3Price: Math.max(0, kennelParts[2]),
+    kennelPrices: kennelParts,
     eggMysteryPrice: Math.max(0, eggParts[0]),
     eggGoldenPrice: Math.max(0, eggParts[1]),
     eggPrismaticPrice: Math.max(0, eggParts[2]),

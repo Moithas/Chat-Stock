@@ -265,9 +265,7 @@ const DEFAULT_SETTINGS = {
   eggMysteryPrice: 250000,
   eggGoldenPrice: 1000000,
   eggPrismaticPrice: 5000000,
-  kennelL1Price: 2500000,
-  kennelL2Price: 7500000,
-  kennelL3Price: 10000000,
+  kennelPrices: [2500000, 7500000, 10000000],
   basePetSlots: 2,
 };
 
@@ -391,6 +389,7 @@ function initPets(database) {
   migrateAddColumn(db, 'pets', 'bond_streak INTEGER DEFAULT 0');
   migrateAddColumn(db, 'pets', 'last_care_day INTEGER DEFAULT 0');
   migrateAddColumn(db, 'pets', 'variant INTEGER DEFAULT 1');
+  migrateAddColumn(db, 'pet_settings', 'kennel_prices TEXT');
 
   saveDatabase();
   console.log('🐾 Pet system initialized');
@@ -428,9 +427,7 @@ function getSettings(guildId) {
       eggMysteryPrice: row.egg_mystery_price,
       eggGoldenPrice: row.egg_golden_price,
       eggPrismaticPrice: row.egg_prismatic_price,
-      kennelL1Price: row.kennel_l1_price,
-      kennelL2Price: row.kennel_l2_price,
-      kennelL3Price: row.kennel_l3_price,
+      kennelPrices: row.kennel_prices ? JSON.parse(row.kennel_prices) : [row.kennel_l1_price, row.kennel_l2_price, row.kennel_l3_price],
       basePetSlots: row.base_pet_slots,
     };
   } else {
@@ -465,9 +462,7 @@ function updateSettings(guildId, updates) {
     eggMysteryPrice: 'egg_mystery_price',
     eggGoldenPrice: 'egg_golden_price',
     eggPrismaticPrice: 'egg_prismatic_price',
-    kennelL1Price: 'kennel_l1_price',
-    kennelL2Price: 'kennel_l2_price',
-    kennelL3Price: 'kennel_l3_price',
+    kennelPrices: 'kennel_prices',
     basePetSlots: 'base_pet_slots',
   };
 
@@ -480,6 +475,7 @@ function updateSettings(guildId, updates) {
   const values = cols.map(k => {
     const val = merged[k];
     if (typeof val === 'boolean') return val ? 1 : 0;
+    if (Array.isArray(val)) return JSON.stringify(val);
     return val;
   });
 
@@ -1164,7 +1160,9 @@ function upgradeKennel(guildId, userId) {
   if (!db) return { success: false, error: 'Database not available' };
 
   const kennel = getKennel(guildId, userId);
-  if (kennel.level >= 3) {
+  const settings = getSettings(guildId);
+  const maxLevel = settings.kennelPrices.length;
+  if (kennel.level >= maxLevel) {
     return { success: false, error: 'max_level' };
   }
 
@@ -1181,9 +1179,8 @@ function upgradeKennel(guildId, userId) {
 
 function getKennelUpgradeCost(guildId, currentLevel) {
   const settings = getSettings(guildId);
-  if (currentLevel >= 3) return null;
-  const costs = [settings.kennelL1Price, settings.kennelL2Price, settings.kennelL3Price];
-  return costs[currentLevel];
+  if (currentLevel >= settings.kennelPrices.length) return null;
+  return settings.kennelPrices[currentLevel];
 }
 
 function getMaxPetSlots(guildId, userId) {
@@ -1203,7 +1200,8 @@ function getMaxPetSlots(guildId, userId) {
   const kennel = getKennel(guildId, userId);
   slots += kennel.level;
 
-  return Math.min(slots, 10); // Hard cap at 10
+  const maxKennelSlots = settings.kennelPrices ? settings.kennelPrices.length : 3;
+  return Math.min(slots, settings.basePetSlots + 5 + maxKennelSlots); // dynamic cap
 }
 
 // ============ DISPLAY HELPERS ============

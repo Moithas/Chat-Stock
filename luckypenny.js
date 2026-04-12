@@ -18,7 +18,8 @@ const LP_EFFECT_TYPES = {
   ROB_FINES: 'lp_rob_fines',               // +/- % rob fines
   HACK_XP: 'lp_hack_xp',                   // +/- % hack XP earned
   ROB_XP: 'lp_rob_xp',                     // +/- % rob XP earned
-  STOCK_PRICES: 'lp_stock_prices'           // +/- % personal stock price modifier
+  STOCK_PRICES: 'lp_stock_prices',           // +/- % personal stock price modifier
+  PET_PRICES: 'lp_pet_prices'               // - % pet/egg shop discount (buff only)
 };
 
 // Human-readable names for each effect
@@ -33,7 +34,8 @@ const LP_EFFECT_NAMES = {
   [LP_EFFECT_TYPES.ROB_FINES]: 'Rob Fines',
   [LP_EFFECT_TYPES.HACK_XP]: 'Hack XP',
   [LP_EFFECT_TYPES.ROB_XP]: 'Rob XP',
-  [LP_EFFECT_TYPES.STOCK_PRICES]: 'Stock Prices'
+  [LP_EFFECT_TYPES.STOCK_PRICES]: 'Stock Prices',
+  [LP_EFFECT_TYPES.PET_PRICES]: 'Pet/Egg Prices'
 };
 
 // Emoji for buff vs debuff descriptions
@@ -48,7 +50,8 @@ const LP_EFFECT_EMOJI = {
   [LP_EFFECT_TYPES.ROB_FINES]: { buff: '🛡️', debuff: '💸' },
   [LP_EFFECT_TYPES.HACK_XP]: { buff: '⬆️', debuff: '⬇️' },
   [LP_EFFECT_TYPES.ROB_XP]: { buff: '⬆️', debuff: '⬇️' },
-  [LP_EFFECT_TYPES.STOCK_PRICES]: { buff: '📈', debuff: '📉' }
+  [LP_EFFECT_TYPES.STOCK_PRICES]: { buff: '📈', debuff: '📉' },
+  [LP_EFFECT_TYPES.PET_PRICES]: { buff: '🏷️', debuff: '🏷️' }
 };
 
 // For cooldown and fines: negative value = buff (less time / less fines)
@@ -58,7 +61,13 @@ const INVERSE_EFFECTS = new Set([
   LP_EFFECT_TYPES.HACK_COOLDOWN,
   LP_EFFECT_TYPES.ROB_COOLDOWN,
   LP_EFFECT_TYPES.HACK_FINES,
-  LP_EFFECT_TYPES.ROB_FINES
+  LP_EFFECT_TYPES.ROB_FINES,
+  LP_EFFECT_TYPES.PET_PRICES
+]);
+
+// Effects that can only roll as buffs (never debuffs)
+const BUFF_ONLY_EFFECTS = new Set([
+  LP_EFFECT_TYPES.PET_PRICES
 ]);
 
 const DEFAULT_SETTINGS = {
@@ -274,8 +283,8 @@ function rollBuffDebuff(settings) {
   const effectKeys = Object.values(LP_EFFECT_TYPES);
   const effectType = effectKeys[Math.floor(Math.random() * effectKeys.length)];
 
-  // 50/50 buff or debuff
-  const isBuff = Math.random() < 0.5;
+  // 50/50 buff or debuff (unless buff-only effect)
+  const isBuff = BUFF_ONLY_EFFECTS.has(effectType) ? true : Math.random() < 0.5;
 
   // Random percentage within range
   const percent = Math.floor(Math.random() * (settings.maxBuffPercent - settings.minBuffPercent + 1)) + settings.minBuffPercent;
@@ -417,5 +426,6 @@ module.exports = {
   LP_EFFECT_NAMES,
   LP_EFFECT_EMOJI,
   INVERSE_EFFECTS,
+  BUFF_ONLY_EFFECTS,
   DEFAULT_SETTINGS
 };

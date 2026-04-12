@@ -19,6 +19,34 @@ const {
 } = require('../pets');
 const { getBalance, removeFromTotal, addMoney } = require('../economy');
 const { getCurrency } = require('../admin');
+const { getLuckyPennyEffect, LP_EFFECT_TYPES } = require('../luckypenny');
+const { EFFECT_TYPES, getEffectValue: getItemEffectValue, consumeEffect } = require('../items');
+
+// Calculate total pet/egg discount from Lucky Penny + coupon
+function getPetDiscount(guildId, userId) {
+  let discount = 0;
+  // Lucky Penny pet price buff (stored as negative value since it's inverse)
+  const lpEffect = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.PET_PRICES);
+  if (lpEffect < 0) discount += Math.abs(lpEffect); // negative = discount
+  // Single-use coupon
+  const couponValue = getItemEffectValue(guildId, userId, EFFECT_TYPES.PET_DISCOUNT);
+  if (couponValue > 0) discount += couponValue;
+  return Math.min(discount, 90); // Cap at 90% off
+}
+
+// Apply discount and consume coupon if used
+function applyPetDiscount(guildId, userId, basePrice) {
+  const discount = getPetDiscount(guildId, userId);
+  if (discount <= 0) return { finalPrice: basePrice, discount: 0, hasCoupon: false, hasLP: false };
+  const lpEffect = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.PET_PRICES);
+  const couponValue = getItemEffectValue(guildId, userId, EFFECT_TYPES.PET_DISCOUNT);
+  const hasCoupon = couponValue > 0;
+  const hasLP = lpEffect < 0;
+  const finalPrice = Math.round(basePrice * (1 - discount / 100));
+  // Consume the coupon (LP buff stays for its duration)
+  if (hasCoupon) consumeEffect(guildId, userId, EFFECT_TYPES.PET_DISCOUNT);
+  return { finalPrice, discount, hasCoupon, hasLP };
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -247,15 +275,18 @@ async function showShopPanel(interaction, guildId, userId, settings, page = 0) {
   page = Math.max(0, Math.min(page, totalPages - 1));
   const pageItems = stock.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
 
+  const discount = getPetDiscount(guildId, userId);
+
+  let shopDesc = `💰 **Balance:** ${Math.round(balance.total).toLocaleString()} ${currency}\n` +
+    `🐾 **Pets:** ${petCount}/${maxSlots} slots\n` +
+    `⏰ **Restocks:** <t:${Math.floor(restockTime / 1000)}:R>\n\n` +
+    `Select a pet below to adopt it!`;
+  if (discount > 0) shopDesc += `\n🏷️ **Active discount: ${discount}% off!**`;
+
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle('🛒 Pet Shop')
-    .setDescription(
-      `💰 **Balance:** ${Math.round(balance.total).toLocaleString()} ${currency}\n` +
-      `🐾 **Pets:** ${petCount}/${maxSlots} slots\n` +
-      `⏰ **Restocks:** <t:${Math.floor(restockTime / 1000)}:R>\n\n` +
-      `Select a pet below to adopt it!`
-    )
+    .setDescription(shopDesc)
     .setTimestamp();
 
   if (pageItems.length === 0) {
@@ -265,7 +296,12 @@ async function showShopPanel(interaction, guildId, userId, settings, page = 0) {
     for (const item of pageItems) {
       const display = formatShopEntry(item);
       const shinyTag = item.shiny ? ' ✨**SHINY!**' : '';
-      listText += `**#${item.slot_number}** ${display}${shinyTag} — **${item.price.toLocaleString()}** ${currency}\n`;
+      if (discount > 0) {
+        const discPrice = Math.round(item.price * (1 - discount / 100));
+        listText += `**#${item.slot_number}** ${display}${shinyTag} — **${discPrice.toLocaleString()}** ~~${item.price.toLocaleString()}~~ ${currency}\n`;
+      } else {
+        listText += `**#${item.slot_number}** ${display}${shinyTag} — **${item.price.toLocaleString()}** ${currency}\n`;
+      }
     }
     embed.addFields({ name: `Available (Page ${page + 1}/${totalPages})`, value: listText });
   }
@@ -278,9 +314,10 @@ async function showShopPanel(interaction, guildId, userId, settings, page = 0) {
       const rarityData = RARITIES[item.rarity];
       const sexStr = item.sex === 'M' ? '♂' : '♀';
       const shinyStr = item.shiny ? '✨ ' : '';
+      const displayPrice = discount > 0 ? Math.round(item.price * (1 - discount / 100)) : item.price;
       return {
         label: `#${item.slot_number} ${shinyStr}${rarityData.name} ${speciesData.name} ${sexStr}`,
-        description: `${item.price.toLocaleString()} ${currency.replace(/<:[^:]+:\d+>/g, '').trim() || 'coins'}`,
+        description: `${displayPrice.toLocaleString()} ${currency.replace(/<:[^:]+:\d+>/g, '').trim() || 'coins'}`,
         value: `${item.slot_number}`,
         emoji: speciesData.emoji,
       };
@@ -346,6 +383,13 @@ async function handleShopSelectPet(interaction, guildId, userId, settings) {
   const sexEmoji = item.sex === 'M' ? '♂️' : '♀️';
   const shinyStr = item.shiny ? '✨ **SHINY!** ' : '';
 
+  const discount = getPetDiscount(guildId, userId);
+  let costLine = `💰 Cost: **${item.price.toLocaleString()}** ${getCurrency(guildId)}`;
+  if (discount > 0) {
+    const discounted = Math.round(item.price * (1 - discount / 100));
+    costLine = `💰 Cost: **${discounted.toLocaleString()}** ~~${item.price.toLocaleString()}~~ ${getCurrency(guildId)} (${discount}% off!)`;
+  }
+
   const embed = new EmbedBuilder()
     .setColor(rarityData.color)
     .setTitle(`${speciesData.emoji} Meet Your New Pet!`)
@@ -353,7 +397,7 @@ async function handleShopSelectPet(interaction, guildId, userId, settings) {
       `${shinyStr}${sexEmoji} **${rarityData.name} ${speciesData.name}**\n` +
       `${PHASES.baby.emoji} Baby — Level 1\n\n` +
       `**Specialty:** ${getSpecialtyDisplay(item.species)}\n` +
-      `💰 Cost: **${item.price.toLocaleString()}** ${getCurrency(guildId)}\n\n` +
+      `${costLine}\n\n` +
       `*Give them a name to bring them home!*`
     )
     .setTimestamp();
@@ -437,8 +481,14 @@ async function handleNameModal(interaction, guildId, userId, settings) {
     return interaction.editReply({ content: '❌ You have no pet slots available!' });
   }
 
+  // Apply discount
+  const { finalPrice, discount, hasCoupon, hasLP } = applyPetDiscount(guildId, userId, item.price);
+  if (balance.total < finalPrice) {
+    return interaction.editReply({ content: `❌ You can't afford this pet!` });
+  }
+
   // Deduct and adopt
-  await removeFromTotal(guildId, userId, item.price, `Adopted pet: ${petName}`);
+  await removeFromTotal(guildId, userId, finalPrice, `Adopted pet: ${petName}`);
   const pet = adoptPet(guildId, userId, item.species, petName, item.rarity, item.sex, item.shiny, 'shop', variant);
   removeShopSlot(guildId, slotNumber);
 
@@ -446,6 +496,15 @@ async function handleNameModal(interaction, guildId, userId, settings) {
   const rarityData = RARITIES[item.rarity];
   const sexEmoji = item.sex === 'M' ? '♂️' : '♀️';
   const shinyStr = item.shiny ? '✨ **SHINY!** ' : '';
+
+  let paidText = `💰 Paid **${finalPrice.toLocaleString()}** ${getCurrency(guildId)}`;
+  if (discount > 0) {
+    paidText += ` ~~${item.price.toLocaleString()}~~ (${discount}% off`;
+    if (hasCoupon && hasLP) paidText += ' — 🎟️ coupon + 🪙 Lucky Penny';
+    else if (hasCoupon) paidText += ' — 🎟️ coupon';
+    else if (hasLP) paidText += ' — 🪙 Lucky Penny';
+    paidText += ')';
+  }
 
   const embed = new EmbedBuilder()
     .setColor(rarityData.color)
@@ -455,7 +514,7 @@ async function handleNameModal(interaction, guildId, userId, settings) {
       `${sexEmoji} **${rarityData.name} ${speciesData.name}**\n` +
       `Level 1 ${PHASES.baby.emoji} Baby\n\n` +
       `**Specialty:** ${getSpecialtyDisplay(item.species)}\n\n` +
-      `💰 Paid **${item.price.toLocaleString()}** ${getCurrency(guildId)}`
+      paidText
     )
     .setFooter({ text: 'Use /pets to manage your new companion!' })
     .setTimestamp();
@@ -1344,7 +1403,9 @@ async function showKennelPanel(interaction, guildId, userId, settings) {
     )
     .setTimestamp();
 
-  if (kennel.level < 3) {
+  const maxLevel = settings.kennelPrices.length;
+
+  if (kennel.level < maxLevel) {
     const nextCost = getKennelUpgradeCost(guildId, kennel.level);
     const nextLevel = kennel.level + 1;
     embed.addFields({
@@ -1356,16 +1417,15 @@ async function showKennelPanel(interaction, guildId, userId, settings) {
   }
 
   // Show all levels
-  const levelInfo = [
-    { level: 1, cost: settings.kennelL1Price, status: kennel.level >= 1 ? '✅' : '❌' },
-    { level: 2, cost: settings.kennelL2Price, status: kennel.level >= 2 ? '✅' : '❌' },
-    { level: 3, cost: settings.kennelL3Price, status: kennel.level >= 3 ? '✅' : '❌' },
-  ];
-  const infoText = levelInfo.map(l => `${l.status} Level ${l.level} — ${l.cost.toLocaleString()} ${currency} (+1 slot)`).join('\n');
-  embed.addFields({ name: 'Upgrade Tiers', value: infoText });
+  const levelInfo = settings.kennelPrices.map((cost, i) => {
+    const level = i + 1;
+    const status = kennel.level >= level ? '✅' : '❌';
+    return `${status} Level ${level} — ${cost.toLocaleString()} ${currency} (+1 slot)`;
+  });
+  embed.addFields({ name: 'Upgrade Tiers', value: levelInfo.join('\n') });
 
   const components = [];
-  if (kennel.level < 3) {
+  if (kennel.level < maxLevel) {
     const nextCost = getKennelUpgradeCost(guildId, kennel.level);
     const canAfford = balance.total >= nextCost;
     components.push(new ActionRowBuilder().addComponents(
@@ -1413,21 +1473,27 @@ async function showEggShopPanel(interaction, guildId, userId, settings) {
   const maxSlots = getMaxPetSlots(guildId, userId);
   const usedSlots = petCount + eggCount;
 
+  const discount = getPetDiscount(guildId, userId);
+
+  let shopDesc = `💰 **Balance:** ${Math.round(balance.total).toLocaleString()} ${currency}\n` +
+    `🐾 **Slots:** ${usedSlots}/${maxSlots} used (${petCount} pets, ${eggCount} eggs)\n\n` +
+    `Purchase an egg to hatch a random pet!\nEggs take **72 hours** to hatch. Use **Warm** to speed it up!\n` +
+    `Eggs occupy a pet slot while incubating.`;
+  if (discount > 0) shopDesc += `\n🏷️ **Active discount: ${discount}% off!**`;
+
   const embed = new EmbedBuilder()
     .setColor(0xF39C12)
     .setTitle('🥚 Egg Shop')
-    .setDescription(
-      `💰 **Balance:** ${Math.round(balance.total).toLocaleString()} ${currency}\n` +
-      `🐾 **Slots:** ${usedSlots}/${maxSlots} used (${petCount} pets, ${eggCount} eggs)\n\n` +
-      `Purchase an egg to hatch a random pet!\nEggs take **72 hours** to hatch. Use **Warm** to speed it up!\n` +
-      `Eggs occupy a pet slot while incubating.`
-    )
+    .setDescription(shopDesc)
     .setTimestamp();
 
   const eggTypes = ['mystery', 'golden', 'prismatic'];
   for (const type of eggTypes) {
     const eggData = EGG_TYPES[type];
     const price = getEggPrice(guildId, type);
+    const discountedPrice = discount > 0 ? Math.round(price * (1 - discount / 100)) : price;
+    let priceDisplay = `${discountedPrice.toLocaleString()} ${currency}`;
+    if (discount > 0) priceDisplay = `${discountedPrice.toLocaleString()} ~~${price.toLocaleString()}~~ ${currency}`;
     let speciesInfo;
     if (type === 'mystery') {
       speciesInfo = '🐺 Wolf · 👽 Alien · 🐱 Cat · 🐶 Dog · 🐦 Bird · 🕷️ Spider · 🐻 Bear · 🐼 Panda';
@@ -1437,7 +1503,7 @@ async function showEggShopPanel(interaction, guildId, userId, settings) {
       speciesInfo = '🐺 Wolf · 👽 Alien · 🐉 Dragon · 🦄 Unicorn';
     }
     embed.addFields({
-      name: `${eggData.emoji} ${eggData.name} — ${price.toLocaleString()} ${currency}`,
+      name: `${eggData.emoji} ${eggData.name} — ${priceDisplay}`,
       value: `${speciesInfo}\n🌡️ Warm cost: **${eggData.warmCost.toLocaleString()}** · ✨ Shiny: **${Math.round(eggData.shinyChance * 100)}%**`,
     });
   }
@@ -1448,10 +1514,11 @@ async function showEggShopPanel(interaction, guildId, userId, settings) {
     ...eggTypes.map(type => {
       const eggData = EGG_TYPES[type];
       const price = getEggPrice(guildId, type);
-      const canAfford = balance.total >= price && slotsAvailable;
+      const discPrice = discount > 0 ? Math.round(price * (1 - discount / 100)) : price;
+      const canAfford = balance.total >= discPrice && slotsAvailable;
       return new ButtonBuilder()
         .setCustomId(`pet_egg_buy_${type}_u_${userId}`)
-        .setLabel(`${eggData.name} (${abbreviateNumber(price)})`)
+        .setLabel(`${eggData.name} (${abbreviateNumber(discPrice)})`)
         .setEmoji(eggData.emoji)
         .setStyle(ButtonStyle.Success)
         .setDisabled(!canAfford);
@@ -1484,8 +1551,11 @@ async function handleEggBuy(interaction, guildId, userId, settings) {
 
   const price = getEggPrice(guildId, eggType);
   const balance = await getBalance(guildId, userId);
-  if (balance.total < price) {
-    return interaction.reply({ content: `❌ You need **${price.toLocaleString()}** ${getCurrency(guildId)} to buy a ${eggData.name}.`, flags: 64 });
+
+  // Apply discount
+  const { finalPrice, discount, hasCoupon, hasLP } = applyPetDiscount(guildId, userId, price);
+  if (balance.total < finalPrice) {
+    return interaction.reply({ content: `❌ You need **${finalPrice.toLocaleString()}** ${getCurrency(guildId)} to buy a ${eggData.name}.`, flags: 64 });
   }
 
   const petCount = getUserPetCount(guildId, userId);
@@ -1495,15 +1565,25 @@ async function handleEggBuy(interaction, guildId, userId, settings) {
     return interaction.reply({ content: `❌ No available slots! You have **${petCount} pets + ${eggCount} eggs** using **${petCount + eggCount}/${maxSlots}** slots.`, flags: 64 });
   }
 
-  await removeFromTotal(guildId, userId, price, `Bought ${eggData.name}`);
+  await removeFromTotal(guildId, userId, finalPrice, `Bought ${eggData.name}`);
   const egg = buyEgg(guildId, userId, eggType);
 
   const currency = getCurrency(guildId);
+  let paidLine = `You bought a **${eggData.name}** for **${finalPrice.toLocaleString()}** ${currency}`;
+  if (discount > 0) {
+    paidLine += ` ~~${price.toLocaleString()}~~ (${discount}% off`;
+    if (hasCoupon && hasLP) paidLine += ' — 🎟️ coupon + 🪙 Lucky Penny';
+    else if (hasCoupon) paidLine += ' — 🎟️ coupon';
+    else if (hasLP) paidLine += ' — 🪙 Lucky Penny';
+    paidLine += ')';
+  }
+  paidLine += '!';
+
   const embed = new EmbedBuilder()
     .setColor(eggData.color)
     .setTitle(`${eggData.emoji} Egg Purchased!`)
     .setDescription(
-      `You bought a **${eggData.name}** for **${price.toLocaleString()}** ${currency}!\n\n` +
+      `${paidLine}\n\n` +
       `⏳ **Hatches:** <t:${Math.floor(egg.hatch_time / 1000)}:F>\n` +
       `🌡️ Use **Warm** to speed up hatching (${eggData.warmCost.toLocaleString()} ${currency} per warm)\n\n` +
       `*Check your eggs from the main panel or the egg shop!*`
