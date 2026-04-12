@@ -748,8 +748,9 @@ async function showItemCreationPanel(interaction, guildId) {
     // Access keys
     { label: '🗝️ Dungeon Key', value: 'dungeon_key', description: 'Required to enter the dungeon (consumed on entry)' },
     // Special
-        { label: '�️ Free Lottery Ticket', value: 'lottery_free_ticket', description: 'Instant free lottery ticket (random numbers)' },
+        { label: '🎟️ Free Lottery Ticket', value: 'lottery_free_ticket', description: 'Instant free lottery ticket (random numbers)' },
         { label: '⏱️ Cooldown Reduction', value: 'cooldown_reduction', description: 'Reduces command cooldowns' },
+        { label: '🏷️ Pet Discount Coupon', value: 'pet_discount', description: 'Discount on next pet or egg purchase (consumed on use)' },
     // Debuffs
             // Service items
     { label: '🎨 Custom Emoji (Service)', value: 'service_custom_emoji', description: 'Admin adds custom emoji' },
