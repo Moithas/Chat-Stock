@@ -1775,10 +1775,10 @@ async function handleEggNameModal(interaction, guildId, userId, settings) {
     return interaction.reply({ content: '❌ Pet name must be 1-24 characters.', flags: 64 });
   }
 
-  await interaction.deferReply();
+  await interaction.deferUpdate();
 
   const speciesData = SPECIES[species];
-  if (!speciesData) return interaction.editReply({ content: '❌ Invalid pet data.' });
+  if (!speciesData) return interaction.editReply({ content: '❌ Invalid pet data.', embeds: [], components: [], files: [] });
 
   // Note: egg was already deleted during hatch. The pet just needs to be created.
   const pet = adoptPet(guildId, userId, species, petName, rarity, sex, shiny, 'hatched', variant);
@@ -1793,7 +1793,7 @@ async function handleEggNameModal(interaction, guildId, userId, settings) {
     .setDescription(
       `${shinyStr}${sexEmoji} **${rarityData.name} ${speciesData.name}**\n` +
       `${PHASES.baby.emoji} Baby — Level 1\n\n` +
-      `**${petName}** has joined your family! Use **/pets** to manage them.`
+      `**${petName}** has joined your family!`
     )
     .setTimestamp();
 
@@ -1805,6 +1805,12 @@ async function handleEggNameModal(interaction, guildId, userId, settings) {
     files.push(attachment);
   }
 
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('My Pets').setEmoji('🐾').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Pet Panel').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`pet_dismiss_u_${userId}`).setLabel('Dismiss').setEmoji('❌').setStyle(ButtonStyle.Danger),
+  );
+
   // Check if server announcement needed (legendary or shiny)
   let announcement = null;
   if (rarity === 'legendary' || shiny) {
@@ -1812,7 +1818,7 @@ async function handleEggNameModal(interaction, guildId, userId, settings) {
     announcement = `${announceEmoji} **${interaction.user.displayName}** hatched a ${shiny ? '✨ **SHINY** ' : ''}**${rarityData.name} ${speciesData.name}** named **${petName}**!`;
   }
 
-  await interaction.editReply({ embeds: [embed], files });
+  await interaction.editReply({ embeds: [embed], components: [row], files });
 
   // Send announcement in same channel if applicable
   if (announcement) {
