@@ -982,6 +982,7 @@ async function updateCreationPanel(interaction, state) {
     { label: '🎟️ Free Lottery Ticket', value: 'lottery_free_ticket', description: 'Instant free lottery ticket', default: currentEffect === 'lottery_free_ticket' },
     { label: '⏱️ Cooldown Reduction', value: 'cooldown_reduction', description: 'Reduces command cooldowns', default: currentEffect === 'cooldown_reduction' },
     { label: '🗝️ Dungeon Key', value: 'dungeon_key', description: 'Required to enter the dungeon', default: currentEffect === 'dungeon_key' },
+    { label: '🏷️ Pet Discount Coupon', value: 'pet_discount', description: 'Discount on next pet or egg purchase (consumed on use)', default: currentEffect === 'pet_discount' },
     { label: '🏷️ Role Grant', value: 'role_grant', description: 'Grants a Discord role when used', default: currentEffect === 'role_grant' },
     { label: '🎨 Custom Emoji (Service)', value: 'service_custom_emoji', description: 'Admin adds custom emoji', default: currentEffect === 'service_custom_emoji' },
     { label: '📝 Nickname Change (Service)', value: 'service_nickname', description: 'Admin changes nickname', default: currentEffect === 'service_nickname' },
