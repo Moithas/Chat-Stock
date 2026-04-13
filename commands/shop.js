@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { getBalance, removeMoney, addMoney } = require('../economy');
 const { 
   getShopItems, 
@@ -161,7 +161,7 @@ module.exports = {
           const newComponents = createShopComponents(items, currentPage, guildId, userId);
           await i.update({ embeds: [newEmbed], components: newComponents });
         }
-        // Handle buy confirmation
+        // Handle buy confirmation - show quantity modal
         else if (i.customId === 'shop_buy') {
           if (!selectedItemId) {
             return i.reply({ content: '❌ No item selected!', ephemeral: true });
@@ -171,70 +171,105 @@ module.exports = {
           if (!item) {
             return i.reply({ content: '❌ Item no longer available!', ephemeral: true });
           }
-          
-          // Re-check balance
-          const currentBalance = getBalance(guildId, userId);
-          if (currentBalance.cash < item.price) {
-            return i.reply({ 
-              content: `❌ You don't have enough cash! You need **${item.price.toLocaleString()}** ${getCurrency(guildId)} but only have **${currentBalance.cash.toLocaleString()}** ${getCurrency(guildId)}.`, 
-              ephemeral: true 
-            });
+
+          const modal = new ModalBuilder()
+            .setCustomId(`shop_qty_modal_${selectedItemId}`)
+            .setTitle(`Buy ${item.name}`);
+
+          const qtyInput = new TextInputBuilder()
+            .setCustomId('quantity')
+            .setLabel(`How many? (${item.price.toLocaleString()} each)`)
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('1')
+            .setValue('1')
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(4);
+
+          modal.addComponents(new ActionRowBuilder().addComponents(qtyInput));
+          await i.showModal(modal);
+
+          // Wait for modal submission
+          try {
+            const modalSubmit = await i.awaitModalSubmit({ time: 60000, filter: m => m.customId === `shop_qty_modal_${selectedItemId}` && m.user.id === userId });
+            const qtyStr = modalSubmit.fields.getTextInputValue('quantity').trim();
+            const quantity = parseInt(qtyStr);
+
+            if (isNaN(quantity) || quantity < 1) {
+              return modalSubmit.reply({ content: '❌ Please enter a valid number (1 or more).', ephemeral: true });
+            }
+            if (quantity > 99) {
+              return modalSubmit.reply({ content: '❌ You can only buy up to 99 at a time.', ephemeral: true });
+            }
+
+            const freshItem = getShopItem(guildId, selectedItemId);
+            if (!freshItem) {
+              return modalSubmit.reply({ content: '❌ Item no longer available!', ephemeral: true });
+            }
+
+            const totalCost = freshItem.price * quantity;
+            const currentBalance = getBalance(guildId, userId);
+
+            if (currentBalance.cash < totalCost) {
+              return modalSubmit.reply({ 
+                content: `❌ You don't have enough cash! You need **${totalCost.toLocaleString()}** ${getCurrency(guildId)} (${quantity}x ${freshItem.price.toLocaleString()}) but only have **${currentBalance.cash.toLocaleString()}** ${getCurrency(guildId)}.`, 
+                ephemeral: true 
+              });
+            }
+
+            // Process purchase
+            const paid = await removeMoney(guildId, userId, totalCost, `Shop purchase: ${freshItem.name} x${quantity}`);
+            if (!paid) {
+              return modalSubmit.reply({ content: '❌ Failed to process payment. Make sure you have enough cash!', ephemeral: true });
+            }
+
+            const addResult = addToInventory(guildId, userId, freshItem.id, quantity);
+            if (!addResult.success) {
+              await addMoney(guildId, userId, totalCost, `Shop refund: ${freshItem.name} x${quantity} (inventory error)`);
+              return modalSubmit.reply({ content: `❌ ${addResult.error}`, ephemeral: true });
+            }
+            recordPurchase(guildId, userId, freshItem, quantity, totalCost);
+
+            const isService = isServiceItem(freshItem.effect_type);
+            const qtyText = quantity > 1 ? ` x${quantity}` : '';
+
+            const successEmbed = new EmbedBuilder()
+              .setColor(0x2ecc71)
+              .setTitle('✅ Purchase Successful!')
+              .setDescription(`You bought **${freshItem.emoji} ${freshItem.name}${qtyText}** for **${totalCost.toLocaleString()}** ${getCurrency(guildId)}`)
+              .addFields(
+                { name: '💵 Previous Balance', value: `${currentBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+                { name: '💰 New Balance', value: `${(currentBalance.cash - totalCost).toLocaleString()} ${getCurrency(guildId)}`, inline: true }
+              );
+
+            if (quantity > 1) {
+              successEmbed.addFields({ name: '🔢 Quantity', value: `${quantity} @ ${freshItem.price.toLocaleString()} each`, inline: true });
+            }
+
+            if (isService) {
+              successEmbed.addFields({
+                name: '🎫 Service Item',
+                value: 'Use this item from `/inventory` to open a ticket and request your service!',
+                inline: false
+              });
+              successEmbed.setFooter({ text: 'Use /inventory → Use Item to open a service ticket' });
+            } else {
+              successEmbed.setFooter({ text: 'Use /inventory to view and use your items!' });
+            }
+
+            const backRow = new ActionRowBuilder()
+              .addComponents(
+                new ButtonBuilder()
+                  .setCustomId('shop_back')
+                  .setLabel('Back to Shop')
+                  .setStyle(ButtonStyle.Secondary)
+                  .setEmoji('🛒')
+              );
+
+            await modalSubmit.update({ embeds: [successEmbed], components: [backRow] });
+          } catch (err) {
+            // Modal timed out or was dismissed - silently ignore
           }
-          
-          // Process purchase - deduct money first, then add item
-          const paid = await removeMoney(guildId, userId, item.price, `Shop purchase: ${item.name}`);
-          if (!paid) {
-            return i.reply({ 
-              content: `❌ Failed to process payment. Make sure you have enough cash!`, 
-              ephemeral: true 
-            });
-          }
-          
-          const addResult = addToInventory(guildId, userId, item.id, 1);
-          if (!addResult.success) {
-            // Refund the money since we couldn't add the item
-            await addMoney(guildId, userId, item.price, `Shop refund: ${item.name} (inventory error)`);
-            return i.reply({ 
-              content: `❌ ${addResult.error}`, 
-              ephemeral: true 
-            });
-          }
-          recordPurchase(guildId, userId, item, 1, item.price);
-          
-          // Check if this is a service item
-          const isService = isServiceItem(item.effect_type);
-          
-          const successEmbed = new EmbedBuilder()
-            .setColor(0x2ecc71)
-            .setTitle('✅ Purchase Successful!')
-            .setDescription(`You bought **${item.emoji} ${item.name}** for **${item.price.toLocaleString()}** ${getCurrency(guildId)}`)
-            .addFields(
-              { name: '💵 Previous Balance', value: `${currentBalance.cash.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-              { name: '💰 New Balance', value: `${(currentBalance.cash - item.price).toLocaleString()} ${getCurrency(guildId)}`, inline: true }
-            );
-          
-          // Add different footer based on item type
-          if (isService) {
-            successEmbed.addFields({
-              name: '🎫 Service Item',
-              value: 'Use this item from `/inventory` to open a ticket and request your service!',
-              inline: false
-            });
-            successEmbed.setFooter({ text: 'Use /inventory → Use Item to open a service ticket' });
-          } else {
-            successEmbed.setFooter({ text: 'Use /inventory to view and use your items!' });
-          }
-          
-          const backRow = new ActionRowBuilder()
-            .addComponents(
-              new ButtonBuilder()
-                .setCustomId('shop_back')
-                .setLabel('Back to Shop')
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji('🛒')
-            );
-          
-          await i.update({ embeds: [successEmbed], components: [backRow] });
         }
         // Handle dismiss
         else if (i.customId === 'shop_dismiss') {
