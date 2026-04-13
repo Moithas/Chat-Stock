@@ -31,7 +31,7 @@ function getPetDiscount(guildId, userId) {
   // Single-use coupon
   const couponValue = getItemEffectValue(guildId, userId, EFFECT_TYPES.PET_DISCOUNT);
   if (couponValue > 0) discount += couponValue;
-  return Math.min(discount, 90); // Cap at 90% off
+  return Math.min(discount, 15); // Cap at 15% off
 }
 
 // Apply discount and consume coupon if used
