@@ -57,6 +57,42 @@ const FOOD_TYPES = {
   treat:   { name: 'Treat',        emoji: '🍰', costMult: 2.0,  hunger: 2,  happiness: 8  },
 };
 
+// ============ BREEDING SYSTEM ============
+const BREEDING_FEES = {
+  common:    75000,
+  uncommon:  100000,
+  rare:      200000,
+  epic:      500000,
+  legendary: 1000000,
+};
+
+const RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+
+// Breeding rarity table: [parentA][parentB] = { common: %, uncommon: %, ... }
+const BREEDING_RARITY_TABLE = {
+  'common-common':       { common: 85, uncommon: 14, rare: 1, epic: 0, legendary: 0 },
+  'common-uncommon':     { common: 45, uncommon: 50, rare: 5, epic: 0, legendary: 0 },
+  'common-rare':         { common: 25, uncommon: 55, rare: 19, epic: 1, legendary: 0 },
+  'common-epic':         { common: 15, uncommon: 40, rare: 40, epic: 5, legendary: 0 },
+  'common-legendary':    { common: 10, uncommon: 30, rare: 40, epic: 19, legendary: 1 },
+  'uncommon-uncommon':   { common: 5, uncommon: 80, rare: 14, epic: 1, legendary: 0 },
+  'uncommon-rare':       { common: 0, uncommon: 45, rare: 50, epic: 5, legendary: 0 },
+  'uncommon-epic':       { common: 0, uncommon: 25, rare: 55, epic: 19, legendary: 1 },
+  'uncommon-legendary':  { common: 0, uncommon: 15, rare: 40, epic: 40, legendary: 5 },
+  'rare-rare':           { common: 0, uncommon: 5, rare: 80, epic: 14, legendary: 1 },
+  'rare-epic':           { common: 0, uncommon: 0, rare: 45, epic: 50, legendary: 5 },
+  'rare-legendary':      { common: 0, uncommon: 0, rare: 25, epic: 55, legendary: 20 },
+  'epic-epic':           { common: 0, uncommon: 0, rare: 5, epic: 80, legendary: 15 },
+  'epic-legendary':      { common: 0, uncommon: 0, rare: 0, epic: 45, legendary: 55 },
+  'legendary-legendary': { common: 0, uncommon: 0, rare: 0, epic: 5, legendary: 95 },
+};
+
+const BREEDING_SHINY_CHANCES = {
+  none: 0.01,   // Neither parent shiny
+  one: 0.05,    // One parent shiny
+  both: 0.15,   // Both parents shiny
+};
+
 // ============ PET IMAGES ============
 const PET_IMAGES_DIR = path.join(__dirname, 'assets', 'pets');
 const PHASE_NAMES = ['baby', 'juvenile', 'adult', 'elder'];
@@ -267,6 +303,24 @@ const DEFAULT_SETTINGS = {
   eggPrismaticPrice: 5000000,
   kennelPrices: [2500000, 7500000, 10000000],
   basePetSlots: 2,
+  // Breeding settings
+  breedingEnabled: true,
+  breedingFeeCommon: 75000,
+  breedingFeeUncommon: 100000,
+  breedingFeeRare: 200000,
+  breedingFeeEpic: 500000,
+  breedingFeeLegendary: 1000000,
+  breedingExoticMultiplier: 3.0,
+  breedingCooldownHours: 72,       // 3 days default
+  gestationHours: 24,
+  breedingShinyNone: 0.01,
+  breedingShinyOne: 0.05,
+  breedingShinyBoth: 0.15,
+  maxStudFee: 0,                   // 0 = unlimited
+  // Transfer settings
+  transferEnabled: true,
+  transferMinHappiness: 80,
+  transferHappinessPenalty: 50,
 };
 
 // Settings cache
@@ -379,9 +433,25 @@ function initPets(database) {
     )
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS breeding_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      requester_id TEXT NOT NULL,
+      requester_pet_id INTEGER NOT NULL,
+      partner_id TEXT NOT NULL,
+      partner_pet_id INTEGER NOT NULL,
+      stud_fee INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    )
+  `);
+
   db.run(`CREATE INDEX IF NOT EXISTS idx_pets_owner ON pets(guild_id, owner_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_pet_shop_guild ON pet_shop(guild_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_eggs_owner ON eggs(guild_id, owner_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_breeding_requests_guild ON breeding_requests(guild_id)`);
 
   // Migration: add is_active column
   migrateAddColumn(db, 'pets', 'is_active INTEGER DEFAULT 0');
@@ -390,6 +460,29 @@ function initPets(database) {
   migrateAddColumn(db, 'pets', 'last_care_day INTEGER DEFAULT 0');
   migrateAddColumn(db, 'pets', 'variant INTEGER DEFAULT 1');
   migrateAddColumn(db, 'pet_settings', 'kennel_prices TEXT');
+
+  // Migration: add breeding columns
+  migrateAddColumn(db, 'pets', 'gestating INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'pets', 'gestation_end INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'pets', 'breeding_cooldown_end INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'pets', 'gestating_for_user TEXT');
+  // Migration: add breeding settings columns
+  migrateAddColumn(db, 'pet_settings', 'breeding_enabled INTEGER DEFAULT 1');
+  migrateAddColumn(db, 'pet_settings', 'breeding_fee_common INTEGER DEFAULT 75000');
+  migrateAddColumn(db, 'pet_settings', 'breeding_fee_uncommon INTEGER DEFAULT 100000');
+  migrateAddColumn(db, 'pet_settings', 'breeding_fee_rare INTEGER DEFAULT 200000');
+  migrateAddColumn(db, 'pet_settings', 'breeding_fee_epic INTEGER DEFAULT 500000');
+  migrateAddColumn(db, 'pet_settings', 'breeding_fee_legendary INTEGER DEFAULT 1000000');
+  migrateAddColumn(db, 'pet_settings', 'breeding_exotic_multiplier REAL DEFAULT 3.0');
+  migrateAddColumn(db, 'pet_settings', 'breeding_cooldown_hours INTEGER DEFAULT 72');
+  migrateAddColumn(db, 'pet_settings', 'gestation_hours INTEGER DEFAULT 24');
+  migrateAddColumn(db, 'pet_settings', 'breeding_shiny_none REAL DEFAULT 0.01');
+  migrateAddColumn(db, 'pet_settings', 'breeding_shiny_one REAL DEFAULT 0.05');
+  migrateAddColumn(db, 'pet_settings', 'breeding_shiny_both REAL DEFAULT 0.15');
+  migrateAddColumn(db, 'pet_settings', 'max_stud_fee INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'pet_settings', 'transfer_enabled INTEGER DEFAULT 1');
+  migrateAddColumn(db, 'pet_settings', 'transfer_min_happiness INTEGER DEFAULT 80');
+  migrateAddColumn(db, 'pet_settings', 'transfer_happiness_penalty INTEGER DEFAULT 50');
 
   saveDatabase();
   console.log('🐾 Pet system initialized');
@@ -429,6 +522,24 @@ function getSettings(guildId) {
       eggPrismaticPrice: row.egg_prismatic_price,
       kennelPrices: row.kennel_prices ? JSON.parse(row.kennel_prices) : [row.kennel_l1_price, row.kennel_l2_price, row.kennel_l3_price],
       basePetSlots: row.base_pet_slots,
+      // Breeding settings
+      breedingEnabled: row.breeding_enabled === 1 || row.breeding_enabled === null,
+      breedingFeeCommon: row.breeding_fee_common ?? 75000,
+      breedingFeeUncommon: row.breeding_fee_uncommon ?? 100000,
+      breedingFeeRare: row.breeding_fee_rare ?? 200000,
+      breedingFeeEpic: row.breeding_fee_epic ?? 500000,
+      breedingFeeLegendary: row.breeding_fee_legendary ?? 1000000,
+      breedingExoticMultiplier: row.breeding_exotic_multiplier ?? 3.0,
+      breedingCooldownHours: row.breeding_cooldown_hours ?? 72,
+      gestationHours: row.gestation_hours ?? 24,
+      breedingShinyNone: row.breeding_shiny_none ?? 0.01,
+      breedingShinyOne: row.breeding_shiny_one ?? 0.05,
+      breedingShinyBoth: row.breeding_shiny_both ?? 0.15,
+      maxStudFee: row.max_stud_fee ?? 0,
+      // Transfer settings
+      transferEnabled: row.transfer_enabled === 1 || row.transfer_enabled === null,
+      transferMinHappiness: row.transfer_min_happiness ?? 80,
+      transferHappinessPenalty: row.transfer_happiness_penalty ?? 50,
     };
   } else {
     settings = { ...DEFAULT_SETTINGS };
@@ -464,6 +575,24 @@ function updateSettings(guildId, updates) {
     eggPrismaticPrice: 'egg_prismatic_price',
     kennelPrices: 'kennel_prices',
     basePetSlots: 'base_pet_slots',
+    // Breeding settings
+    breedingEnabled: 'breeding_enabled',
+    breedingFeeCommon: 'breeding_fee_common',
+    breedingFeeUncommon: 'breeding_fee_uncommon',
+    breedingFeeRare: 'breeding_fee_rare',
+    breedingFeeEpic: 'breeding_fee_epic',
+    breedingFeeLegendary: 'breeding_fee_legendary',
+    breedingExoticMultiplier: 'breeding_exotic_multiplier',
+    breedingCooldownHours: 'breeding_cooldown_hours',
+    gestationHours: 'gestation_hours',
+    breedingShinyNone: 'breeding_shiny_none',
+    breedingShinyOne: 'breeding_shiny_one',
+    breedingShinyBoth: 'breeding_shiny_both',
+    maxStudFee: 'max_stud_fee',
+    // Transfer settings
+    transferEnabled: 'transfer_enabled',
+    transferMinHappiness: 'transfer_min_happiness',
+    transferHappinessPenalty: 'transfer_happiness_penalty',
   };
 
   const current = getSettings(guildId);
@@ -1571,6 +1700,330 @@ function deleteEgg(eggId) {
   saveDatabase();
 }
 
+// ============ BREEDING SYSTEM ============
+
+function getBreedingFee(guildId, rarity, isExotic) {
+  const settings = getSettings(guildId);
+  const fees = {
+    common: settings.breedingFeeCommon,
+    uncommon: settings.breedingFeeUncommon,
+    rare: settings.breedingFeeRare,
+    epic: settings.breedingFeeEpic,
+    legendary: settings.breedingFeeLegendary,
+  };
+  const baseFee = fees[rarity] || fees.common;
+  return isExotic ? Math.round(baseFee * settings.breedingExoticMultiplier) : baseFee;
+}
+
+function canBreed(pet, guildId) {
+  if (!pet) return { canBreed: false, reason: 'Pet not found' };
+  
+  const phase = getPhase(pet.level);
+  if (!phase.canBreed) return { canBreed: false, reason: `${phase.name} pets cannot breed. Must be Adult or Elder.` };
+  
+  if (pet.gestating) return { canBreed: false, reason: 'This pet is currently gestating.' };
+  
+  const now = Date.now();
+  if (pet.sex === 'F' && pet.breeding_cooldown_end && now < pet.breeding_cooldown_end) {
+    const remaining = pet.breeding_cooldown_end - now;
+    return { canBreed: false, reason: 'cooldown', remaining };
+  }
+  
+  return { canBreed: true };
+}
+
+function canBreedTogether(pet1, pet2) {
+  if (!pet1 || !pet2) return { canBreed: false, reason: 'Pet not found' };
+  if (pet1.id === pet2.id) return { canBreed: false, reason: 'Cannot breed a pet with itself' };
+  if (pet1.species !== pet2.species) return { canBreed: false, reason: 'Pets must be the same species' };
+  if (pet1.sex === pet2.sex) return { canBreed: false, reason: 'Breeding requires one male and one female' };
+  
+  const check1 = canBreed(pet1);
+  if (!check1.canBreed) return check1;
+  
+  const check2 = canBreed(pet2);
+  if (!check2.canBreed) return check2;
+  
+  return { canBreed: true };
+}
+
+function rollBreedingRarity(parent1Rarity, parent2Rarity, hasElder) {
+  // Sort rarities so we always look up the correct key
+  const r1Idx = RARITY_ORDER.indexOf(parent1Rarity);
+  const r2Idx = RARITY_ORDER.indexOf(parent2Rarity);
+  const [lowRarity, highRarity] = r1Idx <= r2Idx ? [parent1Rarity, parent2Rarity] : [parent2Rarity, parent1Rarity];
+  
+  const key = `${lowRarity}-${highRarity}`;
+  const table = BREEDING_RARITY_TABLE[key];
+  if (!table) return 'common'; // Fallback
+  
+  // Roll from the table
+  const roll = Math.random() * 100;
+  let cumulative = 0;
+  let result = 'common';
+  for (const rarity of RARITY_ORDER) {
+    cumulative += table[rarity];
+    if (roll <= cumulative) {
+      result = rarity;
+      break;
+    }
+  }
+  
+  // Apply elder bonus: +1 tier
+  if (hasElder) {
+    const idx = RARITY_ORDER.indexOf(result);
+    if (idx < RARITY_ORDER.length - 1) {
+      result = RARITY_ORDER[idx + 1];
+    }
+  }
+  
+  return result;
+}
+
+function rollBreedingShiny(parent1Shiny, parent2Shiny, settings) {
+  const bothShiny = parent1Shiny && parent2Shiny;
+  const oneShiny = parent1Shiny || parent2Shiny;
+  
+  let chance;
+  if (bothShiny) chance = settings.breedingShinyBoth;
+  else if (oneShiny) chance = settings.breedingShinyOne;
+  else chance = settings.breedingShinyNone;
+  
+  return Math.random() < chance ? 1 : 0;
+}
+
+function rollBreedingVariant(parent1, parent2) {
+  // If same variant, inherit it
+  if (parent1.variant === parent2.variant) return parent1.variant;
+  // Otherwise random
+  const speciesData = SPECIES[parent1.species];
+  return Math.ceil(Math.random() * (speciesData?.variants || 1));
+}
+
+function startGestation(guildId, femalePetId, forUserId, settings) {
+  if (!db) return false;
+  
+  const gestationMs = settings.gestationHours * 3600000;
+  const gestationEnd = Date.now() + gestationMs;
+  
+  db.run(
+    'UPDATE pets SET gestating = 1, gestation_end = ?, gestating_for_user = ? WHERE id = ?',
+    [gestationEnd, forUserId, femalePetId]
+  );
+  saveDatabase();
+  return gestationEnd;
+}
+
+function getGestatingPets(guildId, userId) {
+  if (!db) return [];
+  // Get pets gestating FOR this user (they will receive the baby)
+  const stmt = db.prepare('SELECT * FROM pets WHERE guild_id = ? AND gestating_for_user = ? AND gestating = 1');
+  stmt.bind([guildId, userId]);
+  const pets = [];
+  while (stmt.step()) {
+    pets.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return pets;
+}
+
+function getMyGestatingPets(guildId, userId) {
+  if (!db) return [];
+  // Get pets owned by this user that are gestating
+  const stmt = db.prepare('SELECT * FROM pets WHERE guild_id = ? AND owner_id = ? AND gestating = 1');
+  stmt.bind([guildId, userId]);
+  const pets = [];
+  while (stmt.step()) {
+    pets.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return pets;
+}
+
+function giveBirth(guildId, femalePetId, maleParent, requesterUserId) {
+  if (!db) return { success: false, reason: 'Database not ready' };
+  
+  const female = getPet(femalePetId);
+  if (!female) return { success: false, reason: 'Female pet not found' };
+  if (!female.gestating) return { success: false, reason: 'This pet is not gestating' };
+  
+  const now = Date.now();
+  if (now < female.gestation_end) return { success: false, reason: 'Not ready yet', gestation_end: female.gestation_end };
+  
+  const settings = getSettings(guildId);
+  
+  // Determine if either parent is elder
+  const femalePhase = getPhase(female.level);
+  const malePhase = maleParent ? getPhase(maleParent.level) : null;
+  const hasElder = femalePhase.name === 'Elder' || (malePhase && malePhase.name === 'Elder');
+  
+  // Roll baby attributes
+  const babyRarity = rollBreedingRarity(female.rarity, maleParent?.rarity || female.rarity, hasElder);
+  const babyShiny = rollBreedingShiny(female.shiny, maleParent?.shiny || 0, settings);
+  const babyVariant = maleParent ? rollBreedingVariant(female, maleParent) : female.variant;
+  const babySex = Math.random() < 0.5 ? 'M' : 'F';
+  
+  // Clear gestation status and set cooldown
+  const cooldownEnd = now + (settings.breedingCooldownHours * 3600000);
+  db.run(
+    'UPDATE pets SET gestating = 0, gestation_end = 0, gestating_for_user = NULL, breeding_cooldown_end = ? WHERE id = ?',
+    [cooldownEnd, femalePetId]
+  );
+  saveDatabase();
+  
+  return {
+    success: true,
+    species: female.species,
+    rarity: babyRarity,
+    shiny: babyShiny,
+    variant: babyVariant,
+    sex: babySex,
+    hadElder: hasElder,
+    motherName: female.name,
+  };
+}
+
+// Breeding request functions
+function createBreedingRequest(guildId, requesterId, requesterPetId, partnerId, partnerPetId, studFee) {
+  if (!db) return null;
+  
+  const now = Date.now();
+  const expiresAt = now + (24 * 3600000); // 24 hour expiry
+  
+  db.run(
+    `INSERT INTO breeding_requests (guild_id, requester_id, requester_pet_id, partner_id, partner_pet_id, stud_fee, status, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    [guildId, requesterId, requesterPetId, partnerId, partnerPetId, studFee, now, expiresAt]
+  );
+  
+  const stmt = db.prepare('SELECT * FROM breeding_requests WHERE guild_id = ? ORDER BY id DESC LIMIT 1');
+  stmt.bind([guildId]);
+  let request = null;
+  if (stmt.step()) {
+    request = stmt.getAsObject();
+  }
+  stmt.free();
+  saveDatabase();
+  return request;
+}
+
+function getBreedingRequest(requestId) {
+  if (!db) return null;
+  const stmt = db.prepare('SELECT * FROM breeding_requests WHERE id = ?');
+  stmt.bind([requestId]);
+  let request = null;
+  if (stmt.step()) {
+    request = stmt.getAsObject();
+  }
+  stmt.free();
+  return request;
+}
+
+function getPendingBreedingRequests(guildId, userId) {
+  if (!db) return [];
+  // Get requests where this user is the partner and status is pending
+  const stmt = db.prepare('SELECT * FROM breeding_requests WHERE guild_id = ? AND partner_id = ? AND status = ?');
+  stmt.bind([guildId, userId, 'pending']);
+  const requests = [];
+  while (stmt.step()) {
+    requests.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return requests;
+}
+
+function getOutgoingBreedingRequests(guildId, userId) {
+  if (!db) return [];
+  const stmt = db.prepare('SELECT * FROM breeding_requests WHERE guild_id = ? AND requester_id = ? AND status = ?');
+  stmt.bind([guildId, userId, 'pending']);
+  const requests = [];
+  while (stmt.step()) {
+    requests.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return requests;
+}
+
+function updateBreedingRequestStatus(requestId, status) {
+  if (!db) return;
+  db.run('UPDATE breeding_requests SET status = ? WHERE id = ?', [status, requestId]);
+  saveDatabase();
+}
+
+function deleteBreedingRequest(requestId) {
+  if (!db) return;
+  db.run('DELETE FROM breeding_requests WHERE id = ?', [requestId]);
+  saveDatabase();
+}
+
+function cleanupExpiredBreedingRequests(guildId) {
+  if (!db) return;
+  const now = Date.now();
+  db.run('DELETE FROM breeding_requests WHERE guild_id = ? AND expires_at < ? AND status = ?', [guildId, now, 'pending']);
+  saveDatabase();
+}
+
+// ============ PET TRANSFER (GIVE/SELL) ============
+
+function canTransferPet(pet, guildId) {
+  if (!pet) return { canTransfer: false, reason: 'Pet not found' };
+  
+  const settings = getSettings(guildId);
+  if (!settings.transferEnabled) return { canTransfer: false, reason: 'Pet transfers are disabled on this server' };
+  
+  if (pet.gestating) return { canTransfer: false, reason: 'Cannot transfer a gestating pet' };
+  
+  const stats = getEffectiveStats(pet);
+  if (stats.happiness < settings.transferMinHappiness) {
+    return { canTransfer: false, reason: `Pet must have at least ${settings.transferMinHappiness} happiness to transfer. Current: ${stats.happiness}` };
+  }
+  
+  return { canTransfer: true };
+}
+
+function transferPet(guildId, petId, fromUserId, toUserId) {
+  if (!db) return { success: false, reason: 'Database not ready' };
+  
+  const pet = getPet(petId);
+  if (!pet) return { success: false, reason: 'Pet not found' };
+  if (pet.owner_id !== fromUserId) return { success: false, reason: 'Not your pet' };
+  if (pet.guild_id !== guildId) return { success: false, reason: 'Pet not in this server' };
+  
+  const canCheck = canTransferPet(pet, guildId);
+  if (!canCheck.canTransfer) return { success: false, reason: canCheck.reason };
+  
+  const settings = getSettings(guildId);
+  
+  // Calculate new happiness after penalty
+  const stats = getEffectiveStats(pet);
+  const newHappiness = Math.max(0, stats.happiness - settings.transferHappinessPenalty);
+  
+  // Clear active status if it was active
+  if (pet.is_active) {
+    db.run('UPDATE pets SET is_active = 0 WHERE id = ?', [petId]);
+  }
+  
+  // Transfer ownership and apply happiness penalty
+  db.run(
+    'UPDATE pets SET owner_id = ?, happiness = ?, is_active = 0 WHERE id = ?',
+    [toUserId, newHappiness, petId]
+  );
+  
+  saveDatabase();
+  
+  // Auto-set as active for new owner if they have no active pet
+  if (!getActivePet(guildId, toUserId)) {
+    setActivePet(guildId, toUserId, petId);
+  }
+  
+  return {
+    success: true,
+    pet,
+    newHappiness,
+    happinessPenalty: settings.transferHappinessPenalty,
+  };
+}
+
 // ============ EXPORTS ============
 module.exports = {
   initPets,
@@ -1580,6 +2033,8 @@ module.exports = {
   RARITIES,
   PHASES,
   FOOD_TYPES,
+  RARITY_ORDER,
+  BREEDING_RARITY_TABLE,
   // Settings
   getSettings,
   updateSettings,
@@ -1645,4 +2100,25 @@ module.exports = {
   hatchEgg,
   deleteEgg,
   rollEggResult,
+  // Breeding
+  getBreedingFee,
+  canBreed,
+  canBreedTogether,
+  rollBreedingRarity,
+  rollBreedingShiny,
+  rollBreedingVariant,
+  startGestation,
+  getGestatingPets,
+  getMyGestatingPets,
+  giveBirth,
+  createBreedingRequest,
+  getBreedingRequest,
+  getPendingBreedingRequests,
+  getOutgoingBreedingRequests,
+  updateBreedingRequestStatus,
+  deleteBreedingRequest,
+  cleanupExpiredBreedingRequests,
+  // Transfer
+  canTransferPet,
+  transferPet,
 };
