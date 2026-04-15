@@ -1661,8 +1661,9 @@ client.on('interactionCreate', async (interaction) => {
       'modal_prestige_settings',
       // Pets
       'admin_pets_toggle', 'admin_pets_settings', 'admin_pets_restock',
-      'admin_pets_economy', 'admin_pets_kennel', 'back_admin_pets',
+      'admin_pets_economy', 'admin_pets_kennel', 'admin_pets_breeding', 'admin_pets_transfer', 'back_admin_pets',
       'modal_admin_pets_settings', 'modal_admin_pets_economy', 'modal_admin_pets_kennel',
+      'modal_admin_pets_breeding', 'modal_admin_pets_transfer',
     ];
     
     // Check for exact match OR dynamic card/property edit IDs
