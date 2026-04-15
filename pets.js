@@ -448,6 +448,20 @@ function initPets(database) {
     )
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS trade_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      requester_id TEXT NOT NULL,
+      requester_pet_id INTEGER NOT NULL,
+      partner_id TEXT NOT NULL,
+      partner_pet_id INTEGER,
+      status TEXT DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    )
+  `);
+
   db.run(`CREATE INDEX IF NOT EXISTS idx_pets_owner ON pets(guild_id, owner_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_pet_shop_guild ON pet_shop(guild_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_eggs_owner ON eggs(guild_id, owner_id)`);
@@ -2024,6 +2038,118 @@ function transferPet(guildId, petId, fromUserId, toUserId) {
   };
 }
 
+// ============ PET TRADING (SWAP) ============
+
+function createTradeRequest(guildId, requesterId, requesterPetId, partnerId, partnerPetId = null) {
+  if (!db) return null;
+  
+  const now = Date.now();
+  const expiresAt = now + (24 * 3600000); // 24 hour expiry
+  
+  db.run(
+    `INSERT INTO trade_requests (guild_id, requester_id, requester_pet_id, partner_id, partner_pet_id, status, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    [guildId, requesterId, requesterPetId, partnerId, partnerPetId, now, expiresAt]
+  );
+  
+  const stmt = db.prepare('SELECT * FROM trade_requests WHERE guild_id = ? ORDER BY id DESC LIMIT 1');
+  stmt.bind([guildId]);
+  let request = null;
+  if (stmt.step()) {
+    request = stmt.getAsObject();
+  }
+  stmt.free();
+  saveDatabase();
+  return request;
+}
+
+function getTradeRequest(requestId) {
+  if (!db) return null;
+  const stmt = db.prepare('SELECT * FROM trade_requests WHERE id = ?');
+  stmt.bind([requestId]);
+  let request = null;
+  if (stmt.step()) {
+    request = stmt.getAsObject();
+  }
+  stmt.free();
+  return request;
+}
+
+function updateTradeRequestPet(requestId, partnerPetId) {
+  if (!db) return;
+  db.run('UPDATE trade_requests SET partner_pet_id = ? WHERE id = ?', [partnerPetId, requestId]);
+  saveDatabase();
+}
+
+function updateTradeRequestStatus(requestId, status) {
+  if (!db) return;
+  db.run('UPDATE trade_requests SET status = ? WHERE id = ?', [status, requestId]);
+  saveDatabase();
+}
+
+function deleteTradeRequest(requestId) {
+  if (!db) return;
+  db.run('DELETE FROM trade_requests WHERE id = ?', [requestId]);
+  saveDatabase();
+}
+
+function cleanupExpiredTradeRequests(guildId) {
+  if (!db) return;
+  const now = Date.now();
+  db.run('DELETE FROM trade_requests WHERE guild_id = ? AND expires_at < ? AND status = ?', [guildId, now, 'pending']);
+  saveDatabase();
+}
+
+function executeTrade(guildId, pet1Id, user1Id, pet2Id, user2Id) {
+  if (!db) return { success: false, reason: 'Database not ready' };
+  
+  const pet1 = getPet(pet1Id);
+  const pet2 = getPet(pet2Id);
+  
+  if (!pet1 || !pet2) return { success: false, reason: 'Pet not found' };
+  if (pet1.owner_id !== user1Id) return { success: false, reason: 'Pet 1 ownership mismatch' };
+  if (pet2.owner_id !== user2Id) return { success: false, reason: 'Pet 2 ownership mismatch' };
+  if (pet1.guild_id !== guildId || pet2.guild_id !== guildId) return { success: false, reason: 'Pet not in this server' };
+  
+  const settings = getSettings(guildId);
+  
+  // Calculate new happiness after penalty for both pets
+  const stats1 = getEffectiveStats(pet1);
+  const stats2 = getEffectiveStats(pet2);
+  const newHappiness1 = Math.max(0, stats1.happiness - settings.transferHappinessPenalty);
+  const newHappiness2 = Math.max(0, stats2.happiness - settings.transferHappinessPenalty);
+  
+  // Clear active status for both pets
+  db.run('UPDATE pets SET is_active = 0 WHERE id IN (?, ?)', [pet1Id, pet2Id]);
+  
+  // Swap ownership and apply happiness penalty
+  db.run(
+    'UPDATE pets SET owner_id = ?, happiness = ?, is_active = 0 WHERE id = ?',
+    [user2Id, newHappiness1, pet1Id]
+  );
+  db.run(
+    'UPDATE pets SET owner_id = ?, happiness = ?, is_active = 0 WHERE id = ?',
+    [user1Id, newHappiness2, pet2Id]
+  );
+  
+  saveDatabase();
+  
+  // Auto-set as active for new owners if they have no active pet
+  if (!getActivePet(guildId, user1Id)) {
+    setActivePet(guildId, user1Id, pet2Id);
+  }
+  if (!getActivePet(guildId, user2Id)) {
+    setActivePet(guildId, user2Id, pet1Id);
+  }
+  
+  return {
+    success: true,
+    pet1: { ...pet1, newHappiness: newHappiness1 },
+    pet2: { ...pet2, newHappiness: newHappiness2 },
+    happinessPenalty: settings.transferHappinessPenalty,
+  };
+}
+
 // ============ EXPORTS ============
 module.exports = {
   initPets,
@@ -2121,4 +2247,12 @@ module.exports = {
   // Transfer
   canTransferPet,
   transferPet,
+  // Trading
+  createTradeRequest,
+  getTradeRequest,
+  updateTradeRequestPet,
+  updateTradeRequestStatus,
+  deleteTradeRequest,
+  cleanupExpiredTradeRequests,
+  executeTrade,
 };

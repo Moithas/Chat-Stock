@@ -24,6 +24,9 @@ const {
   cleanupExpiredBreedingRequests, RARITY_ORDER,
   // Transfer
   canTransferPet, transferPet,
+  // Trading
+  createTradeRequest, getTradeRequest, updateTradeRequestPet,
+  updateTradeRequestStatus, deleteTradeRequest, cleanupExpiredTradeRequests, executeTrade,
 } = require('../pets');
 const { getBalance, removeFromTotal, addMoney } = require('../economy');
 const { getCurrency } = require('../admin');
@@ -154,11 +157,16 @@ module.exports = {
     if (customId.startsWith('pet_breed_request_')) return handleBreedRequest(interaction, guildId, userId, settings);
     // Transfer buttons
     if (customId.startsWith('pet_transfer_menu_')) return showTransferPanel(interaction, guildId, userId, settings);
-    if (customId.startsWith('pet_transfer_') && !customId.includes('_confirm_') && !customId.includes('_accept_') && !customId.includes('_decline_') && !customId.includes('_target_'))
+    if (customId.startsWith('pet_transfer_') && !customId.includes('_confirm_') && !customId.includes('_accept_') && !customId.includes('_decline_') && !customId.includes('_target_') && !customId.includes('_userselect_'))
       return showTransferPanel(interaction, guildId, userId, settings, parsePetIdFromCustomId(customId));
     if (customId.startsWith('pet_transfer_confirm_')) return handleTransferConfirm(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_transfer_accept_')) return handleTransferAccept(interaction, guildId, settings);
     if (customId.startsWith('pet_transfer_decline_')) return handleTransferDecline(interaction, guildId, settings);
+    // Trade buttons
+    if (customId.startsWith('pet_trade_menu_')) return showTradePanel(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_trade_accept_')) return handleTradeAccept(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_trade_decline_')) return handleTradeDecline(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_trade_confirm_')) return handleTradeConfirm(interaction, guildId, userId, settings);
   },
 
   async handleSelectMenu(interaction) {
@@ -174,6 +182,8 @@ module.exports = {
     if (customId.startsWith('pet_stud_mypet_')) return handleStudMyPetSelect(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_stud_partner_')) return handleStudPartnerSelect(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_transfer_target_')) return handleTransferTargetSelect(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_trade_select_')) return handleTradeSelectPet(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_trade_partner_')) return handleTradePartnerSelectPet(interaction, guildId, userId, settings);
   },
 
   async handleUserSelectMenu(interaction) {
@@ -184,6 +194,7 @@ module.exports = {
 
     if (customId.startsWith('pet_stud_targetuser_')) return handleStudTargetUserSelect(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_transfer_userselect_')) return handleTransferUserSelect(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_trade_userselect_')) return handleTradeUserSelect(interaction, guildId, userId, settings);
   },
 
   async handleModal(interaction) {
@@ -302,10 +313,15 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
     new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('My Pets').setEmoji('🐾').setStyle(ButtonStyle.Primary).setDisabled(pets.length === 0),
     new ButtonBuilder().setCustomId(`pet_myeggs_u_${userId}`).setLabel('My Eggs').setEmoji('🥚').setStyle(ButtonStyle.Primary).setDisabled(eggs.length === 0),
     new ButtonBuilder().setCustomId(`pet_panel_kennel_u_${userId}`).setLabel('Kennel').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_transfer_menu_u_${userId}`).setLabel('Give/Sell').setEmoji('🔄').setStyle(ButtonStyle.Secondary).setDisabled(!settings.transferEnabled || pets.length === 0),
+    new ButtonBuilder().setCustomId(`pet_trade_menu_u_${userId}`).setLabel('Trade').setEmoji('🤝').setStyle(ButtonStyle.Secondary).setDisabled(!settings.transferEnabled || pets.length === 0),
     new ButtonBuilder().setCustomId(`pet_dismiss_u_${userId}`).setLabel('Dismiss').setEmoji('❌').setStyle(ButtonStyle.Danger),
   );
 
-  const options = { embeds: [embed], components: [row1] };
+  const options = { embeds: [embed], components: [row1, row2] };
   if (isDeferred) return interaction.editReply(options);
   if (isUpdate) return interaction.update(options);
   return interaction.reply(options);
@@ -3424,4 +3440,426 @@ async function handleTransferDecline(interaction, guildId, settings) {
 
 async function handleTransferConfirm(interaction, guildId, userId, settings) {
   return showTransferPanel(interaction, guildId, userId, settings);
+}
+
+// ================== PET TRADING (SWAP) ==================
+
+async function showTradePanel(interaction, guildId, userId, settings) {
+  if (!settings.transferEnabled) {
+    return interaction.reply({ content: '❌ Pet transfers/trades are not enabled on this server.', flags: 64 });
+  }
+
+  await interaction.deferUpdate();
+  const pets = getUserPets(guildId, userId);
+
+  // Filter tradeable pets (same requirements as transfer)
+  const tradeablePets = pets.filter(p => {
+    const check = canTransferPet(p, guildId);
+    return check.canTransfer;
+  });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x9B59B6)
+    .setTitle('🤝 Pet Trade')
+    .setDescription(
+      `Trade pets with another player — no spare slots needed!\n\n` +
+      `**How it works:**\n` +
+      `1. Select a pet you want to trade\n` +
+      `2. Select the player you want to trade with\n` +
+      `3. They choose which pet to trade for yours\n` +
+      `4. You both confirm, and pets swap instantly!\n\n` +
+      `**Requirements:**\n` +
+      `• Pet must have ${settings.transferMinHappiness}+ happiness\n` +
+      `• Cannot trade eggs or gestating pets\n` +
+      `• Both pets lose ${settings.transferHappinessPenalty} happiness on trade`
+    )
+    .setTimestamp();
+
+  if (tradeablePets.length === 0) {
+    embed.addFields({ name: 'Your Pets', value: 'No pets available for trade. Make sure they have enough happiness!' });
+  } else {
+    const petList = tradeablePets.slice(0, 10).map(p => {
+      const speciesData = SPECIES[p.species];
+      const rarityData = RARITIES[p.rarity];
+      const stats = getEffectiveStats(p);
+      const sexEmoji = p.sex === 'M' ? '♂️' : '♀️';
+      return `${speciesData.emoji} **${p.name}** — ${rarityData.name} ${sexEmoji} L${p.level} (😊 ${Math.round(stats.happiness)})`;
+    }).join('\n');
+    embed.addFields({ name: 'Available for Trade', value: petList });
+  }
+
+  const rows = [];
+
+  if (tradeablePets.length > 0) {
+    const options = tradeablePets.slice(0, 25).map(p => {
+      const speciesData = SPECIES[p.species];
+      const rarityData = RARITIES[p.rarity];
+      const stats = getEffectiveStats(p);
+      return {
+        label: p.name,
+        description: `${rarityData.name} ${speciesData.name} L${p.level} — 😊 ${Math.round(stats.happiness)}`,
+        value: `${p.id}`,
+        emoji: speciesData.emoji,
+      };
+    });
+
+    const selectRow = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`pet_trade_select_u_${userId}`)
+        .setPlaceholder('Select a pet to trade...')
+        .addOptions(options)
+    );
+    rows.push(selectRow);
+  }
+
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Main Panel').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+  );
+  rows.push(navRow);
+
+  await interaction.editReply({ embeds: [embed], components: rows, files: [] });
+}
+
+async function handleTradeSelectPet(interaction, guildId, userId, settings) {
+  const petId = parseInt(interaction.values[0]);
+  const pet = getPet(petId);
+
+  if (!pet || pet.owner_id !== userId) {
+    return interaction.reply({ content: '❌ Pet not found or not yours.', flags: 64 });
+  }
+
+  const check = canTransferPet(pet, guildId);
+  if (!check.canTransfer) {
+    return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
+  }
+
+  await interaction.deferUpdate();
+
+  const speciesData = SPECIES[pet.species];
+  const rarityData = RARITIES[pet.rarity];
+  const sexEmoji = pet.sex === 'M' ? '♂️' : '♀️';
+  const stats = getEffectiveStats(pet);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x9B59B6)
+    .setTitle('🤝 Trade Pet')
+    .setDescription(
+      `You selected:\n` +
+      `${speciesData.emoji} **${pet.name}**\n` +
+      `${rarityData.name} ${speciesData.name} ${sexEmoji} Level ${pet.level}\n` +
+      `😊 Happiness: ${Math.round(stats.happiness)}\n\n` +
+      `**Select a user to trade with:**`
+    )
+    .setTimestamp();
+
+  const userSelectRow = new ActionRowBuilder().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId(`pet_trade_userselect_${petId}_u_${userId}`)
+      .setPlaceholder('Select a user...')
+  );
+
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_trade_menu_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+  );
+
+  await interaction.editReply({ embeds: [embed], components: [userSelectRow, navRow], files: [] });
+}
+
+async function handleTradeUserSelect(interaction, guildId, userId, settings) {
+  // pet_trade_userselect_<petId>_u_<userId>
+  const parts = interaction.customId.split('_');
+  const petId = parseInt(parts[3]);
+  const targetUser = interaction.users.first();
+
+  if (!targetUser) {
+    return interaction.reply({ content: '❌ No user selected.', flags: 64 });
+  }
+
+  if (targetUser.id === userId) {
+    return interaction.reply({ content: '❌ Cannot trade with yourself.', flags: 64 });
+  }
+
+  if (targetUser.bot) {
+    return interaction.reply({ content: '❌ Cannot trade with a bot.', flags: 64 });
+  }
+
+  const pet = getPet(petId);
+  if (!pet || pet.owner_id !== userId) {
+    return interaction.reply({ content: '❌ Pet not found or not yours.', flags: 64 });
+  }
+
+  const check = canTransferPet(pet, guildId);
+  if (!check.canTransfer) {
+    return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
+  }
+
+  // Create trade request
+  const request = createTradeRequest(guildId, userId, petId, targetUser.id, null);
+  if (!request) {
+    return interaction.reply({ content: '❌ Failed to create trade request.', flags: 64 });
+  }
+
+  await interaction.deferReply();
+
+  const speciesData = SPECIES[pet.species];
+  const rarityData = RARITIES[pet.rarity];
+  const sexEmoji = pet.sex === 'M' ? '♂️' : '♀️';
+  const shinyStr = pet.shiny ? '✨ ' : '';
+  const stats = getEffectiveStats(pet);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x9B59B6)
+    .setTitle('🤝 Pet Trade Request')
+    .setDescription(
+      `**${interaction.user.displayName}** wants to trade with you!\n\n` +
+      `**Their pet:**\n` +
+      `${speciesData.emoji} ${shinyStr}**${pet.name}**\n` +
+      `${rarityData.name} ${speciesData.name} ${sexEmoji} Level ${pet.level}\n` +
+      `😊 Happiness: ${Math.round(stats.happiness)}\n\n` +
+      `**Select one of your pets to trade:**`
+    )
+    .setFooter({ text: 'Expires in 24 hours' })
+    .setTimestamp();
+
+  // Get partner's tradeable pets
+  const partnerPets = getUserPets(guildId, targetUser.id);
+  const tradeablePartnerPets = partnerPets.filter(p => {
+    const c = canTransferPet(p, guildId);
+    return c.canTransfer;
+  });
+
+  const rows = [];
+
+  if (tradeablePartnerPets.length > 0) {
+    const options = tradeablePartnerPets.slice(0, 25).map(p => {
+      const sp = SPECIES[p.species];
+      const rr = RARITIES[p.rarity];
+      const st = getEffectiveStats(p);
+      return {
+        label: p.name,
+        description: `${rr.name} ${sp.name} L${p.level} — 😊 ${Math.round(st.happiness)}`,
+        value: `${p.id}`,
+        emoji: sp.emoji,
+      };
+    });
+
+    const selectRow = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`pet_trade_partner_${request.id}_u_${targetUser.id}`)
+        .setPlaceholder('Select your pet to trade...')
+        .addOptions(options)
+    );
+    rows.push(selectRow);
+  }
+
+  const buttonRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`pet_trade_decline_${request.id}_${userId}`)
+      .setLabel('Decline')
+      .setEmoji('❌')
+      .setStyle(ButtonStyle.Danger),
+  );
+  rows.push(buttonRow);
+
+  // Send public message tagging partner
+  await interaction.editReply({
+    content: `<@${targetUser.id}>`,
+    embeds: [embed],
+    components: rows,
+  });
+}
+
+async function handleTradePartnerSelectPet(interaction, guildId, userId, settings) {
+  // pet_trade_partner_<requestId>_u_<partnerId>
+  const parts = interaction.customId.split('_');
+  const requestId = parseInt(parts[3]);
+  const partnerId = parts[5];
+
+  if (userId !== partnerId) {
+    return interaction.reply({ content: '❌ This trade is not for you.', flags: 64 });
+  }
+
+  const request = getTradeRequest(requestId);
+  if (!request || request.status !== 'pending') {
+    return interaction.reply({ content: '❌ Trade request not found or already processed.', flags: 64 });
+  }
+
+  const partnerPetId = parseInt(interaction.values[0]);
+  const partnerPet = getPet(partnerPetId);
+
+  if (!partnerPet || partnerPet.owner_id !== userId) {
+    return interaction.reply({ content: '❌ Pet not found or not yours.', flags: 64 });
+  }
+
+  const check = canTransferPet(partnerPet, guildId);
+  if (!check.canTransfer) {
+    return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
+  }
+
+  // Update request with partner's pet
+  updateTradeRequestPet(requestId, partnerPetId);
+
+  await interaction.deferUpdate();
+
+  const requesterPet = getPet(request.requester_pet_id);
+  if (!requesterPet) {
+    deleteTradeRequest(requestId);
+    return interaction.editReply({ content: '❌ Requester\'s pet is no longer available.', embeds: [], components: [] });
+  }
+
+  const reqSpecies = SPECIES[requesterPet.species];
+  const reqRarity = RARITIES[requesterPet.rarity];
+  const reqSex = requesterPet.sex === 'M' ? '♂️' : '♀️';
+  const reqShiny = requesterPet.shiny ? '✨ ' : '';
+  const reqStats = getEffectiveStats(requesterPet);
+
+  const partnerSpecies = SPECIES[partnerPet.species];
+  const partnerRarity = RARITIES[partnerPet.rarity];
+  const partnerSex = partnerPet.sex === 'M' ? '♂️' : '♀️';
+  const partnerShiny = partnerPet.shiny ? '✨ ' : '';
+  const partnerStats = getEffectiveStats(partnerPet);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x9B59B6)
+    .setTitle('🤝 Confirm Trade')
+    .setDescription(
+      `**${interaction.user.displayName}** wants to trade!\n\n` +
+      `**You get:**\n` +
+      `${reqSpecies.emoji} ${reqShiny}**${requesterPet.name}**\n` +
+      `${reqRarity.name} ${reqSpecies.name} ${reqSex} Level ${requesterPet.level}\n` +
+      `😊 Happiness: ${Math.round(reqStats.happiness)}\n\n` +
+      `**You give:**\n` +
+      `${partnerSpecies.emoji} ${partnerShiny}**${partnerPet.name}**\n` +
+      `${partnerRarity.name} ${partnerSpecies.name} ${partnerSex} Level ${partnerPet.level}\n` +
+      `😊 Happiness: ${Math.round(partnerStats.happiness)}\n\n` +
+      `⚠️ Both pets lose ${settings.transferHappinessPenalty} happiness.`
+    )
+    .setFooter({ text: `<@${request.requester_id}> must also confirm` })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`pet_trade_confirm_${requestId}_p_${userId}`)
+      .setLabel('Confirm Trade')
+      .setEmoji('✅')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`pet_trade_decline_${requestId}_${request.requester_id}`)
+      .setLabel('Cancel')
+      .setEmoji('❌')
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  // Tag the requester to confirm
+  await interaction.editReply({
+    content: `<@${request.requester_id}> — **${interaction.user.displayName}** selected their pet! Review and confirm the trade:`,
+    embeds: [embed],
+    components: [row],
+  });
+}
+
+async function handleTradeConfirm(interaction, guildId, userId, settings) {
+  // pet_trade_confirm_<requestId>_p_<partnerId>
+  const parts = interaction.customId.split('_');
+  const requestId = parseInt(parts[3]);
+  const partnerId = parts[5];
+
+  const request = getTradeRequest(requestId);
+  if (!request || request.status !== 'pending') {
+    return interaction.reply({ content: '❌ Trade request not found or already processed.', flags: 64 });
+  }
+
+  // Either requester or partner can confirm
+  if (userId !== request.requester_id && userId !== partnerId) {
+    return interaction.reply({ content: '❌ This trade is not for you.', flags: 64 });
+  }
+
+  // Validate both pets still exist and are transferable
+  const requesterPet = getPet(request.requester_pet_id);
+  const partnerPet = getPet(request.partner_pet_id);
+
+  if (!requesterPet || requesterPet.owner_id !== request.requester_id) {
+    deleteTradeRequest(requestId);
+    return interaction.reply({ content: '❌ Requester\'s pet is no longer available.', flags: 64 });
+  }
+
+  if (!partnerPet || partnerPet.owner_id !== request.partner_id) {
+    deleteTradeRequest(requestId);
+    return interaction.reply({ content: '❌ Partner\'s pet is no longer available.', flags: 64 });
+  }
+
+  const check1 = canTransferPet(requesterPet, guildId);
+  const check2 = canTransferPet(partnerPet, guildId);
+
+  if (!check1.canTransfer) {
+    return interaction.reply({ content: `❌ Requester's pet: ${check1.reason}`, flags: 64 });
+  }
+
+  if (!check2.canTransfer) {
+    return interaction.reply({ content: `❌ Partner's pet: ${check2.reason}`, flags: 64 });
+  }
+
+  await interaction.deferUpdate();
+
+  // Execute the trade
+  const result = executeTrade(guildId, request.requester_pet_id, request.requester_id, request.partner_pet_id, request.partner_id);
+
+  if (!result.success) {
+    return interaction.editReply({ content: `❌ Trade failed: ${result.reason}`, embeds: [], components: [] });
+  }
+
+  // Mark request as completed
+  updateTradeRequestStatus(requestId, 'completed');
+
+  const pet1Species = SPECIES[result.pet1.species];
+  const pet2Species = SPECIES[result.pet2.species];
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ECC71)
+    .setTitle('✅ Trade Complete!')
+    .setDescription(
+      `🎉 The trade was successful!\n\n` +
+      `**<@${request.requester_id}>** received:\n` +
+      `${pet2Species.emoji} **${result.pet2.name}** (😊 ${result.pet2.newHappiness})\n\n` +
+      `**<@${request.partner_id}>** received:\n` +
+      `${pet1Species.emoji} **${result.pet1.name}** (😊 ${result.pet1.newHappiness})\n\n` +
+      `Both pets lost ${result.happinessPenalty} happiness.`
+    )
+    .setTimestamp();
+
+  await interaction.editReply({ content: '', embeds: [embed], components: [] });
+}
+
+async function handleTradeAccept(interaction, guildId, userId, settings) {
+  // This is no longer used - partner selects pet directly
+  return interaction.reply({ content: '❌ Please select a pet from the dropdown.', flags: 64 });
+}
+
+async function handleTradeDecline(interaction, guildId, userId, settings) {
+  // pet_trade_decline_<requestId>_<requesterId>
+  const parts = interaction.customId.split('_');
+  const requestId = parseInt(parts[3]);
+  const requesterId = parts[4];
+
+  const request = getTradeRequest(requestId);
+  if (!request) {
+    return interaction.reply({ content: '❌ Trade request not found.', flags: 64 });
+  }
+
+  // Only requester or partner can decline
+  if (userId !== request.requester_id && userId !== request.partner_id) {
+    return interaction.reply({ content: '❌ This trade is not for you.', flags: 64 });
+  }
+
+  await interaction.deferUpdate();
+
+  deleteTradeRequest(requestId);
+
+  const embed = new EmbedBuilder()
+    .setColor(0xE74C3C)
+    .setTitle('❌ Trade Cancelled')
+    .setDescription('The pet trade was cancelled.')
+    .setTimestamp();
+
+  await interaction.editReply({ content: '', embeds: [embed], components: [] });
 }

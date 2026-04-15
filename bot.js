@@ -1202,7 +1202,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   // Handle pet panel buttons
-  if (interaction.isButton() && (interaction.customId.startsWith('pet_panel_') || interaction.customId.startsWith('pet_feed_') || interaction.customId.startsWith('pet_feedmenu_') || interaction.customId.startsWith('pet_play_') || interaction.customId.startsWith('pet_train_') || interaction.customId.startsWith('pet_active_') || interaction.customId.startsWith('pet_dismiss_') || interaction.customId.startsWith('pet_view_') || interaction.customId.startsWith('pet_release_') || interaction.customId.startsWith('pet_rename_') || interaction.customId.startsWith('pet_namebuy_') || interaction.customId.startsWith('pet_buy_') || interaction.customId.startsWith('pet_kennel_') || interaction.customId.startsWith('pet_shop_page_') || interaction.customId.startsWith('pet_egg_') || interaction.customId.startsWith('pet_myeggs_') || interaction.customId.startsWith('pet_breed_') || interaction.customId.startsWith('pet_birth_') || interaction.customId.startsWith('pet_gestating_') || interaction.customId.startsWith('pet_stud_') || interaction.customId.startsWith('pet_transfer_'))) {
+  if (interaction.isButton() && (interaction.customId.startsWith('pet_panel_') || interaction.customId.startsWith('pet_feed_') || interaction.customId.startsWith('pet_feedmenu_') || interaction.customId.startsWith('pet_play_') || interaction.customId.startsWith('pet_train_') || interaction.customId.startsWith('pet_active_') || interaction.customId.startsWith('pet_dismiss_') || interaction.customId.startsWith('pet_view_') || interaction.customId.startsWith('pet_release_') || interaction.customId.startsWith('pet_rename_') || interaction.customId.startsWith('pet_namebuy_') || interaction.customId.startsWith('pet_buy_') || interaction.customId.startsWith('pet_kennel_') || interaction.customId.startsWith('pet_shop_page_') || interaction.customId.startsWith('pet_egg_') || interaction.customId.startsWith('pet_myeggs_') || interaction.customId.startsWith('pet_breed_') || interaction.customId.startsWith('pet_birth_') || interaction.customId.startsWith('pet_gestating_') || interaction.customId.startsWith('pet_stud_') || interaction.customId.startsWith('pet_transfer_') || interaction.customId.startsWith('pet_trade_'))) {
     try {
       const { handleButton } = require('./commands/pets');
       await handleButton(interaction);
@@ -1219,7 +1219,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   // Handle pet panel select menus
-  if (interaction.isStringSelectMenu() && (interaction.customId.startsWith('pet_select_') || interaction.customId.startsWith('pet_shop_select_') || interaction.customId.startsWith('pet_breed_select_') || interaction.customId.startsWith('pet_breed_partner_select_') || interaction.customId.startsWith('pet_stud_mypet_') || interaction.customId.startsWith('pet_stud_partner_') || interaction.customId.startsWith('pet_transfer_target_'))) {
+  if (interaction.isStringSelectMenu() && (interaction.customId.startsWith('pet_select_') || interaction.customId.startsWith('pet_shop_select_') || interaction.customId.startsWith('pet_breed_select_') || interaction.customId.startsWith('pet_breed_partner_select_') || interaction.customId.startsWith('pet_stud_mypet_') || interaction.customId.startsWith('pet_stud_partner_') || interaction.customId.startsWith('pet_transfer_target_') || interaction.customId.startsWith('pet_trade_select_') || interaction.customId.startsWith('pet_trade_partner_'))) {
     try {
       const { handleSelectMenu } = require('./commands/pets');
       await handleSelectMenu(interaction);
@@ -1236,7 +1236,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   // Handle pet panel user select menus
-  if (interaction.isUserSelectMenu() && (interaction.customId.startsWith('pet_stud_targetuser_') || interaction.customId.startsWith('pet_transfer_userselect_'))) {
+  if (interaction.isUserSelectMenu() && (interaction.customId.startsWith('pet_stud_targetuser_') || interaction.customId.startsWith('pet_transfer_userselect_') || interaction.customId.startsWith('pet_trade_userselect_'))) {
     try {
       const { handleUserSelectMenu } = require('./commands/pets');
       await handleUserSelectMenu(interaction);
