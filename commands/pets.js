@@ -4,7 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require('discord.js');
+  StringSelectMenuBuilder, UserSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require('discord.js');
 const {
   getSettings, SPECIES, SHOP_SPECIES, RARITIES, PHASES, FOOD_TYPES,
   getShopStock, getShopRestockTime, removeShopSlot,
@@ -174,6 +174,15 @@ module.exports = {
     if (customId.startsWith('pet_transfer_target_')) return handleTransferTargetSelect(interaction, guildId, userId, settings);
   },
 
+  async handleUserSelectMenu(interaction) {
+    const customId = interaction.customId;
+    const guildId = interaction.guildId;
+    const userId = interaction.user.id;
+    const settings = getSettings(guildId);
+
+    if (customId.startsWith('pet_stud_targetuser_')) return handleStudTargetUserSelect(interaction, guildId, userId, settings);
+  },
+
   async handleModal(interaction) {
     const customId = interaction.customId;
     const guildId = interaction.guildId;
@@ -184,7 +193,6 @@ module.exports = {
     if (customId.startsWith('modal_pet_rename_')) return handleRenameModal(interaction, guildId, userId, settings);
     if (customId.startsWith('modal_egg_name_')) return handleEggNameModal(interaction, guildId, userId, settings);
     if (customId.startsWith('modal_birth_name_')) return handleBirthNameModal(interaction, guildId, userId, settings);
-    if (customId.startsWith('modal_stud_fee_')) return handleStudFeeSubmit(interaction, guildId, userId, settings);
     if (customId.startsWith('modal_stud_accept_')) return handleStudAcceptSubmit(interaction, guildId, userId, settings);
     if (customId.startsWith('modal_transfer_price_')) return handleTransferPriceSubmit(interaction, guildId, userId, settings);
   },
@@ -2592,7 +2600,7 @@ async function handleBreedPartnerSelect(interaction, guildId, userId, settings) 
   return showStudRequestPanel(interaction, guildId, userId, settings);
 }
 
-// Step 2: User selected their pet, now show modal to enter target user ID and stud fee
+// Step 2: User selected their pet, now show user select menu to pick target
 async function handleStudMyPetSelect(interaction, guildId, userId, settings) {
   const petId = parseInt(interaction.values[0]);
   const pet = getPet(petId);
@@ -2606,30 +2614,39 @@ async function handleStudMyPetSelect(interaction, guildId, userId, settings) {
     return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
   }
 
-  // Show modal to enter target user ID only (partner sets fee when accepting)
-  const modal = new ModalBuilder()
-    .setCustomId(`modal_stud_fee_${petId}_u_${userId}`)
-    .setTitle(`Stud Request: ${pet.name}`);
+  await interaction.deferUpdate();
 
-  const targetInput = new TextInputBuilder()
-    .setCustomId('target_user')
-    .setLabel('Target User ID (right-click → Copy ID)')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g. 123456789012345678');
+  const speciesData = SPECIES[pet.species];
+  const rarityData = RARITIES[pet.rarity];
+  const sexEmoji = pet.sex === 'M' ? '♂️' : '♀️';
 
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(targetInput)
+  const embed = new EmbedBuilder()
+    .setColor(0xFF69B4)
+    .setTitle('💌 Select Target User')
+    .setDescription(
+      `Your pet: ${speciesData.emoji} **${pet.name}** ${sexEmoji} (${rarityData.name})\n\n` +
+      `Select the user whose pet you want to breed with:\n` +
+      `*They can accept and set a stud fee.*`
+    )
+    .setTimestamp();
+
+  const userSelectRow = new ActionRowBuilder().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId(`pet_stud_targetuser_${petId}_u_${userId}`)
+      .setPlaceholder('Select a user...')
   );
 
-  await interaction.showModal(modal);
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_stud_request_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+  );
+
+  await interaction.editReply({ embeds: [embed], components: [userSelectRow, navRow], files: [] });
 }
 
-// Step 3: Handle stud fee modal submit - query target user's pets and show selection
-async function handleStudFeeSubmit(interaction, guildId, userId, settings) {
-  const customId = interaction.customId;
-  // modal_stud_fee_<petId>_u_<userId>
-  const parts = customId.split('_');
+// Step 3: User selected target user, now show their compatible pets
+async function handleStudTargetUserSelect(interaction, guildId, userId, settings) {
+  // pet_stud_targetuser_<petId>_u_<userId>
+  const parts = interaction.customId.split('_');
   const petId = parseInt(parts[3]);
   
   const myPet = getPet(petId);
@@ -2637,11 +2654,7 @@ async function handleStudFeeSubmit(interaction, guildId, userId, settings) {
     return interaction.reply({ content: '❌ Pet not found.', flags: 64 });
   }
 
-  const targetUserId = interaction.fields.getTextInputValue('target_user').trim();
-
-  if (!targetUserId.match(/^\d{17,20}$/)) {
-    return interaction.reply({ content: '❌ Invalid User ID format. Right-click on the user and select "Copy User ID".', flags: 64 });
-  }
+  const targetUserId = interaction.values[0];
 
   if (targetUserId === userId) {
     return interaction.reply({ content: '❌ You can\'t request to breed with yourself. Use the normal breeding panel.', flags: 64 });

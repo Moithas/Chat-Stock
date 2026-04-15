@@ -1235,8 +1235,25 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Handle pet panel user select menus
+  if (interaction.isUserSelectMenu() && interaction.customId.startsWith('pet_stud_targetuser_')) {
+    try {
+      const { handleUserSelectMenu } = require('./commands/pets');
+      await handleUserSelectMenu(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'pets user select', error });
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) {}
+    }
+    return;
+  }
+
   // Handle pet panel modals
-  if (interaction.isModalSubmit() && (interaction.customId.startsWith('modal_pet_name_') || interaction.customId.startsWith('modal_pet_rename_') || interaction.customId.startsWith('modal_egg_name_') || interaction.customId.startsWith('modal_birth_name_') || interaction.customId.startsWith('modal_stud_fee_') || interaction.customId.startsWith('modal_stud_accept_') || interaction.customId.startsWith('modal_transfer_price_'))) {
+  if (interaction.isModalSubmit() && (interaction.customId.startsWith('modal_pet_name_') || interaction.customId.startsWith('modal_pet_rename_') || interaction.customId.startsWith('modal_egg_name_') || interaction.customId.startsWith('modal_birth_name_') || interaction.customId.startsWith('modal_stud_accept_') || interaction.customId.startsWith('modal_transfer_price_'))) {
     try {
       const { handleModal } = require('./commands/pets');
       await handleModal(interaction);
