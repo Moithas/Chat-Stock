@@ -138,7 +138,6 @@ module.exports = {
     if (customId.startsWith('pet_breed_menu_')) return showBreedingPanel(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_') && !customId.includes('_confirm_') && !customId.includes('_cancel_') && !customId.includes('_select_') && !customId.includes('_request_') && !customId.includes('_partner_'))
       return showBreedingPanel(interaction, guildId, userId, settings, parsePetIdFromCustomId(customId));
-    if (customId.startsWith('pet_breed_select_')) return handleBreedSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_confirm_')) return handleBreedConfirm(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_cancel_')) return showMyPetsPanel(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_birth_')) return handleGiveBirth(interaction, guildId, userId, settings);
@@ -166,6 +165,7 @@ module.exports = {
 
     if (customId.startsWith('pet_select_view_')) return handleSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_shop_select_')) return handleShopSelectPet(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_breed_select_')) return handleBreedSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_partner_select_')) return handleBreedPartnerSelect(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_transfer_target_')) return handleTransferTargetSelect(interaction, guildId, userId, settings);
   },
