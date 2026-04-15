@@ -183,6 +183,7 @@ module.exports = {
     const settings = getSettings(guildId);
 
     if (customId.startsWith('pet_stud_targetuser_')) return handleStudTargetUserSelect(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_transfer_userselect_')) return handleTransferUserSelect(interaction, guildId, userId, settings);
   },
 
   async handleModal(interaction) {
@@ -3175,17 +3176,66 @@ async function handleTransferTargetSelect(interaction, guildId, userId, settings
     return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
   }
 
-  // Show modal to enter target user and price
-  const modal = new ModalBuilder()
-    .setCustomId(`modal_transfer_price_${petId}_u_${userId}`)
-    .setTitle(`Transfer ${pet.name}`);
+  await interaction.deferUpdate();
 
-  const targetInput = new TextInputBuilder()
-    .setCustomId('target_user')
-    .setLabel('Target User ID (right-click → Copy ID)')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g. 123456789012345678');
+  const speciesData = SPECIES[pet.species];
+  const rarityData = RARITIES[pet.rarity];
+  const sexEmoji = pet.sex === 'M' ? '♂️' : '♀️';
+  const stats = getEffectiveStats(pet);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x3498DB)
+    .setTitle('🔄 Transfer Pet')
+    .setDescription(
+      `You selected:\n` +
+      `${speciesData.emoji} **${pet.name}**\n` +
+      `${rarityData.name} ${speciesData.name} ${sexEmoji} Level ${pet.level}\n` +
+      `😊 Happiness: ${Math.round(stats.happiness)}\n\n` +
+      `**Select a user to transfer this pet to:**`
+    )
+    .setTimestamp();
+
+  const userSelectRow = new ActionRowBuilder().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId(`pet_transfer_userselect_${petId}_u_${userId}`)
+      .setPlaceholder('Select a user...')
+  );
+
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_transfer_menu_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+  );
+
+  await interaction.editReply({ embeds: [embed], components: [userSelectRow, navRow], files: [] });
+}
+
+async function handleTransferUserSelect(interaction, guildId, userId, settings) {
+  // pet_transfer_userselect_<petId>_u_<userId>
+  const parts = interaction.customId.split('_');
+  const petId = parseInt(parts[3]);
+  const targetUser = interaction.users.first();
+
+  if (!targetUser) {
+    return interaction.reply({ content: '❌ No user selected.', flags: 64 });
+  }
+
+  if (targetUser.id === userId) {
+    return interaction.reply({ content: '❌ Cannot transfer to yourself.', flags: 64 });
+  }
+
+  const pet = getPet(petId);
+  if (!pet || pet.owner_id !== userId) {
+    return interaction.reply({ content: '❌ Pet not found or not yours.', flags: 64 });
+  }
+
+  const check = canTransferPet(pet, guildId);
+  if (!check.canTransfer) {
+    return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
+  }
+
+  // Show modal to enter price only
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_transfer_price_${petId}_t_${targetUser.id}_u_${userId}`)
+    .setTitle(`Transfer ${pet.name}`);
 
   const priceInput = new TextInputBuilder()
     .setCustomId('price')
@@ -3196,7 +3246,6 @@ async function handleTransferTargetSelect(interaction, guildId, userId, settings
     .setPlaceholder('0');
 
   modal.addComponents(
-    new ActionRowBuilder().addComponents(targetInput),
     new ActionRowBuilder().addComponents(priceInput)
   );
 
@@ -3205,20 +3254,12 @@ async function handleTransferTargetSelect(interaction, guildId, userId, settings
 
 async function handleTransferPriceSubmit(interaction, guildId, userId, settings) {
   const parts = interaction.customId.split('_');
-  // modal_transfer_price_<petId>_u_<userId>
+  // modal_transfer_price_<petId>_t_<targetUserId>_u_<userId>
   const petId = parseInt(parts[3]);
+  const targetUserId = parts[5];
 
-  const targetUserId = interaction.fields.getTextInputValue('target_user').trim();
   const priceStr = interaction.fields.getTextInputValue('price').trim();
   const price = parseInt(priceStr) || 0;
-
-  if (!/^\d{17,19}$/.test(targetUserId)) {
-    return interaction.reply({ content: '❌ Invalid user ID format. Use right-click → Copy ID.', flags: 64 });
-  }
-
-  if (targetUserId === userId) {
-    return interaction.reply({ content: '❌ Cannot transfer to yourself.', flags: 64 });
-  }
 
   if (price < 0) {
     return interaction.reply({ content: '❌ Price cannot be negative.', flags: 64 });
