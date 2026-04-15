@@ -731,8 +731,8 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   );
 
   // Row 3: Breeding and Transfer buttons
-  const breedCheck = canBreed(pet, settings);
-  const transferCheck = canTransferPet(pet, settings);
+  const breedCheck = canBreed(pet, guildId);
+  const transferCheck = canTransferPet(pet, guildId);
   
   const row3 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -740,13 +740,13 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
       .setLabel('Breed')
       .setEmoji('💕')
       .setStyle(ButtonStyle.Primary)
-      .setDisabled(!settings.breedingEnabled || !breedCheck.success),
+      .setDisabled(!settings.breedingEnabled || !breedCheck.canBreed),
     new ButtonBuilder()
       .setCustomId(`pet_transfer_${pet.id}_u_${userId}`)
       .setLabel('Give/Sell')
       .setEmoji('🎁')
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(!settings.transferEnabled || !transferCheck.success),
+      .setDisabled(!settings.transferEnabled || !transferCheck.canTransfer),
   );
 
   return interaction.update({ embeds: [embed], components: [row1, row2, row3], files });
