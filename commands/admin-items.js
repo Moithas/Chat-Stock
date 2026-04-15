@@ -1228,7 +1228,7 @@ async function handleItemCreationModal(interaction, guildId) {
   }
   
   logAdminAction(guildId, interaction.user.id, interaction.user.username, 'ITEM_ADD', 
-    `Added item: ${name} (${price} coins, category: ${state.category}, effect: ${state.effectType || 'none'}${isRoleGrant ? `, role: ${state.roleId}` : ''})`);
+    `Added item: ${name} (${price.toLocaleString()} ${getCurrency(guildId)}, category: ${state.category}, effect: ${state.effectType || 'none'}${isRoleGrant ? `, role: ${state.roleId}` : ''})`);
   
   await interaction.reply({ 
     content: successMsg,
@@ -1293,7 +1293,7 @@ async function showGiveItemPanel(interaction, guildId) {
     const option = {
       label: item.name.length > 95 ? item.name.substring(0, 92) + '...' : item.name,
       value: item.id.toString(),
-      description: `${item.price.toLocaleString()} coins - ${item.category}`
+      description: `${item.price.toLocaleString()} ${getCurrency(guildId)} - ${item.category}`
     };
     // Add emoji separately (properly parsed for select menus)
     const parsedEmoji = parseEmojiForSelect(item.emoji);
@@ -1399,7 +1399,7 @@ async function updateGiveItemPanel(interaction, state) {
     const option = {
       label: item.name.length > 95 ? item.name.substring(0, 92) + '...' : item.name,
       value: item.id.toString(),
-      description: `${item.price.toLocaleString()} coins - ${item.category}`,
+      description: `${item.price.toLocaleString()} ${getCurrency(guildId)} - ${item.category}`,
       default: item.id === state.itemId
     };
     // Add emoji separately (properly parsed for select menus)
@@ -1926,7 +1926,7 @@ async function handleAddItemModal(interaction, guildId) {
   }
   
   logAdminAction(guildId, interaction.user.id, interaction.user.username, 'ITEM_ADD', 
-    `Added item: ${name} (${price} coins)`);
+    `Added item: ${name} (${price.toLocaleString()} ${getCurrency(guildId)})`);
   
   await interaction.reply({ 
     content: `✅ Created item **${emoji} ${name}** for **${price.toLocaleString()}** ${getCurrency(guildId)}`,

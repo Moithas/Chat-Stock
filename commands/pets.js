@@ -1405,7 +1405,7 @@ async function handleRenameButton(interaction, guildId, userId, settings) {
 
   const modal = new ModalBuilder()
     .setCustomId(`modal_pet_rename_${petId}_u_${userId}`)
-    .setTitle(`Rename ${pet.name} (${settings.renameCost.toLocaleString()} coins)`);
+    .setTitle(`Rename ${pet.name} (${settings.renameCost.toLocaleString()} ${getCurrency(guildId)})`);
 
   const nameInput = new TextInputBuilder()
     .setCustomId('pet_rename_name')

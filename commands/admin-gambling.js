@@ -825,7 +825,7 @@ async function handleForceVaultSpawn(interaction, guildId) {
     const result = await spawnVault(guildId);
     
     if (result && result.success) {
-      logAdminAction(guildId, interaction.user.id, interaction.user.username, `Force spawned vault: ${result.amount} coins`);
+      logAdminAction(guildId, interaction.user.id, interaction.user.username, `Force spawned vault: ${result.amount.toLocaleString()} ${getCurrency(guildId)}`);
       await interaction.editReply({ 
         content: `💰 **Vault Spawned!**\n\n💵 Amount: ${result.amount?.toLocaleString() || 'Unknown'}\n📢 Channel: <#${result.channelId || 'Unknown'}>`
       });
