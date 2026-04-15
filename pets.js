@@ -480,6 +480,17 @@ function initPets(database) {
   migrateAddColumn(db, 'pets', 'gestation_end INTEGER DEFAULT 0');
   migrateAddColumn(db, 'pets', 'breeding_cooldown_end INTEGER DEFAULT 0');
   migrateAddColumn(db, 'pets', 'gestating_for_user TEXT');
+  migrateAddColumn(db, 'pets', 'gestating_male_id INTEGER'); // Track the father during gestation
+  // Migration: add lineage columns
+  migrateAddColumn(db, 'pets', 'mother_id INTEGER'); // NULL if adopted/hatched
+  migrateAddColumn(db, 'pets', 'father_id INTEGER'); // NULL if adopted/hatched
+  migrateAddColumn(db, 'pets', 'mother_name TEXT'); // Stored at birth so it persists even if parent is deleted
+  migrateAddColumn(db, 'pets', 'father_name TEXT'); // Stored at birth so it persists even if parent is deleted
+  // Grandparent names - stored at birth for full lineage persistence
+  migrateAddColumn(db, 'pets', 'maternal_grandmother_name TEXT'); // Mother's mother
+  migrateAddColumn(db, 'pets', 'maternal_grandfather_name TEXT'); // Mother's father
+  migrateAddColumn(db, 'pets', 'paternal_grandmother_name TEXT'); // Father's mother
+  migrateAddColumn(db, 'pets', 'paternal_grandfather_name TEXT'); // Father's father
   // Migration: add breeding settings columns
   migrateAddColumn(db, 'pet_settings', 'breeding_enabled INTEGER DEFAULT 1');
   migrateAddColumn(db, 'pet_settings', 'breeding_fee_common INTEGER DEFAULT 75000');
@@ -756,16 +767,23 @@ function removeShopSlot(guildId, slotNumber) {
 }
 
 // ============ PET CRUD ============
-function adoptPet(guildId, userId, species, name, rarity, sex, shiny, source = 'shop', forcedVariant = null) {
+function adoptPet(guildId, userId, species, name, rarity, sex, shiny, source = 'shop', forcedVariant = null, lineage = null) {
   if (!db) return null;
   const now = Date.now();
   const speciesData = SPECIES[species];
   const variant = forcedVariant || Math.ceil(Math.random() * (speciesData?.variants || 1));
 
+  // Lineage contains: motherId, fatherId, motherName, fatherName, and grandparent names
+  const lin = lineage || {};
+
   db.run(
-    `INSERT INTO pets (guild_id, owner_id, species, name, rarity, sex, shiny, level, xp, hunger, happiness, last_decay_time, born_at, source, variant)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 100, 100, ?, ?, ?, ?)`,
-    [guildId, userId, species, name, rarity, sex, shiny, now, now, source, variant]
+    `INSERT INTO pets (guild_id, owner_id, species, name, rarity, sex, shiny, level, xp, hunger, happiness, last_decay_time, born_at, source, variant, mother_id, father_id, mother_name, father_name, maternal_grandmother_name, maternal_grandfather_name, paternal_grandmother_name, paternal_grandfather_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 100, 100, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [guildId, userId, species, name, rarity, sex, shiny, now, now, source, variant,
+     lin.motherId || null, lin.fatherId || null,
+     lin.motherName || null, lin.fatherName || null,
+     lin.maternalGrandmotherName || null, lin.maternalGrandfatherName || null,
+     lin.paternalGrandmotherName || null, lin.paternalGrandfatherName || null]
   );
 
   // Get the inserted pet
@@ -1822,8 +1840,8 @@ function startGestation(guildId, femalePetId, malePetId, forUserId) {
   const gestationEnd = Date.now() + gestationMs;
   
   db.run(
-    'UPDATE pets SET gestating = 1, gestation_end = ?, gestating_for_user = ? WHERE id = ?',
-    [gestationEnd, forUserId, femalePetId]
+    'UPDATE pets SET gestating = 1, gestation_end = ?, gestating_for_user = ?, gestating_male_id = ? WHERE id = ?',
+    [gestationEnd, forUserId, malePetId, femalePetId]
   );
   saveDatabase();
   return { success: true, gestationEnd };
@@ -1867,21 +1885,25 @@ function giveBirth(guildId, femalePetId, maleParent, requesterUserId) {
   
   const settings = getSettings(guildId);
   
+  // Get male parent from stored ID if not provided
+  const maleId = female.gestating_male_id;
+  const male = maleParent || (maleId ? getPet(maleId) : null);
+  
   // Determine if either parent is elder
   const femalePhase = getPhase(female.level);
-  const malePhase = maleParent ? getPhase(maleParent.level) : null;
+  const malePhase = male ? getPhase(male.level) : null;
   const hasElder = femalePhase.name === 'Elder' || (malePhase && malePhase.name === 'Elder');
   
   // Roll baby attributes
-  const babyRarity = rollBreedingRarity(female.rarity, maleParent?.rarity || female.rarity, hasElder);
-  const babyShiny = rollBreedingShiny(female.shiny, maleParent?.shiny || 0, settings);
-  const babyVariant = maleParent ? rollBreedingVariant(female, maleParent) : female.variant;
+  const babyRarity = rollBreedingRarity(female.rarity, male?.rarity || female.rarity, hasElder);
+  const babyShiny = rollBreedingShiny(female.shiny, male?.shiny || 0, settings);
+  const babyVariant = male ? rollBreedingVariant(female, male) : female.variant;
   const babySex = Math.random() < 0.5 ? 'M' : 'F';
   
   // Clear gestation status and set cooldown
   const cooldownEnd = now + (settings.breedingCooldownHours * 3600000);
   db.run(
-    'UPDATE pets SET gestating = 0, gestation_end = 0, gestating_for_user = NULL, breeding_cooldown_end = ? WHERE id = ?',
+    'UPDATE pets SET gestating = 0, gestation_end = 0, gestating_for_user = NULL, gestating_male_id = NULL, breeding_cooldown_end = ? WHERE id = ?',
     [cooldownEnd, femalePetId]
   );
   saveDatabase();
@@ -1895,6 +1917,9 @@ function giveBirth(guildId, femalePetId, maleParent, requesterUserId) {
     sex: babySex,
     hadElder: hasElder,
     motherName: female.name,
+    motherId: female.id,
+    fatherId: male?.id || null,
+    fatherName: male?.name || null,
   };
 }
 

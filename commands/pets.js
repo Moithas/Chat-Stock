@@ -167,6 +167,8 @@ module.exports = {
     if (customId.startsWith('pet_trade_accept_')) return handleTradeAccept(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_trade_decline_')) return handleTradeDecline(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_trade_confirm_')) return handleTradeConfirm(interaction, guildId, userId, settings);
+    // Lineage button
+    if (customId.startsWith('pet_lineage_')) return handleLineageView(interaction, guildId, userId, settings);
   },
 
   async handleSelectMenu(interaction) {
@@ -739,7 +741,27 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   // Source / age
   const ageMs = now - pet.born_at;
   const ageDays = Math.floor(ageMs / 86400000);
-  desc += `📅 Age: ${ageDays} day${ageDays !== 1 ? 's' : ''} | Source: ${pet.source}`;
+  desc += `📅 Age: ${ageDays} day${ageDays !== 1 ? 's' : ''} | Source: ${pet.source}\n`;
+
+  // Lineage info
+  if (pet.source === 'bred' && (pet.mother_id || pet.father_id)) {
+    // Use stored names (persist even if parents are deleted), fallback to lookup for older pets
+    let motherName = pet.mother_name;
+    let fatherName = pet.father_name;
+    if (!motherName && pet.mother_id) {
+      const mother = getPet(pet.mother_id);
+      motherName = mother ? mother.name : '(unknown)';
+    }
+    if (!fatherName && pet.father_id) {
+      const father = getPet(pet.father_id);
+      fatherName = father ? father.name : '(unknown)';
+    }
+    desc += `🧬 Parents: **${motherName || '(unknown)'}** × **${fatherName || '(unknown)'}**`;
+  } else if (pet.source === 'shop') {
+    desc += `🏠 Origin: Adopted from Shop`;
+  } else if (pet.source === 'egg') {
+    desc += `🥚 Origin: Hatched from Egg`;
+  }
 
   embed.setDescription(desc);
 
@@ -771,9 +793,10 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
   );
 
-  // Row 3: Breeding and Transfer buttons
+  // Row 3: Breeding, Transfer, and Lineage buttons
   const breedCheck = canBreed(pet, guildId);
   const transferCheck = canTransferPet(pet, guildId);
+  const hasLineage = pet.source === 'bred' && (pet.mother_id || pet.father_id);
   
   const row3 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -788,6 +811,12 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
       .setEmoji('🎁')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!settings.transferEnabled || !transferCheck.canTransfer),
+    new ButtonBuilder()
+      .setCustomId(`pet_lineage_${pet.id}_u_${userId}`)
+      .setLabel('Family Tree')
+      .setEmoji('🧬')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!hasLineage),
   );
 
   return interaction.update({ embeds: [embed], components: [row1, row2, row3], files });
@@ -2313,15 +2342,15 @@ async function handleBreedConfirm(interaction, guildId, userId, settings) {
   const isExotic = speciesData.type === 'exotic';
   const fee = getBreedingFee(guildId, highRarity, isExotic);
 
-  const removed = removeFromTotal(guildId, userId, fee);
-  if (!removed) {
-    return interaction.editReply({ content: `❌ Not enough ${currency}!`, embeds: [], components: [] });
+  const removed = await removeFromTotal(guildId, userId, fee, 'Breeding fee');
+  if (!removed || !removed.success) {
+    return interaction.editReply({ content: `❌ Not enough ${currency}! Need **${fee.toLocaleString()}** ${currency}.`, embeds: [], components: [] });
   }
 
   // Start gestation
   const result = startGestation(guildId, femaleId, maleId, userId);
   if (!result.success) {
-    addMoney(guildId, userId, fee, 'wallet'); // Refund
+    await addMoney(guildId, userId, fee, 'wallet'); // Refund
     return interaction.editReply({ content: `❌ ${result.reason}`, embeds: [], components: [] });
   }
 
@@ -2385,6 +2414,7 @@ async function handleGiveBirth(interaction, guildId, userId, settings) {
     .setDescription(
       `${shinyStr}${speciesData.emoji} ${sexEmoji} **${rarityData.name} ${speciesData.name}**\n\n` +
       `Mother: **${result.motherName}**\n` +
+      (result.fatherName ? `Father: **${result.fatherName}**\n` : '') +
       (result.hadElder ? '✨ Elder bonus applied!\n' : '') +
       `\nGive your new pet a name!`
     )
@@ -2399,9 +2429,13 @@ async function handleGiveBirth(interaction, guildId, userId, settings) {
     files.push(attachment);
   }
 
+  // Include mother/father IDs in the button customId
+  const motherId = result.motherId || 0;
+  const fatherId = result.fatherId || 0;
+
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`pet_birth_name_${result.species}_${result.rarity}_${result.sex}_${result.shiny}_${result.variant}_u_${userId}`)
+      .setCustomId(`pet_birth_name_${result.species}_${result.rarity}_${result.sex}_${result.shiny}_${result.variant}_${motherId}_${fatherId}_u_${userId}`)
       .setLabel('Name This Pet')
       .setEmoji('✏️')
       .setStyle(ButtonStyle.Success),
@@ -2412,7 +2446,7 @@ async function handleGiveBirth(interaction, guildId, userId, settings) {
 
 async function handleBirthName(interaction, guildId, userId, settings) {
   const parts = interaction.customId.split('_');
-  // pet_birth_name_<species>_<rarity>_<sex>_<shiny>_<variant>_u_<userId>
+  // pet_birth_name_<species>_<rarity>_<sex>_<shiny>_<variant>_<motherId>_<fatherId>_u_<userId>
   const species = parts[3];
   const speciesData = SPECIES[species];
 
@@ -2435,12 +2469,14 @@ async function handleBirthName(interaction, guildId, userId, settings) {
 
 async function handleBirthNameModal(interaction, guildId, userId, settings) {
   const parts = interaction.customId.split('_');
-  // modal_birth_name_<species>_<rarity>_<sex>_<shiny>_<variant>_u_<userId>
+  // modal_birth_name_<species>_<rarity>_<sex>_<shiny>_<variant>_<motherId>_<fatherId>_u_<userId>
   const species = parts[3];
   const rarity = parts[4];
   const sex = parts[5];
   const shiny = parseInt(parts[6]);
   const variant = parseInt(parts[7]);
+  const motherId = parseInt(parts[8]) || null;
+  const fatherId = parseInt(parts[9]) || null;
   const petName = interaction.fields.getTextInputValue('pet_name').trim();
 
   if (!petName || petName.length > 24) {
@@ -2452,8 +2488,26 @@ async function handleBirthNameModal(interaction, guildId, userId, settings) {
   const speciesData = SPECIES[species];
   if (!speciesData) return interaction.editReply({ content: '❌ Invalid pet data.', embeds: [], components: [], files: [] });
 
-  // Create the pet
-  const pet = adoptPet(guildId, userId, species, petName, rarity, sex, shiny, 'bred', variant);
+  // Look up parents to get their names and their parents' names (grandparents)
+  const mother = motherId ? getPet(motherId) : null;
+  const father = fatherId ? getPet(fatherId) : null;
+
+  // Build full lineage object with grandparent names
+  const lineage = {
+    motherId,
+    fatherId,
+    motherName: mother ? mother.name : null,
+    fatherName: father ? father.name : null,
+    // Grandparents from mother's side
+    maternalGrandmotherName: mother ? mother.mother_name : null,
+    maternalGrandfatherName: mother ? mother.father_name : null,
+    // Grandparents from father's side
+    paternalGrandmotherName: father ? father.mother_name : null,
+    paternalGrandfatherName: father ? father.father_name : null,
+  };
+
+  // Create the pet with full lineage info
+  const pet = adoptPet(guildId, userId, species, petName, rarity, sex, shiny, 'bred', variant, lineage);
 
   const rarityData = RARITIES[rarity];
   const sexEmoji = sex === 'M' ? '♂️' : '♀️';
@@ -2998,30 +3052,42 @@ async function handleStudFeeAccept(interaction, guildId, userId, settings) {
   const totalCost = studFee + breedingFee;
 
   // Check requester can afford everything
-  const requesterBalance = await getBalance(guildId, requesterId);
+  const requesterBalance = getBalance(guildId, requesterId);
   if (requesterBalance.total < totalCost) {
     deleteBreedingRequest(requestId);
-    await interaction.update({ content: `❌ <@${requesterId}> can't afford **${totalCost.toLocaleString()}** ${currency}`, embeds: [], components: [] });
+    await interaction.update({ content: `❌ <@${requesterId}> can't afford **${totalCost.toLocaleString()}** ${currency} (have **${requesterBalance.total.toLocaleString()}**)`, embeds: [], components: [] });
+    return;
+  }
+
+  // Charge breeding fee first
+  const breedingResult = await removeFromTotal(guildId, requesterId, breedingFee, 'Breeding fee');
+  if (!breedingResult || !breedingResult.success) {
+    deleteBreedingRequest(requestId);
+    await interaction.update({ content: `❌ Failed to charge breeding fee. <@${requesterId}> may not have enough ${currency}.`, embeds: [], components: [] });
     return;
   }
 
   // Transfer stud fee: requester → partner
   if (studFee > 0) {
-    await removeFromTotal(guildId, requesterId, studFee);
-    await addMoney(guildId, partnerId, studFee);
+    const studResult = await removeFromTotal(guildId, requesterId, studFee, 'Stud fee');
+    if (!studResult || !studResult.success) {
+      // Refund the breeding fee
+      await addMoney(guildId, requesterId, breedingFee, 'wallet');
+      deleteBreedingRequest(requestId);
+      await interaction.update({ content: `❌ Failed to charge stud fee. <@${requesterId}> may not have enough ${currency}.`, embeds: [], components: [] });
+      return;
+    }
+    await addMoney(guildId, partnerId, studFee, 'wallet');
   }
-
-  // Charge breeding fee
-  await removeFromTotal(guildId, requesterId, breedingFee);
 
   // Start gestation - baby goes to REQUESTER
   const result = startGestation(guildId, female.id, male.id, requesterId);
   if (!result.success) {
     // Refund everything
-    await addMoney(guildId, requesterId, breedingFee);
+    await addMoney(guildId, requesterId, breedingFee, 'wallet');
     if (studFee > 0) {
-      await addMoney(guildId, requesterId, studFee);
-      await removeFromTotal(guildId, partnerId, studFee);
+      await addMoney(guildId, requesterId, studFee, 'wallet');
+      await removeFromTotal(guildId, partnerId, studFee, 'Stud fee refund');
     }
     deleteBreedingRequest(requestId);
     await interaction.update({ content: `❌ ${result.reason}`, embeds: [], components: [] });
@@ -3876,4 +3942,119 @@ async function handleTradeDecline(interaction, guildId, userId, settings) {
     .setTimestamp();
 
   await interaction.editReply({ content: '', embeds: [embed], components: [] });
+}
+
+// ================== LINEAGE / FAMILY TREE ==================
+
+async function handleLineageView(interaction, guildId, userId, settings) {
+  const petId = parsePetIdFromCustomId(interaction.customId);
+  const pet = getPet(petId);
+
+  if (!pet) {
+    return interaction.reply({ content: '❌ Pet not found.', flags: 64 });
+  }
+
+  await interaction.deferUpdate();
+
+  const speciesData = SPECIES[pet.species];
+  const rarityData = RARITIES[pet.rarity];
+
+  // Build the family tree
+  let treeDesc = '';
+
+  // The pet itself
+  const sexEmoji = pet.sex === 'M' ? '♂️' : '♀️';
+  const shinyStr = pet.shiny ? '✨ ' : '';
+  treeDesc += `**${shinyStr}${speciesData.emoji} ${pet.name}** ${sexEmoji}\n`;
+  treeDesc += `${rarityData.name} ${speciesData.name}\n\n`;
+
+  // Parents
+  treeDesc += '**─── Parents ───**\n';
+  const motherName = pet.mother_name || '(unknown)';
+  const fatherName = pet.father_name || '(unknown)';
+  
+  // Try to get parent species if they still exist
+  const mother = pet.mother_id ? getPet(pet.mother_id) : null;
+  const father = pet.father_id ? getPet(pet.father_id) : null;
+  
+  const motherSpecies = mother ? SPECIES[mother.species] : null;
+  const fatherSpecies = father ? SPECIES[father.species] : null;
+  
+  treeDesc += `👩 Mother: **${motherName}**`;
+  if (motherSpecies) treeDesc += ` ${motherSpecies.emoji}`;
+  treeDesc += '\n';
+  
+  treeDesc += `👨 Father: **${fatherName}**`;
+  if (fatherSpecies) treeDesc += ` ${fatherSpecies.emoji}`;
+  treeDesc += '\n\n';
+
+  // Grandparents (maternal side)
+  const hasMaternalGrandparents = pet.maternal_grandmother_name || pet.maternal_grandfather_name;
+  const hasPaternalGrandparents = pet.paternal_grandmother_name || pet.paternal_grandfather_name;
+
+  if (hasMaternalGrandparents || hasPaternalGrandparents) {
+    treeDesc += '**─── Grandparents ───**\n';
+    
+    if (hasMaternalGrandparents) {
+      treeDesc += `*Maternal side (${motherName}):*\n`;
+      if (pet.maternal_grandmother_name) {
+        treeDesc += `  👵 Grandmother: **${pet.maternal_grandmother_name}**\n`;
+      }
+      if (pet.maternal_grandfather_name) {
+        treeDesc += `  👴 Grandfather: **${pet.maternal_grandfather_name}**\n`;
+      }
+    }
+    
+    if (hasPaternalGrandparents) {
+      treeDesc += `*Paternal side (${fatherName}):*\n`;
+      if (pet.paternal_grandmother_name) {
+        treeDesc += `  👵 Grandmother: **${pet.paternal_grandmother_name}**\n`;
+      }
+      if (pet.paternal_grandfather_name) {
+        treeDesc += `  👴 Grandfather: **${pet.paternal_grandfather_name}**\n`;
+      }
+    }
+  }
+
+  // Count generations
+  let generations = 1;
+  if (pet.mother_name || pet.father_name) generations = 2;
+  if (hasMaternalGrandparents || hasPaternalGrandparents) generations = 3;
+
+  const embed = new EmbedBuilder()
+    .setColor(rarityData.color)
+    .setTitle(`🧬 Family Tree: ${pet.name}`)
+    .setDescription(treeDesc)
+    .setFooter({ text: `${generations} generation${generations !== 1 ? 's' : ''} of lineage recorded` })
+    .setTimestamp();
+
+  // Attach pet image
+  const phase = getPhase(pet.level);
+  const petImage = await getPetImage(pet.species, phase.name.toLowerCase(), pet.variant || 1, pet.shiny);
+  let files = [];
+  if (petImage) {
+    const attachment = new AttachmentBuilder(petImage.data, { name: petImage.fileName });
+    embed.setThumbnail(`attachment://${petImage.fileName}`);
+    files.push(attachment);
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`pet_view_${pet.id}_u_${userId}`)
+      .setLabel('Back to Pet')
+      .setEmoji('◀️')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`pet_panel_mypets_u_${userId}`)
+      .setLabel('All Pets')
+      .setEmoji('🐾')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`pet_dismiss_u_${userId}`)
+      .setLabel('Dismiss')
+      .setEmoji('❌')
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  await interaction.editReply({ embeds: [embed], components: [row], files });
 }
