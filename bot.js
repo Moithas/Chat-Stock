@@ -1236,7 +1236,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   // Handle pet panel user select menus
-  if (interaction.isUserSelectMenu() && interaction.customId.startsWith('pet_stud_targetuser_')) {
+  if (interaction.isUserSelectMenu() && (interaction.customId.startsWith('pet_stud_targetuser_') || interaction.customId.startsWith('pet_transfer_userselect_'))) {
     try {
       const { handleUserSelectMenu } = require('./commands/pets');
       await handleUserSelectMenu(interaction);
