@@ -20,7 +20,7 @@ const {
   getBreedingFee, canBreed, canBreedTogether, startGestation,
   getGestatingPets, getMyGestatingPets, giveBirth,
   createBreedingRequest, getBreedingRequest, getPendingBreedingRequests,
-  getOutgoingBreedingRequests, updateBreedingRequestStatus, deleteBreedingRequest,
+  getOutgoingBreedingRequests, updateBreedingRequestStatus, updateBreedingRequestStudFee, deleteBreedingRequest,
   cleanupExpiredBreedingRequests, RARITY_ORDER,
   // Transfer
   canTransferPet, transferPet,
@@ -2893,9 +2893,7 @@ async function handleStudAcceptSubmit(interaction, guildId, userId, settings) {
   }
 
   // Update the request with the stud fee (store but don't transfer yet)
-  // We'll store fee in the request for when requester accepts
-  const db = require('better-sqlite3')('./data/economy.db');
-  db.prepare('UPDATE breeding_requests SET stud_fee = ? WHERE id = ?').run(studFee, requestId);
+  updateBreedingRequestStudFee(requestId, studFee);
 
   // Update the original message to show it's been responded to
   await interaction.update({ 

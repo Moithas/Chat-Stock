@@ -1964,6 +1964,12 @@ function updateBreedingRequestStatus(requestId, status) {
   saveDatabase();
 }
 
+function updateBreedingRequestStudFee(requestId, studFee) {
+  if (!db) return;
+  db.run('UPDATE breeding_requests SET stud_fee = ? WHERE id = ?', [studFee, requestId]);
+  saveDatabase();
+}
+
 function deleteBreedingRequest(requestId) {
   if (!db) return;
   db.run('DELETE FROM breeding_requests WHERE id = ?', [requestId]);
@@ -2242,6 +2248,7 @@ module.exports = {
   getPendingBreedingRequests,
   getOutgoingBreedingRequests,
   updateBreedingRequestStatus,
+  updateBreedingRequestStudFee,
   deleteBreedingRequest,
   cleanupExpiredBreedingRequests,
   // Transfer
