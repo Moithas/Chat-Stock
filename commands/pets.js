@@ -2791,24 +2791,6 @@ async function handleStudPartnerSelect(interaction, guildId, userId, settings) {
     )
     .setTimestamp();
 
-  // Try to DM the target user
-  try {
-    const targetUser = await interaction.client.users.fetch(targetUserId);
-    const dmEmbed = new EmbedBuilder()
-      .setColor(0xFF69B4)
-      .setTitle('💌 New Breeding Request!')
-      .setDescription(
-        `<@${userId}> wants to breed their **${myPet.name}** with your **${theirPet.name}**!\n\n` +
-        `${speciesData.emoji} **${speciesData.name}**\n\n` +
-        `Use \`/pets\` → Breeding Center to accept (and set a fee) or decline.`
-      )
-      .setTimestamp();
-    
-    await targetUser.send({ embeds: [dmEmbed] }).catch(() => {});
-  } catch (e) {
-    // DM failed, that's okay
-  }
-
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel('Breeding Center').setEmoji('💕').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Main Panel').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
@@ -2992,22 +2974,6 @@ async function handleStudAcceptSubmit(interaction, guildId, userId, settings) {
     new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel('Breeding Center').setEmoji('💕').setStyle(ButtonStyle.Primary),
   );
 
-  // Notify the requester
-  try {
-    const requester = await interaction.client.users.fetch(requesterId);
-    const dmEmbed = new EmbedBuilder()
-      .setColor(0x2ECC71)
-      .setTitle('✅ Breeding Request Accepted!')
-      .setDescription(
-        `<@${partnerId}> accepted your breeding request!\n\n` +
-        `${speciesData.emoji} **${male.name}** ♂ × **${female.name}** ♀\n` +
-        (studFee > 0 ? `💰 Stud Fee: **${studFee.toLocaleString()}** ${currency}\n` : '') +
-        `💰 Breeding Fee: **${breedingFee.toLocaleString()}** ${currency}\n` +
-        `🤰 Gestating... Birth in ${Math.round(settings.gestationHours)} hours.`
-      );
-    await requester.send({ embeds: [dmEmbed] }).catch(() => {});
-  } catch (e) {}
-
   await interaction.editReply({ embeds: [embed], components: [row], files: [] });
 }
 
@@ -3045,16 +3011,6 @@ async function handleStudDecline(interaction, guildId, userId, settings) {
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel('Breeding Center').setEmoji('💕').setStyle(ButtonStyle.Primary),
   );
-
-  // Notify the requester
-  try {
-    const requester = await interaction.client.users.fetch(request.requester_id);
-    const dmEmbed = new EmbedBuilder()
-      .setColor(0xE74C3C)
-      .setTitle('❌ Breeding Request Declined')
-      .setDescription(`<@${userId}> declined your breeding request for **${petNames}**.`);
-    await requester.send({ embeds: [dmEmbed] }).catch(() => {});
-  } catch (e) {}
 
   await interaction.editReply({ embeds: [embed], components: [row], files: [] });
 }
