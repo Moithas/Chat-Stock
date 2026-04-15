@@ -1219,7 +1219,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   // Handle pet panel select menus
-  if (interaction.isStringSelectMenu() && (interaction.customId.startsWith('pet_select_') || interaction.customId.startsWith('pet_shop_select_') || interaction.customId.startsWith('pet_breed_select_') || interaction.customId.startsWith('pet_breed_partner_select_') || interaction.customId.startsWith('pet_transfer_target_'))) {
+  if (interaction.isStringSelectMenu() && (interaction.customId.startsWith('pet_select_') || interaction.customId.startsWith('pet_shop_select_') || interaction.customId.startsWith('pet_breed_select_') || interaction.customId.startsWith('pet_breed_partner_select_') || interaction.customId.startsWith('pet_stud_mypet_') || interaction.customId.startsWith('pet_stud_partner_') || interaction.customId.startsWith('pet_transfer_target_'))) {
     try {
       const { handleSelectMenu } = require('./commands/pets');
       await handleSelectMenu(interaction);

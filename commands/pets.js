@@ -144,8 +144,10 @@ module.exports = {
     if (customId.startsWith('pet_birth_name_')) return handleBirthName(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_gestating_')) return showGestatingPanel(interaction, guildId, userId, settings);
     // Cross-player breeding
-    if (customId.startsWith('pet_stud_accept_')) return handleStudAccept(interaction, guildId, settings);
-    if (customId.startsWith('pet_stud_decline_')) return handleStudDecline(interaction, guildId, settings);
+    if (customId.startsWith('pet_stud_request_')) return showStudRequestPanel(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_stud_select_')) return handleStudSelectPet(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_stud_accept_')) return handleStudAccept(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_stud_decline_')) return handleStudDecline(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_stud_fee_')) return handleStudFeeModal(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_request_')) return handleBreedRequest(interaction, guildId, userId, settings);
     // Transfer buttons
@@ -167,6 +169,8 @@ module.exports = {
     if (customId.startsWith('pet_shop_select_')) return handleShopSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_select_')) return handleBreedSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_partner_select_')) return handleBreedPartnerSelect(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_stud_mypet_')) return handleStudMyPetSelect(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_stud_partner_')) return handleStudPartnerSelect(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_transfer_target_')) return handleTransferTargetSelect(interaction, guildId, userId, settings);
   },
 
@@ -2140,11 +2144,68 @@ async function showBreedingPanel(interaction, guildId, userId, settings, initial
     }
   }
 
+  // Cleanup expired requests
+  cleanupExpiredBreedingRequests(guildId);
+  
+  // Show pending incoming requests
+  const incomingRequests = getPendingBreedingRequests(guildId, userId);
+  if (incomingRequests.length > 0) {
+    const reqList = incomingRequests.slice(0, 5).map(req => {
+      const myPet = getPet(req.partner_pet_id);
+      const theirPet = getPet(req.requester_pet_id);
+      if (!myPet || !theirPet) return null;
+      const speciesData = SPECIES[myPet.species];
+      const timeLeft = req.expires_at - Date.now();
+      return `${speciesData.emoji} <@${req.requester_id}>'s **${theirPet.name}** wants to breed with your **${myPet.name}**\n` +
+             `💰 Stud Fee: **${req.stud_fee.toLocaleString()}** ${currency} | ⏳ ${formatCooldown(timeLeft)}`;
+    }).filter(Boolean).join('\n\n');
+    if (reqList) {
+      embed.addFields({ name: '📬 Incoming Requests', value: reqList });
+    }
+  }
+
+  // Show outgoing requests
+  const outgoingRequests = getOutgoingBreedingRequests(guildId, userId);
+  if (outgoingRequests.length > 0) {
+    const outList = outgoingRequests.slice(0, 3).map(req => {
+      const myPet = getPet(req.requester_pet_id);
+      const theirPet = getPet(req.partner_pet_id);
+      if (!myPet || !theirPet) return null;
+      const speciesData = SPECIES[myPet.species];
+      const timeLeft = req.expires_at - Date.now();
+      return `${speciesData.emoji} Your **${myPet.name}** → <@${req.partner_id}>'s **${theirPet.name}** | ⏳ ${formatCooldown(timeLeft)}`;
+    }).filter(Boolean).join('\n');
+    if (outList) {
+      embed.addFields({ name: '📤 Outgoing Requests', value: outList });
+    }
+  }
+
   const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_stud_request_u_${userId}`).setLabel('Request Stud').setEmoji('💌').setStyle(ButtonStyle.Primary).setDisabled(breedablePets.length === 0),
     new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('My Pets').setEmoji('🐾').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Main Panel').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
   );
   rows.push(navRow);
+
+  // Add accept/decline buttons for incoming requests
+  if (incomingRequests.length > 0) {
+    const reqRow = new ActionRowBuilder();
+    incomingRequests.slice(0, 2).forEach(req => {
+      reqRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`pet_stud_accept_${req.id}_u_${userId}`)
+          .setLabel('Accept')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`pet_stud_decline_${req.id}_u_${userId}`)
+          .setLabel('Decline')
+          .setEmoji('❌')
+          .setStyle(ButtonStyle.Danger)
+      );
+    });
+    rows.splice(rows.length - 1, 0, reqRow); // Insert before nav row
+  }
 
   await interaction.editReply({ embeds: [embed], components: rows, files: [] });
 }
@@ -2447,29 +2508,526 @@ async function handleBirthNameModal(interaction, guildId, userId, settings) {
   }
 }
 
-// Placeholder functions for cross-player breeding (can be expanded later)
-async function handleBreedPartnerSelect(interaction, guildId, userId, settings) {
-  return interaction.reply({ content: '🚧 Cross-player breeding coming soon!', flags: 64 });
+// ================== CROSS-PLAYER BREEDING (STUD SERVICE) ==================
+
+// Step 1: Show panel to select your pet for stud request
+async function showStudRequestPanel(interaction, guildId, userId, settings) {
+  if (!settings.breedingEnabled) {
+    return interaction.reply({ content: '❌ Breeding is not enabled on this server.', flags: 64 });
+  }
+
+  await interaction.deferUpdate();
+  const currency = getCurrency(guildId);
+  const pets = getUserPets(guildId, userId);
+  
+  // Filter breedable pets (Adult/Elder, not gestating, not on cooldown if female)
+  const breedablePets = pets.filter(p => {
+    const phase = getPhase(p.level);
+    if (!phase.canBreed || p.gestating) return false;
+    if (p.sex === 'F') {
+      const now = Date.now();
+      if (p.breeding_cooldown_end && now < p.breeding_cooldown_end) return false;
+    }
+    return true;
+  });
+
+  const embed = new EmbedBuilder()
+    .setColor(0xFF69B4)
+    .setTitle('💌 Request Stud Service')
+    .setDescription(
+      'Request to breed one of your pets with another player\'s pet.\n\n' +
+      '**How it works:**\n' +
+      '1. Select your pet below\n' +
+      '2. Enter the other player\'s User ID and stud fee\n' +
+      '3. Select their compatible pet\n' +
+      '4. They can accept or decline\n\n' +
+      '*The baby goes to the female\'s owner. Stud fee goes to the male\'s owner.*'
+    )
+    .setTimestamp();
+
+  if (breedablePets.length === 0) {
+    embed.addFields({ name: 'Your Pets', value: 'No breedable pets available. Need Adult/Elder pets not on cooldown.' });
+  }
+
+  const rows = [];
+
+  if (breedablePets.length > 0) {
+    const options = breedablePets.slice(0, 25).map(p => {
+      const speciesData = SPECIES[p.species];
+      const rarityData = RARITIES[p.rarity];
+      const sexEmoji = p.sex === 'M' ? '♂' : '♀';
+      return {
+        label: `${p.name} ${sexEmoji}`,
+        description: `${rarityData.name} ${speciesData.name} L${p.level}`,
+        value: `${p.id}`,
+        emoji: speciesData.emoji,
+      };
+    });
+
+    const selectRow = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`pet_stud_mypet_u_${userId}`)
+        .setPlaceholder('Select your pet...')
+        .addOptions(options)
+    );
+    rows.push(selectRow);
+  }
+
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel('Back to Breeding').setEmoji('💕').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Main Panel').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+  );
+  rows.push(navRow);
+
+  await interaction.editReply({ embeds: [embed], components: rows, files: [] });
 }
 
-async function handleStudAccept(interaction, guildId, settings) {
-  return interaction.reply({ content: '🚧 Cross-player breeding coming soon!', flags: 64 });
-}
-
-async function handleStudDecline(interaction, guildId, settings) {
-  return interaction.reply({ content: '🚧 Cross-player breeding coming soon!', flags: 64 });
-}
-
-async function handleStudFeeModal(interaction, guildId, userId, settings) {
-  return interaction.reply({ content: '🚧 Cross-player breeding coming soon!', flags: 64 });
-}
-
+// Handle "Request Stud" button (legacy)
 async function handleBreedRequest(interaction, guildId, userId, settings) {
-  return interaction.reply({ content: '🚧 Cross-player breeding coming soon!', flags: 64 });
+  return showStudRequestPanel(interaction, guildId, userId, settings);
 }
 
+// Handle deprecated breed partner select
+async function handleBreedPartnerSelect(interaction, guildId, userId, settings) {
+  return showStudRequestPanel(interaction, guildId, userId, settings);
+}
+
+// Step 2: User selected their pet, now show modal to enter target user ID and stud fee
+async function handleStudMyPetSelect(interaction, guildId, userId, settings) {
+  const petId = parseInt(interaction.values[0]);
+  const pet = getPet(petId);
+  
+  if (!pet || pet.owner_id !== userId) {
+    return interaction.reply({ content: '❌ Pet not found or not yours.', flags: 64 });
+  }
+
+  const check = canBreed(pet, guildId);
+  if (!check.canBreed) {
+    return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
+  }
+
+  // Show modal to enter target user ID and stud fee
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_stud_fee_${petId}_u_${userId}`)
+    .setTitle(`Stud Request: ${pet.name}`);
+
+  const targetInput = new TextInputBuilder()
+    .setCustomId('target_user')
+    .setLabel('Target User ID (right-click → Copy ID)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder('e.g. 123456789012345678');
+
+  const feeInput = new TextInputBuilder()
+    .setCustomId('stud_fee')
+    .setLabel('Stud Fee (you pay if your pet is female)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setValue('0')
+    .setPlaceholder('0');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(targetInput),
+    new ActionRowBuilder().addComponents(feeInput)
+  );
+
+  await interaction.showModal(modal);
+}
+
+// Step 3: Handle stud fee modal submit - query target user's pets and show selection
 async function handleStudFeeSubmit(interaction, guildId, userId, settings) {
-  return interaction.reply({ content: '🚧 Cross-player breeding coming soon!', flags: 64 });
+  const customId = interaction.customId;
+  // modal_stud_fee_<petId>_u_<userId>
+  const parts = customId.split('_');
+  const petId = parseInt(parts[3]);
+  
+  const myPet = getPet(petId);
+  if (!myPet || myPet.owner_id !== userId) {
+    return interaction.reply({ content: '❌ Pet not found.', flags: 64 });
+  }
+
+  const targetUserId = interaction.fields.getTextInputValue('target_user').trim();
+  const studFee = parseInt(interaction.fields.getTextInputValue('stud_fee').replace(/,/g, '')) || 0;
+
+  if (!targetUserId.match(/^\d{17,20}$/)) {
+    return interaction.reply({ content: '❌ Invalid User ID format. Right-click on the user and select "Copy User ID".', flags: 64 });
+  }
+
+  if (targetUserId === userId) {
+    return interaction.reply({ content: '❌ You can\'t request to breed with yourself. Use the normal breeding panel.', flags: 64 });
+  }
+
+  if (studFee < 0) {
+    return interaction.reply({ content: '❌ Stud fee cannot be negative.', flags: 64 });
+  }
+
+  if (settings.maxStudFee > 0 && studFee > settings.maxStudFee) {
+    return interaction.reply({ content: `❌ Max stud fee on this server is ${settings.maxStudFee.toLocaleString()}.`, flags: 64 });
+  }
+
+  // If my pet is female, I need to pay the fee - check balance
+  if (myPet.sex === 'F') {
+    const balance = await getBalance(guildId, userId);
+    if (balance.total < studFee) {
+      const currency = getCurrency(guildId);
+      return interaction.reply({ 
+        content: `❌ You need **${studFee.toLocaleString()}** ${currency} to pay the stud fee, but only have **${Math.round(balance.total).toLocaleString()}**.`, 
+        flags: 64 
+      });
+    }
+  }
+
+  await interaction.deferUpdate();
+  const currency = getCurrency(guildId);
+
+  // Get target user's pets
+  const targetPets = getUserPets(guildId, targetUserId);
+  
+  // Find compatible pets (same species, opposite sex, breedable)
+  const oppositeSex = myPet.sex === 'M' ? 'F' : 'M';
+  const compatiblePets = targetPets.filter(p => {
+    if (p.species !== myPet.species) return false;
+    if (p.sex !== oppositeSex) return false;
+    const phase = getPhase(p.level);
+    if (!phase.canBreed || p.gestating) return false;
+    if (p.sex === 'F') {
+      const now = Date.now();
+      if (p.breeding_cooldown_end && now < p.breeding_cooldown_end) return false;
+    }
+    return true;
+  });
+
+  if (compatiblePets.length === 0) {
+    const embed = new EmbedBuilder()
+      .setColor(0xE74C3C)
+      .setTitle('❌ No Compatible Pets')
+      .setDescription(
+        `<@${targetUserId}> has no compatible pets for breeding.\n\n` +
+        `Looking for: **${SPECIES[myPet.species].name}** ${oppositeSex === 'M' ? '♂️ Male' : '♀️ Female'}\n` +
+        `(Adult/Elder, not gestating or on cooldown)`
+      );
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+    );
+
+    return interaction.editReply({ embeds: [embed], components: [row], files: [] });
+  }
+
+  // Show compatible pets to select
+  const embed = new EmbedBuilder()
+    .setColor(0xFF69B4)
+    .setTitle('💕 Select Partner Pet')
+    .setDescription(
+      `Your pet: **${myPet.name}** (${myPet.sex === 'M' ? '♂️' : '♀️'})\n` +
+      `Target: <@${targetUserId}>\n` +
+      `Stud Fee: **${studFee.toLocaleString()}** ${currency}\n\n` +
+      `Select a compatible pet from their collection:`
+    )
+    .setTimestamp();
+
+  const options = compatiblePets.slice(0, 25).map(p => {
+    const speciesData = SPECIES[p.species];
+    const rarityData = RARITIES[p.rarity];
+    const sexEmoji = p.sex === 'M' ? '♂' : '♀';
+    return {
+      label: `${p.name} ${sexEmoji}`,
+      description: `${rarityData.name} ${speciesData.name} L${p.level}`,
+      value: `${myPet.id}_${p.id}_${studFee}_${targetUserId}`,
+      emoji: speciesData.emoji,
+    };
+  });
+
+  const selectRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`pet_stud_partner_u_${userId}`)
+      .setPlaceholder('Select their pet...')
+      .addOptions(options)
+  );
+
+  const navRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_stud_request_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+  );
+
+  await interaction.editReply({ embeds: [embed], components: [selectRow, navRow], files: [] });
+}
+
+// Step 4: Create the breeding request
+async function handleStudPartnerSelect(interaction, guildId, userId, settings) {
+  const [myPetIdStr, theirPetIdStr, studFeeStr, targetUserId] = interaction.values[0].split('_');
+  const myPetId = parseInt(myPetIdStr);
+  const theirPetId = parseInt(theirPetIdStr);
+  const studFee = parseInt(studFeeStr);
+
+  const myPet = getPet(myPetId);
+  const theirPet = getPet(theirPetId);
+
+  if (!myPet || myPet.owner_id !== userId) {
+    return interaction.reply({ content: '❌ Your pet not found.', flags: 64 });
+  }
+
+  if (!theirPet || theirPet.owner_id !== targetUserId) {
+    return interaction.reply({ content: '❌ Their pet not found.', flags: 64 });
+  }
+
+  // Verify breeding compatibility
+  const check = canBreedTogether(myPet, theirPet);
+  if (!check.canBreed) {
+    return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
+  }
+
+  // Check for existing pending request
+  const outgoing = getOutgoingBreedingRequests(guildId, userId);
+  const existingRequest = outgoing.find(r => 
+    (r.requester_pet_id === myPetId && r.partner_pet_id === theirPetId) ||
+    (r.partner_pet_id === myPetId && r.requester_pet_id === theirPetId)
+  );
+  if (existingRequest) {
+    return interaction.reply({ content: '❌ You already have a pending request for this breeding pair.', flags: 64 });
+  }
+
+  await interaction.deferUpdate();
+  const currency = getCurrency(guildId);
+
+  // Create the request
+  const request = createBreedingRequest(guildId, userId, myPetId, targetUserId, theirPetId, studFee);
+  if (!request) {
+    return interaction.editReply({ content: '❌ Failed to create breeding request.', embeds: [], components: [] });
+  }
+
+  const speciesData = SPECIES[myPet.species];
+  const female = myPet.sex === 'F' ? myPet : theirPet;
+  const male = myPet.sex === 'M' ? myPet : theirPet;
+  const feeText = studFee > 0 ? `💰 **${studFee.toLocaleString()}** ${currency}` : '🆓 Free';
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ECC71)
+    .setTitle('✅ Breeding Request Sent!')
+    .setDescription(
+      `${speciesData.emoji} **${myPet.name}** × **${theirPet.name}**\n\n` +
+      `Request sent to <@${targetUserId}>!\n` +
+      `Stud Fee: ${feeText}\n` +
+      `Expires in 24 hours.\n\n` +
+      `*They will see this in their Breeding Center.*`
+    )
+    .setTimestamp();
+
+  // Try to DM the target user
+  try {
+    const targetUser = await interaction.client.users.fetch(targetUserId);
+    const dmEmbed = new EmbedBuilder()
+      .setColor(0xFF69B4)
+      .setTitle('💌 New Breeding Request!')
+      .setDescription(
+        `<@${userId}> wants to breed their **${myPet.name}** with your **${theirPet.name}**!\n\n` +
+        `${speciesData.emoji} **${speciesData.name}** — ${male.name} ♂ × ${female.name} ♀\n` +
+        `Stud Fee: ${feeText}\n\n` +
+        `Use \`/pets\` → Breeding Center to accept or decline.`
+      )
+      .setTimestamp();
+    
+    await targetUser.send({ embeds: [dmEmbed] }).catch(() => {});
+  } catch (e) {
+    // DM failed, that's okay
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel('Breeding Center').setEmoji('💕').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Main Panel').setEmoji('◀️').setStyle(ButtonStyle.Secondary),
+  );
+
+  await interaction.editReply({ embeds: [embed], components: [row], files: [] });
+}
+
+// Handle accepting a stud request
+async function handleStudAccept(interaction, guildId, userId, settings) {
+  const customId = interaction.customId;
+  // pet_stud_accept_<requestId>_u_<userId>
+  const parts = customId.split('_');
+  const requestId = parseInt(parts[3]);
+
+  const request = getBreedingRequest(requestId);
+  if (!request) {
+    return interaction.reply({ content: '❌ Request not found or expired.', flags: 64 });
+  }
+
+  if (request.partner_id !== userId) {
+    return interaction.reply({ content: '❌ This request is not for you.', flags: 64 });
+  }
+
+  if (request.status !== 'pending') {
+    return interaction.reply({ content: '❌ This request has already been processed.', flags: 64 });
+  }
+
+  const requesterPet = getPet(request.requester_pet_id);
+  const partnerPet = getPet(request.partner_pet_id);
+
+  if (!requesterPet || !partnerPet) {
+    deleteBreedingRequest(requestId);
+    return interaction.reply({ content: '❌ One of the pets no longer exists.', flags: 64 });
+  }
+
+  // Verify still breedable
+  const check = canBreedTogether(requesterPet, partnerPet);
+  if (!check.canBreed) {
+    deleteBreedingRequest(requestId);
+    return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
+  }
+
+  await interaction.deferUpdate();
+  const currency = getCurrency(guildId);
+  const studFee = request.stud_fee;
+
+  // Determine who pays and who receives
+  const female = requesterPet.sex === 'F' ? requesterPet : partnerPet;
+  const male = requesterPet.sex === 'M' ? requesterPet : partnerPet;
+  const femaleOwnerId = female.owner_id;
+  const maleOwnerId = male.owner_id;
+
+  // Transfer stud fee if applicable
+  if (studFee > 0) {
+    const payerBalance = await getBalance(guildId, femaleOwnerId);
+    if (payerBalance.total < studFee) {
+      deleteBreedingRequest(requestId);
+      return interaction.editReply({ 
+        content: `❌ <@${femaleOwnerId}> doesn't have enough to pay the **${studFee.toLocaleString()}** ${currency} stud fee.`,
+        embeds: [], components: []
+      });
+    }
+
+    // Transfer fee
+    await removeFromTotal(guildId, femaleOwnerId, studFee);
+    await addMoney(guildId, maleOwnerId, studFee);
+  }
+
+  // Calculate breeding fee based on highest rarity
+  const highRarity = RARITY_ORDER.indexOf(male.rarity) >= RARITY_ORDER.indexOf(female.rarity) ? male.rarity : female.rarity;
+  const speciesData = SPECIES[female.species];
+  const isExotic = speciesData.type === 'exotic';
+  const breedingFee = getBreedingFee(guildId, highRarity, isExotic);
+
+  // Charge breeding fee to female's owner
+  const feeBalance = await getBalance(guildId, femaleOwnerId);
+  if (feeBalance.total < breedingFee) {
+    // Refund stud fee if applicable
+    if (studFee > 0) {
+      await addMoney(guildId, femaleOwnerId, studFee);
+      await removeFromTotal(guildId, maleOwnerId, studFee);
+    }
+    deleteBreedingRequest(requestId);
+    return interaction.editReply({
+      content: `❌ <@${femaleOwnerId}> doesn't have enough to pay the **${breedingFee.toLocaleString()}** ${currency} breeding fee.`,
+      embeds: [], components: []
+    });
+  }
+
+  await removeFromTotal(guildId, femaleOwnerId, breedingFee);
+
+  // Start gestation
+  const result = startGestation(guildId, female.id, male.id, femaleOwnerId);
+  if (!result.success) {
+    // Refund everything
+    await addMoney(guildId, femaleOwnerId, breedingFee);
+    if (studFee > 0) {
+      await addMoney(guildId, femaleOwnerId, studFee);
+      await removeFromTotal(guildId, maleOwnerId, studFee);
+    }
+    deleteBreedingRequest(requestId);
+    return interaction.editReply({ content: `❌ ${result.reason}`, embeds: [], components: [] });
+  }
+
+  // Mark request as accepted
+  updateBreedingRequestStatus(requestId, 'accepted');
+
+  const embed = new EmbedBuilder()
+    .setColor(0xFF69B4)
+    .setTitle('💕 Breeding Started!')
+    .setDescription(
+      `${speciesData.emoji} **${male.name}** ♂ × **${female.name}** ♀\n\n` +
+      `🤰 **${female.name}** is now gestating!\n` +
+      `⏳ Birth in: ${Math.round(settings.gestationHours)} hours\n\n` +
+      (studFee > 0 ? `💰 Stud Fee: **${studFee.toLocaleString()}** ${currency} → <@${maleOwnerId}>\n` : '') +
+      `💰 Breeding Fee: **${breedingFee.toLocaleString()}** ${currency}\n\n` +
+      `*Baby goes to <@${femaleOwnerId}>*`
+    )
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel('Breeding Center').setEmoji('💕').setStyle(ButtonStyle.Primary),
+  );
+
+  // Notify the requester
+  try {
+    const requester = await interaction.client.users.fetch(request.requester_id);
+    const dmEmbed = new EmbedBuilder()
+      .setColor(0x2ECC71)
+      .setTitle('✅ Breeding Request Accepted!')
+      .setDescription(
+        `<@${userId}> accepted your breeding request!\n\n` +
+        `${speciesData.emoji} **${male.name}** ♂ × **${female.name}** ♀\n` +
+        `🤰 Gestating... Birth in ${Math.round(settings.gestationHours)} hours.`
+      );
+    await requester.send({ embeds: [dmEmbed] }).catch(() => {});
+  } catch (e) {}
+
+  await interaction.editReply({ embeds: [embed], components: [row], files: [] });
+}
+
+// Handle declining a stud request
+async function handleStudDecline(interaction, guildId, userId, settings) {
+  const customId = interaction.customId;
+  // pet_stud_decline_<requestId>_u_<userId>
+  const parts = customId.split('_');
+  const requestId = parseInt(parts[3]);
+
+  const request = getBreedingRequest(requestId);
+  if (!request) {
+    return interaction.reply({ content: '❌ Request not found or expired.', flags: 64 });
+  }
+
+  if (request.partner_id !== userId) {
+    return interaction.reply({ content: '❌ This request is not for you.', flags: 64 });
+  }
+
+  await interaction.deferUpdate();
+
+  // Delete the request
+  deleteBreedingRequest(requestId);
+
+  const requesterPet = getPet(request.requester_pet_id);
+  const partnerPet = getPet(request.partner_pet_id);
+  const petNames = `${requesterPet?.name || 'Unknown'} × ${partnerPet?.name || 'Unknown'}`;
+
+  const embed = new EmbedBuilder()
+    .setColor(0xE74C3C)
+    .setTitle('❌ Request Declined')
+    .setDescription(`You declined the breeding request for **${petNames}**.`)
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel('Breeding Center').setEmoji('💕').setStyle(ButtonStyle.Primary),
+  );
+
+  // Notify the requester
+  try {
+    const requester = await interaction.client.users.fetch(request.requester_id);
+    const dmEmbed = new EmbedBuilder()
+      .setColor(0xE74C3C)
+      .setTitle('❌ Breeding Request Declined')
+      .setDescription(`<@${userId}> declined your breeding request for **${petNames}**.`);
+    await requester.send({ embeds: [dmEmbed] }).catch(() => {});
+  } catch (e) {}
+
+  await interaction.editReply({ embeds: [embed], components: [row], files: [] });
+}
+
+// Legacy stub handlers
+async function handleStudFeeModal(interaction, guildId, userId, settings) {
+  return showStudRequestPanel(interaction, guildId, userId, settings);
+}
+
+async function handleStudSelectPet(interaction, guildId, userId, settings) {
+  return showStudRequestPanel(interaction, guildId, userId, settings);
 }
 
 async function showGestatingPanel(interaction, guildId, userId, settings) {
