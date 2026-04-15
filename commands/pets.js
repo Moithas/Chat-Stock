@@ -264,6 +264,7 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
   const balance = await getBalance(guildId, userId);
   const currency = getCurrency(guildId);
   const eggs = getUserEggs(guildId, userId);
+  const gestating = getMyGestatingPets(guildId, userId);
 
   const embed = new EmbedBuilder()
     .setColor(0xE67E22)
@@ -271,10 +272,15 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
     .setTimestamp();
 
-  const usedSlots = pets.length + eggs.length;
+  const usedSlots = pets.length + eggs.length + gestating.length;
   let desc = `Welcome, **${interaction.user.displayName}**!\n\n`;
-  desc += `🐾 **Pets:** ${pets.length}/${maxSlots} slots`;
-  if (eggs.length > 0) desc += ` (🥚 ${eggs.length} incubating)`;
+  desc += `🐾 **Slots:** ${usedSlots}/${maxSlots}`;
+  if (eggs.length > 0 || gestating.length > 0) {
+    const parts = [`${pets.length} pets`];
+    if (eggs.length > 0) parts.push(`${eggs.length} eggs`);
+    if (gestating.length > 0) parts.push(`${gestating.length} gestating`);
+    desc += ` (${parts.join(', ')})`;
+  }
   desc += `\n`;
   desc += `🏠 **Kennel:** ${kennel.level > 0 ? `Level ${kennel.level}` : 'None'}\n`;
   desc += `💰 **Balance:** ${Math.round(balance.total).toLocaleString()} ${currency}\n`;
@@ -335,7 +341,10 @@ async function showShopPanel(interaction, guildId, userId, settings, page = 0) {
   const balance = await getBalance(guildId, userId);
   const currency = getCurrency(guildId);
   const petCount = getUserPetCount(guildId, userId);
+  const eggCount = getUserEggCount(guildId, userId);
+  const gestatingCount = getMyGestatingPets(guildId, userId).length;
   const maxSlots = getMaxPetSlots(guildId, userId);
+  const usedSlots = petCount + eggCount + gestatingCount;
 
   const ITEMS_PER_PAGE = 9;
   const totalPages = Math.ceil(stock.length / ITEMS_PER_PAGE);
@@ -345,7 +354,7 @@ async function showShopPanel(interaction, guildId, userId, settings, page = 0) {
   const discount = getPetDiscount(guildId, userId);
 
   let shopDesc = `💰 **Balance:** ${Math.round(balance.total).toLocaleString()} ${currency}\n` +
-    `🐾 **Pets:** ${petCount}/${maxSlots} slots\n` +
+    `🐾 **Slots:** ${usedSlots}/${maxSlots}\n` +
     `⏰ **Restocks:** <t:${Math.floor(restockTime / 1000)}:R>\n\n` +
     `Select a pet below to adopt it!`;
   if (discount > 0) shopDesc += `\n🏷️ **Active discount: ${discount}% off!**`;
@@ -1477,6 +1486,9 @@ async function showKennelPanel(interaction, guildId, userId, settings) {
   const currency = getCurrency(guildId);
   const maxSlots = getMaxPetSlots(guildId, userId);
   const petCount = getUserPetCount(guildId, userId);
+  const eggCount = getUserEggCount(guildId, userId);
+  const gestatingCount = getMyGestatingPets(guildId, userId).length;
+  const usedSlots = petCount + eggCount + gestatingCount;
 
   const embed = new EmbedBuilder()
     .setColor(0x8B4513)
@@ -1484,7 +1496,7 @@ async function showKennelPanel(interaction, guildId, userId, settings) {
     .setDescription(
       `Your kennel provides extra pet slots!\n\n` +
       `**Current Level:** ${kennel.level > 0 ? `Level ${kennel.level} (+${kennel.level} slots)` : 'None'}\n` +
-      `**Pet Slots:** ${petCount}/${maxSlots}\n` +
+      `**Slots:** ${usedSlots}/${maxSlots}\n` +
       `💰 **Balance:** ${Math.round(balance.total).toLocaleString()} ${currency}`
     )
     .setTimestamp();
