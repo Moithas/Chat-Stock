@@ -185,6 +185,7 @@ module.exports = {
     if (customId.startsWith('modal_egg_name_')) return handleEggNameModal(interaction, guildId, userId, settings);
     if (customId.startsWith('modal_birth_name_')) return handleBirthNameModal(interaction, guildId, userId, settings);
     if (customId.startsWith('modal_stud_fee_')) return handleStudFeeSubmit(interaction, guildId, userId, settings);
+    if (customId.startsWith('modal_stud_accept_')) return handleStudAcceptSubmit(interaction, guildId, userId, settings);
     if (customId.startsWith('modal_transfer_price_')) return handleTransferPriceSubmit(interaction, guildId, userId, settings);
   },
 };
@@ -2156,11 +2157,10 @@ async function showBreedingPanel(interaction, guildId, userId, settings, initial
       if (!myPet || !theirPet) return null;
       const speciesData = SPECIES[myPet.species];
       const timeLeft = req.expires_at - Date.now();
-      return `${speciesData.emoji} <@${req.requester_id}>'s **${theirPet.name}** wants to breed with your **${myPet.name}**\n` +
-             `💰 Stud Fee: **${req.stud_fee.toLocaleString()}** ${currency} | ⏳ ${formatCooldown(timeLeft)}`;
-    }).filter(Boolean).join('\n\n');
+      return `${speciesData.emoji} <@${req.requester_id}>'s **${theirPet.name}** × your **${myPet.name}** | ⏳ ${formatCooldown(timeLeft)}`;
+    }).filter(Boolean).join('\n');
     if (reqList) {
-      embed.addFields({ name: '📬 Incoming Requests', value: reqList });
+      embed.addFields({ name: '📬 Incoming Requests', value: reqList + '\n*You can set a stud fee when accepting.*' });
     }
   }
 
@@ -2538,10 +2538,10 @@ async function showStudRequestPanel(interaction, guildId, userId, settings) {
       'Request to breed one of your pets with another player\'s pet.\n\n' +
       '**How it works:**\n' +
       '1. Select your pet below\n' +
-      '2. Enter the other player\'s User ID and stud fee\n' +
+      '2. Enter the other player\'s User ID\n' +
       '3. Select their compatible pet\n' +
-      '4. They can accept or decline\n\n' +
-      '*The baby goes to the female\'s owner. Stud fee goes to the male\'s owner.*'
+      '4. They can accept (and set a stud fee) or decline\n\n' +
+      '*You receive the baby. They can charge a stud fee.*'
     )
     .setTimestamp();
 
@@ -2606,7 +2606,7 @@ async function handleStudMyPetSelect(interaction, guildId, userId, settings) {
     return interaction.reply({ content: `❌ ${check.reason}`, flags: 64 });
   }
 
-  // Show modal to enter target user ID and stud fee
+  // Show modal to enter target user ID only (partner sets fee when accepting)
   const modal = new ModalBuilder()
     .setCustomId(`modal_stud_fee_${petId}_u_${userId}`)
     .setTitle(`Stud Request: ${pet.name}`);
@@ -2618,17 +2618,8 @@ async function handleStudMyPetSelect(interaction, guildId, userId, settings) {
     .setRequired(true)
     .setPlaceholder('e.g. 123456789012345678');
 
-  const feeInput = new TextInputBuilder()
-    .setCustomId('stud_fee')
-    .setLabel('Stud Fee (you pay if your pet is female)')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setValue('0')
-    .setPlaceholder('0');
-
   modal.addComponents(
-    new ActionRowBuilder().addComponents(targetInput),
-    new ActionRowBuilder().addComponents(feeInput)
+    new ActionRowBuilder().addComponents(targetInput)
   );
 
   await interaction.showModal(modal);
@@ -2647,7 +2638,6 @@ async function handleStudFeeSubmit(interaction, guildId, userId, settings) {
   }
 
   const targetUserId = interaction.fields.getTextInputValue('target_user').trim();
-  const studFee = parseInt(interaction.fields.getTextInputValue('stud_fee').replace(/,/g, '')) || 0;
 
   if (!targetUserId.match(/^\d{17,20}$/)) {
     return interaction.reply({ content: '❌ Invalid User ID format. Right-click on the user and select "Copy User ID".', flags: 64 });
@@ -2655,26 +2645,6 @@ async function handleStudFeeSubmit(interaction, guildId, userId, settings) {
 
   if (targetUserId === userId) {
     return interaction.reply({ content: '❌ You can\'t request to breed with yourself. Use the normal breeding panel.', flags: 64 });
-  }
-
-  if (studFee < 0) {
-    return interaction.reply({ content: '❌ Stud fee cannot be negative.', flags: 64 });
-  }
-
-  if (settings.maxStudFee > 0 && studFee > settings.maxStudFee) {
-    return interaction.reply({ content: `❌ Max stud fee on this server is ${settings.maxStudFee.toLocaleString()}.`, flags: 64 });
-  }
-
-  // If my pet is female, I need to pay the fee - check balance
-  if (myPet.sex === 'F') {
-    const balance = await getBalance(guildId, userId);
-    if (balance.total < studFee) {
-      const currency = getCurrency(guildId);
-      return interaction.reply({ 
-        content: `❌ You need **${studFee.toLocaleString()}** ${currency} to pay the stud fee, but only have **${Math.round(balance.total).toLocaleString()}**.`, 
-        flags: 64 
-      });
-    }
   }
 
   await interaction.deferUpdate();
@@ -2720,9 +2690,9 @@ async function handleStudFeeSubmit(interaction, guildId, userId, settings) {
     .setTitle('💕 Select Partner Pet')
     .setDescription(
       `Your pet: **${myPet.name}** (${myPet.sex === 'M' ? '♂️' : '♀️'})\n` +
-      `Target: <@${targetUserId}>\n` +
-      `Stud Fee: **${studFee.toLocaleString()}** ${currency}\n\n` +
-      `Select a compatible pet from their collection:`
+      `Target: <@${targetUserId}>\n\n` +
+      `Select a compatible pet from their collection:\n` +
+      `*They can set a stud fee when accepting.*`
     )
     .setTimestamp();
 
@@ -2733,7 +2703,7 @@ async function handleStudFeeSubmit(interaction, guildId, userId, settings) {
     return {
       label: `${p.name} ${sexEmoji}`,
       description: `${rarityData.name} ${speciesData.name} L${p.level}`,
-      value: `${myPet.id}_${p.id}_${studFee}_${targetUserId}`,
+      value: `${myPet.id}_${p.id}_${targetUserId}`,
       emoji: speciesData.emoji,
     };
   });
@@ -2754,10 +2724,10 @@ async function handleStudFeeSubmit(interaction, guildId, userId, settings) {
 
 // Step 4: Create the breeding request
 async function handleStudPartnerSelect(interaction, guildId, userId, settings) {
-  const [myPetIdStr, theirPetIdStr, studFeeStr, targetUserId] = interaction.values[0].split('_');
+  const [myPetIdStr, theirPetIdStr, targetUserId] = interaction.values[0].split('_');
   const myPetId = parseInt(myPetIdStr);
   const theirPetId = parseInt(theirPetIdStr);
-  const studFee = parseInt(studFeeStr);
+  const studFee = 0; // Partner sets fee when accepting
 
   const myPet = getPet(myPetId);
   const theirPet = getPet(theirPetId);
@@ -2796,9 +2766,6 @@ async function handleStudPartnerSelect(interaction, guildId, userId, settings) {
   }
 
   const speciesData = SPECIES[myPet.species];
-  const female = myPet.sex === 'F' ? myPet : theirPet;
-  const male = myPet.sex === 'M' ? myPet : theirPet;
-  const feeText = studFee > 0 ? `💰 **${studFee.toLocaleString()}** ${currency}` : '🆓 Free';
 
   const embed = new EmbedBuilder()
     .setColor(0x2ECC71)
@@ -2806,9 +2773,8 @@ async function handleStudPartnerSelect(interaction, guildId, userId, settings) {
     .setDescription(
       `${speciesData.emoji} **${myPet.name}** × **${theirPet.name}**\n\n` +
       `Request sent to <@${targetUserId}>!\n` +
-      `Stud Fee: ${feeText}\n` +
       `Expires in 24 hours.\n\n` +
-      `*They will see this in their Breeding Center.*`
+      `*They can accept and optionally charge a stud fee.*`
     )
     .setTimestamp();
 
@@ -2820,9 +2786,8 @@ async function handleStudPartnerSelect(interaction, guildId, userId, settings) {
       .setTitle('💌 New Breeding Request!')
       .setDescription(
         `<@${userId}> wants to breed their **${myPet.name}** with your **${theirPet.name}**!\n\n` +
-        `${speciesData.emoji} **${speciesData.name}** — ${male.name} ♂ × ${female.name} ♀\n` +
-        `Stud Fee: ${feeText}\n\n` +
-        `Use \`/pets\` → Breeding Center to accept or decline.`
+        `${speciesData.emoji} **${speciesData.name}**\n\n` +
+        `Use \`/pets\` → Breeding Center to accept (and set a fee) or decline.`
       )
       .setTimestamp();
     
@@ -2839,7 +2804,7 @@ async function handleStudPartnerSelect(interaction, guildId, userId, settings) {
   await interaction.editReply({ embeds: [embed], components: [row], files: [] });
 }
 
-// Handle accepting a stud request
+// Handle accept button - show modal to set stud fee
 async function handleStudAccept(interaction, guildId, userId, settings) {
   const customId = interaction.customId;
   // pet_stud_accept_<requestId>_u_<userId>
@@ -2859,6 +2824,66 @@ async function handleStudAccept(interaction, guildId, userId, settings) {
     return interaction.reply({ content: '❌ This request has already been processed.', flags: 64 });
   }
 
+  const myPet = getPet(request.partner_pet_id);
+  const theirPet = getPet(request.requester_pet_id);
+
+  if (!myPet || !theirPet) {
+    deleteBreedingRequest(requestId);
+    return interaction.reply({ content: '❌ One of the pets no longer exists.', flags: 64 });
+  }
+
+  // Show modal to set stud fee
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_stud_accept_${requestId}_u_${userId}`)
+    .setTitle(`Accept: ${myPet.name} × ${theirPet.name}`);
+
+  const feeInput = new TextInputBuilder()
+    .setCustomId('stud_fee')
+    .setLabel('Stud Fee (they pay you)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setValue('0')
+    .setPlaceholder('0 for free');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(feeInput)
+  );
+
+  await interaction.showModal(modal);
+}
+
+// Process the accept modal submission
+async function handleStudAcceptSubmit(interaction, guildId, userId, settings) {
+  const customId = interaction.customId;
+  // modal_stud_accept_<requestId>_u_<userId>
+  const parts = customId.split('_');
+  const requestId = parseInt(parts[3]);
+
+  const request = getBreedingRequest(requestId);
+  if (!request) {
+    return interaction.reply({ content: '❌ Request not found or expired.', flags: 64 });
+  }
+
+  if (request.partner_id !== userId) {
+    return interaction.reply({ content: '❌ This request is not for you.', flags: 64 });
+  }
+
+  if (request.status !== 'pending') {
+    return interaction.reply({ content: '❌ This request has already been processed.', flags: 64 });
+  }
+
+  // Parse stud fee from modal
+  const studFee = parseInt(interaction.fields.getTextInputValue('stud_fee').replace(/,/g, '')) || 0;
+  const currency = getCurrency(guildId);
+
+  if (studFee < 0) {
+    return interaction.reply({ content: '❌ Stud fee cannot be negative.', flags: 64 });
+  }
+
+  if (settings.maxStudFee > 0 && studFee > settings.maxStudFee) {
+    return interaction.reply({ content: `❌ Max stud fee on this server is ${settings.maxStudFee.toLocaleString()}.`, flags: 64 });
+  }
+
   const requesterPet = getPet(request.requester_pet_id);
   const partnerPet = getPet(request.partner_pet_id);
 
@@ -2875,62 +2900,60 @@ async function handleStudAccept(interaction, guildId, userId, settings) {
   }
 
   await interaction.deferUpdate();
-  const currency = getCurrency(guildId);
-  const studFee = request.stud_fee;
 
-  // Determine who pays and who receives
-  const female = requesterPet.sex === 'F' ? requesterPet : partnerPet;
-  const male = requesterPet.sex === 'M' ? requesterPet : partnerPet;
-  const femaleOwnerId = female.owner_id;
-  const maleOwnerId = male.owner_id;
+  // Requester pays, partner receives
+  const requesterId = request.requester_id;
+  const partnerId = request.partner_id;
 
-  // Transfer stud fee if applicable
+  // Transfer stud fee: requester pays, partner receives
   if (studFee > 0) {
-    const payerBalance = await getBalance(guildId, femaleOwnerId);
-    if (payerBalance.total < studFee) {
+    const requesterBalance = await getBalance(guildId, requesterId);
+    if (requesterBalance.total < studFee) {
       deleteBreedingRequest(requestId);
       return interaction.editReply({ 
-        content: `❌ <@${femaleOwnerId}> doesn't have enough to pay the **${studFee.toLocaleString()}** ${currency} stud fee.`,
+        content: `❌ <@${requesterId}> doesn't have enough to pay the **${studFee.toLocaleString()}** ${currency} stud fee.`,
         embeds: [], components: []
       });
     }
 
-    // Transfer fee
-    await removeFromTotal(guildId, femaleOwnerId, studFee);
-    await addMoney(guildId, maleOwnerId, studFee);
+    // Transfer fee: requester → partner
+    await removeFromTotal(guildId, requesterId, studFee);
+    await addMoney(guildId, partnerId, studFee);
   }
 
   // Calculate breeding fee based on highest rarity
+  const female = requesterPet.sex === 'F' ? requesterPet : partnerPet;
+  const male = requesterPet.sex === 'M' ? requesterPet : partnerPet;
   const highRarity = RARITY_ORDER.indexOf(male.rarity) >= RARITY_ORDER.indexOf(female.rarity) ? male.rarity : female.rarity;
   const speciesData = SPECIES[female.species];
   const isExotic = speciesData.type === 'exotic';
   const breedingFee = getBreedingFee(guildId, highRarity, isExotic);
 
-  // Charge breeding fee to female's owner
-  const feeBalance = await getBalance(guildId, femaleOwnerId);
-  if (feeBalance.total < breedingFee) {
+  // Charge breeding fee to requester (they get the baby)
+  const requesterFeeBalance = await getBalance(guildId, requesterId);
+  if (requesterFeeBalance.total < breedingFee) {
     // Refund stud fee if applicable
     if (studFee > 0) {
-      await addMoney(guildId, femaleOwnerId, studFee);
-      await removeFromTotal(guildId, maleOwnerId, studFee);
+      await addMoney(guildId, requesterId, studFee);
+      await removeFromTotal(guildId, partnerId, studFee);
     }
     deleteBreedingRequest(requestId);
     return interaction.editReply({
-      content: `❌ <@${femaleOwnerId}> doesn't have enough to pay the **${breedingFee.toLocaleString()}** ${currency} breeding fee.`,
+      content: `❌ <@${requesterId}> doesn't have enough to pay the **${breedingFee.toLocaleString()}** ${currency} breeding fee.`,
       embeds: [], components: []
     });
   }
 
-  await removeFromTotal(guildId, femaleOwnerId, breedingFee);
+  await removeFromTotal(guildId, requesterId, breedingFee);
 
-  // Start gestation
-  const result = startGestation(guildId, female.id, male.id, femaleOwnerId);
+  // Start gestation - baby goes to REQUESTER
+  const result = startGestation(guildId, female.id, male.id, requesterId);
   if (!result.success) {
     // Refund everything
-    await addMoney(guildId, femaleOwnerId, breedingFee);
+    await addMoney(guildId, requesterId, breedingFee);
     if (studFee > 0) {
-      await addMoney(guildId, femaleOwnerId, studFee);
-      await removeFromTotal(guildId, maleOwnerId, studFee);
+      await addMoney(guildId, requesterId, studFee);
+      await removeFromTotal(guildId, partnerId, studFee);
     }
     deleteBreedingRequest(requestId);
     return interaction.editReply({ content: `❌ ${result.reason}`, embeds: [], components: [] });
@@ -2946,9 +2969,9 @@ async function handleStudAccept(interaction, guildId, userId, settings) {
       `${speciesData.emoji} **${male.name}** ♂ × **${female.name}** ♀\n\n` +
       `🤰 **${female.name}** is now gestating!\n` +
       `⏳ Birth in: ${Math.round(settings.gestationHours)} hours\n\n` +
-      (studFee > 0 ? `💰 Stud Fee: **${studFee.toLocaleString()}** ${currency} → <@${maleOwnerId}>\n` : '') +
+      (studFee > 0 ? `💰 Stud Fee: **${studFee.toLocaleString()}** ${currency} → <@${partnerId}>\n` : '') +
       `💰 Breeding Fee: **${breedingFee.toLocaleString()}** ${currency}\n\n` +
-      `*Baby goes to <@${femaleOwnerId}>*`
+      `*Baby goes to <@${requesterId}>*`
     )
     .setTimestamp();
 
@@ -2958,13 +2981,15 @@ async function handleStudAccept(interaction, guildId, userId, settings) {
 
   // Notify the requester
   try {
-    const requester = await interaction.client.users.fetch(request.requester_id);
+    const requester = await interaction.client.users.fetch(requesterId);
     const dmEmbed = new EmbedBuilder()
       .setColor(0x2ECC71)
       .setTitle('✅ Breeding Request Accepted!')
       .setDescription(
-        `<@${userId}> accepted your breeding request!\n\n` +
+        `<@${partnerId}> accepted your breeding request!\n\n` +
         `${speciesData.emoji} **${male.name}** ♂ × **${female.name}** ♀\n` +
+        (studFee > 0 ? `💰 Stud Fee: **${studFee.toLocaleString()}** ${currency}\n` : '') +
+        `💰 Breeding Fee: **${breedingFee.toLocaleString()}** ${currency}\n` +
         `🤰 Gestating... Birth in ${Math.round(settings.gestationHours)} hours.`
       );
     await requester.send({ embeds: [dmEmbed] }).catch(() => {});

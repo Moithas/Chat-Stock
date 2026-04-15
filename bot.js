@@ -1236,7 +1236,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   // Handle pet panel modals
-  if (interaction.isModalSubmit() && (interaction.customId.startsWith('modal_pet_name_') || interaction.customId.startsWith('modal_pet_rename_') || interaction.customId.startsWith('modal_egg_name_') || interaction.customId.startsWith('modal_birth_name_') || interaction.customId.startsWith('modal_stud_fee_') || interaction.customId.startsWith('modal_transfer_price_'))) {
+  if (interaction.isModalSubmit() && (interaction.customId.startsWith('modal_pet_name_') || interaction.customId.startsWith('modal_pet_rename_') || interaction.customId.startsWith('modal_egg_name_') || interaction.customId.startsWith('modal_birth_name_') || interaction.customId.startsWith('modal_stud_fee_') || interaction.customId.startsWith('modal_stud_accept_') || interaction.customId.startsWith('modal_transfer_price_'))) {
     try {
       const { handleModal } = require('./commands/pets');
       await handleModal(interaction);
