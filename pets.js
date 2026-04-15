@@ -1814,9 +1814,10 @@ function rollBreedingVariant(parent1, parent2) {
   return Math.ceil(Math.random() * (speciesData?.variants || 1));
 }
 
-function startGestation(guildId, femalePetId, forUserId, settings) {
-  if (!db) return false;
+function startGestation(guildId, femalePetId, malePetId, forUserId) {
+  if (!db) return { success: false, reason: 'Database not ready' };
   
+  const settings = getSettings(guildId);
   const gestationMs = settings.gestationHours * 3600000;
   const gestationEnd = Date.now() + gestationMs;
   
@@ -1825,7 +1826,7 @@ function startGestation(guildId, femalePetId, forUserId, settings) {
     [gestationEnd, forUserId, femalePetId]
   );
   saveDatabase();
-  return gestationEnd;
+  return { success: true, gestationEnd };
 }
 
 function getGestatingPets(guildId, userId) {

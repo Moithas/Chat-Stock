@@ -2319,7 +2319,11 @@ async function handleBreedConfirm(interaction, guildId, userId, settings) {
   }
 
   // Start gestation
-  const gestationEnd = startGestation(guildId, femaleId, userId, settings);
+  const result = startGestation(guildId, femaleId, maleId, userId);
+  if (!result.success) {
+    addMoney(guildId, userId, fee, 'wallet'); // Refund
+    return interaction.editReply({ content: `❌ ${result.reason}`, embeds: [], components: [] });
+  }
 
   const embed = new EmbedBuilder()
     .setColor(0xFF69B4)
