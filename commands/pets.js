@@ -2401,8 +2401,12 @@ async function handleGiveBirth(interaction, guildId, userId, settings) {
     return interaction.editReply({ content: '❌ Pet not found.', embeds: [], components: [] });
   }
 
-  // Verify gestation target (could be cross-player breeding)
-  if (female.gestating_for_user !== userId) {
+  // Verify gestation target (could be cross-player breeding OR own pet)
+  // Allow: the gestating_for_user OR the pet owner (for self-breeding)
+  const isForUser = String(female.gestating_for_user) === String(userId);
+  const isOwner = String(female.owner_id) === String(userId);
+  
+  if (!isForUser && !isOwner) {
     return interaction.editReply({ content: '❌ This baby is not for you.', embeds: [], components: [] });
   }
 
