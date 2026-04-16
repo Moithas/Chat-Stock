@@ -143,8 +143,8 @@ module.exports = {
       return showBreedingPanel(interaction, guildId, userId, settings, parsePetIdFromCustomId(customId));
     if (customId.startsWith('pet_breed_confirm_')) return handleBreedConfirm(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_cancel_')) return showMyPetsPanel(interaction, guildId, userId, settings);
-    if (customId.startsWith('pet_birth_')) return handleGiveBirth(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_birth_name_')) return handleBirthName(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_birth_')) return handleGiveBirth(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_gestating_')) return showGestatingPanel(interaction, guildId, userId, settings);
     // Cross-player breeding
     if (customId.startsWith('pet_stud_request_')) return showStudRequestPanel(interaction, guildId, userId, settings);
