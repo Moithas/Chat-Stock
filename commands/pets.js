@@ -2144,7 +2144,16 @@ async function showBreedingPanel(interaction, guildId, userId, settings, initial
   const rows = [];
 
   // If gestating pets are ready, show birth buttons
-  const readyBirths = gestatingForMe.filter(p => {
+  // Combine own gestating pets AND cross-breeding gestating pets
+  const allGestating = [...gestatingPets];
+  // Add cross-breeding pets that aren't already included
+  for (const p of gestatingForMe) {
+    if (!allGestating.some(g => g.id === p.id)) {
+      allGestating.push(p);
+    }
+  }
+  
+  const readyBirths = allGestating.filter(p => {
     const now = Date.now();
     return p.gestation_end <= now;
   });
