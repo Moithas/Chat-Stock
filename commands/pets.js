@@ -1464,13 +1464,17 @@ async function handleRenameButton(interaction, guildId, userId, settings) {
   const pet = getPet(petId);
   if (!pet || pet.owner_id !== userId) return interaction.reply({ content: '❌ Pet not found.', flags: 64 });
 
+  // Modal titles have a 45 character limit - keep it short
+  const shortName = pet.name.length > 15 ? pet.name.slice(0, 12) + '...' : pet.name;
+  const title = `Rename ${shortName}`.slice(0, 45);
+
   const modal = new ModalBuilder()
     .setCustomId(`modal_pet_rename_${petId}_u_${userId}`)
-    .setTitle(`Rename ${pet.name} (${settings.renameCost.toLocaleString()} ${getCurrency(guildId)})`);
+    .setTitle(title);
 
   const nameInput = new TextInputBuilder()
     .setCustomId('pet_rename_name')
-    .setLabel('New name')
+    .setLabel(`New name (Cost: ${settings.renameCost.toLocaleString()})`)
     .setStyle(TextInputStyle.Short)
     .setMinLength(1)
     .setMaxLength(24)
