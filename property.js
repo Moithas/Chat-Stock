@@ -74,27 +74,27 @@ const DEFAULT_CARDS = [
   { id: 18, name: 'Land Grant', flavor: 'The city rezoned in your favor!', type: 'positive', effectType: 'property_value', minPercent: 3, maxPercent: 6 },
   { id: 19, name: 'Community Chest', flavor: 'Monopoly taught you well.', type: 'positive', effectType: 'flat', minValue: 500, maxValue: 1000 },
   { id: 20, name: 'Jackpot', flavor: 'You hit it big at the casino... for once.', type: 'positive', effectType: 'balance', minPercent: 12, maxPercent: 18 },
-  // Negative Cards (21-40)
-  { id: 21, name: 'Property Tax', flavor: "The assessor 'reassessed' your property value.", type: 'negative', effectType: 'property_value', minPercent: 3, maxPercent: 7 },
-  { id: 22, name: 'Market Crash', flavor: "Should've sold yesterday... 📉", type: 'negative', effectType: 'portfolio', minPercent: 0.4, maxPercent: 0.5 },
-  { id: 23, name: 'Emergency Repair', flavor: 'The water heater chose violence today.', type: 'negative', effectType: 'balance', minPercent: 2, maxPercent: 5 },
-  { id: 24, name: 'Lawsuit', flavor: "Your tenant's lawyer is VERY expensive.", type: 'negative', effectType: 'property_value', minPercent: 6, maxPercent: 10 },
-  { id: 25, name: 'Bad Investment', flavor: 'That crypto your cousin recommended tanked.', type: 'negative', effectType: 'portfolio', minPercent: 0.3, maxPercent: 0.4 },
-  { id: 26, name: 'Fines & Fees', flavor: 'Parking tickets from 2019 finally caught up.', type: 'negative', effectType: 'flat', minValue: 400, maxValue: 600 },
-  { id: 27, name: 'Tenant Damage', flavor: "They said the hole in the wall was 'already there.'", type: 'negative', effectType: 'balance', minPercent: 1, maxPercent: 3 },
-  { id: 28, name: 'Stock Dump', flavor: 'Insider trading... against you.', type: 'negative', effectType: 'portfolio', minPercent: 0.2, maxPercent: 0.3 },
-  { id: 29, name: 'City Assessment', flavor: 'Surprise! The city needs a new sidewalk.', type: 'negative', effectType: 'property_value', minPercent: 4, maxPercent: 8 },
-  { id: 30, name: 'IRS Audit', flavor: "They're going through EVERYTHING.", type: 'negative', effectType: 'balance', minPercent: 1, maxPercent: 10 },
-  { id: 31, name: 'Burst Pipe', flavor: 'Water, water everywhere... especially in the basement.', type: 'negative', effectType: 'flat', minValue: 800, maxValue: 1200 },
-  { id: 32, name: 'Eviction Costs', flavor: 'Getting them out cost more than keeping them.', type: 'negative', effectType: 'property_value', minPercent: 3, maxPercent: 6 },
-  { id: 33, name: 'Margin Call', flavor: 'Your broker is NOT happy with you right now.', type: 'negative', effectType: 'portfolio', minPercent: 0.2, maxPercent: 0.3 },
-  { id: 34, name: 'Legal Fees', flavor: 'Lawyers charge HOW MUCH per hour?!', type: 'negative', effectType: 'balance', minPercent: 2, maxPercent: 4 },
-  { id: 35, name: 'Foundation Crack', flavor: "That's not supposed to move like that...", type: 'negative', effectType: 'property_value', minPercent: 7, maxPercent: 11 },
-  { id: 36, name: 'Ponzi Scheme', flavor: 'It was NOT a legitimate investment opportunity.', type: 'negative', effectType: 'portfolio', minPercent: 0.1, maxPercent: 0.2 },
-  { id: 37, name: 'HOA Fine', flavor: 'Your grass was 0.5 inches too tall.', type: 'negative', effectType: 'flat', minValue: 200, maxValue: 350 },
-  { id: 38, name: 'Recession', flavor: 'The economy decided to take a nap.', type: 'negative', effectType: 'balance', minPercent: 2, maxPercent: 3 },
-  { id: 39, name: 'Vandalism', flavor: 'Local teens discovered your property.', type: 'negative', effectType: 'flat', minValue: 1200, maxValue: 1800 },
-  { id: 40, name: 'Tax Lien', flavor: 'The government wants their cut. ALL of it.', type: 'negative', effectType: 'property_value', minPercent: 12, maxPercent: 18 },
+  // Negative Cards (21-40) - BALANCED: Effects reduced to be more fair
+  { id: 21, name: 'Property Tax', flavor: "The assessor 'reassessed' your property value.", type: 'negative', effectType: 'property_value', minPercent: 1, maxPercent: 3 },
+  { id: 22, name: 'Market Crash', flavor: "Should've sold yesterday... 📉", type: 'negative', effectType: 'portfolio', minPercent: 0.01, maxPercent: 0.02 },
+  { id: 23, name: 'Emergency Repair', flavor: 'The water heater chose violence today.', type: 'negative', effectType: 'balance', minPercent: 0.5, maxPercent: 1.5 },
+  { id: 24, name: 'Lawsuit', flavor: "Your tenant's lawyer is VERY expensive.", type: 'negative', effectType: 'property_value', minPercent: 2, maxPercent: 4 },
+  { id: 25, name: 'Bad Investment', flavor: 'That crypto your cousin recommended tanked.', type: 'negative', effectType: 'portfolio', minPercent: 0.01, maxPercent: 0.015 },
+  { id: 26, name: 'Fines & Fees', flavor: 'Parking tickets from 2019 finally caught up.', type: 'negative', effectType: 'flat', minValue: 200, maxValue: 400 },
+  { id: 27, name: 'Tenant Damage', flavor: "They said the hole in the wall was 'already there.'", type: 'negative', effectType: 'balance', minPercent: 0.3, maxPercent: 1 },
+  { id: 28, name: 'Stock Dump', flavor: 'Insider trading... against you.', type: 'negative', effectType: 'portfolio', minPercent: 0.005, maxPercent: 0.01 },
+  { id: 29, name: 'City Assessment', flavor: 'Surprise! The city needs a new sidewalk.', type: 'negative', effectType: 'property_value', minPercent: 1, maxPercent: 3 },
+  { id: 30, name: 'IRS Audit', flavor: "They're going through EVERYTHING.", type: 'negative', effectType: 'balance', minPercent: 0.5, maxPercent: 2 },
+  { id: 31, name: 'Burst Pipe', flavor: 'Water, water everywhere... especially in the basement.', type: 'negative', effectType: 'flat', minValue: 400, maxValue: 700 },
+  { id: 32, name: 'Eviction Costs', flavor: 'Getting them out cost more than keeping them.', type: 'negative', effectType: 'property_value', minPercent: 1, maxPercent: 2 },
+  { id: 33, name: 'Margin Call', flavor: 'Your broker is NOT happy with you right now.', type: 'negative', effectType: 'portfolio', minPercent: 0.005, maxPercent: 0.01 },
+  { id: 34, name: 'Legal Fees', flavor: 'Lawyers charge HOW MUCH per hour?!', type: 'negative', effectType: 'balance', minPercent: 0.5, maxPercent: 1.5 },
+  { id: 35, name: 'Foundation Crack', flavor: "That's not supposed to move like that...", type: 'negative', effectType: 'property_value', minPercent: 2, maxPercent: 4 },
+  { id: 36, name: 'Ponzi Scheme', flavor: 'It was NOT a legitimate investment opportunity.', type: 'negative', effectType: 'portfolio', minPercent: 0.005, maxPercent: 0.01 },
+  { id: 37, name: 'HOA Fine', flavor: 'Your grass was 0.5 inches too tall.', type: 'negative', effectType: 'flat', minValue: 100, maxValue: 200 },
+  { id: 38, name: 'Recession', flavor: 'The economy decided to take a nap.', type: 'negative', effectType: 'balance', minPercent: 0.5, maxPercent: 1 },
+  { id: 39, name: 'Vandalism', flavor: 'Local teens discovered your property.', type: 'negative', effectType: 'flat', minValue: 500, maxValue: 900 },
+  { id: 40, name: 'Tax Lien', flavor: 'The government wants their cut. ALL of it.', type: 'negative', effectType: 'property_value', minPercent: 3, maxPercent: 5 },
   // Neutral Cards (41-50)
   { id: 41, name: 'Quiet Day', flavor: 'Nothing happened. Enjoy the peace while it lasts.', type: 'neutral', effectType: 'none', minValue: 0, maxValue: 0 },
   { id: 42, name: 'Mail Call', flavor: 'Just ads and a pizza coupon. Maybe next time.', type: 'neutral', effectType: 'none', minValue: 0, maxValue: 0 },
@@ -122,7 +122,7 @@ function initProperty(database) {
       property_limit INTEGER DEFAULT 3,
       rent_percent REAL DEFAULT 1.0,
       card_cooldown_minutes INTEGER DEFAULT 120,
-      negative_card_odds INTEGER DEFAULT 50,
+      negative_card_odds INTEGER DEFAULT 35,
       enabled INTEGER DEFAULT 1,
       required_role TEXT DEFAULT NULL,
       register_price INTEGER DEFAULT 10000
@@ -249,7 +249,7 @@ function getPropertySettings(guildId) {
         propertyLimit: settings.property_limit,
         rentPercent: settings.rent_percent,
         cardCooldownMinutes: settings.card_cooldown_minutes,
-        negativeCardOdds: settings.negative_card_odds || 50,
+        negativeCardOdds: settings.negative_card_odds || 35,
         enabled: settings.enabled === 1,
         requiredRole: settings.required_role || null,
         registerPrice: settings.register_price || 10000
@@ -870,14 +870,52 @@ function distributeCardsForUser(guildId, userId) {
     totalCards += cardsPerTier[prop.tier] || 1;
   }
   
-  // Grant random cards (truly random from all cards)
-  const cards = getCards(guildId);
+  // Get settings for negative card odds
+  const settings = getPropertySettings(guildId);
+  const negativeOdds = settings.negativeCardOdds || 50; // Default 50%
+  // Remaining odds split: positive gets 2/3, neutral gets 1/3
+  const remainingOdds = 100 - negativeOdds;
+  const positiveOdds = Math.round(remainingOdds * 0.67); // ~2/3 of remaining
+  // neutral = remainingOdds - positiveOdds
+  
+  // Get cards by type
+  const allCards = getCards(guildId);
+  const positiveCards = allCards.filter(c => c.type === 'positive');
+  const negativeCards = allCards.filter(c => c.type === 'negative');
+  const neutralCards = allCards.filter(c => c.type === 'neutral');
+  
+  // Track distributed card IDs to prevent duplicates
+  const distributedCardIds = new Set();
   
   for (let i = 0; i < totalCards; i++) {
-    if (cards.length > 0) {
-      const card = cards[Math.floor(Math.random() * cards.length)];
-      grantCard(guildId, userId, card.id);
+    const roll = Math.random() * 100;
+    let cardPool;
+    
+    if (roll < negativeOdds) {
+      // Negative card
+      cardPool = negativeCards.length > 0 ? negativeCards : allCards;
+    } else if (roll < negativeOdds + positiveOdds) {
+      // Positive card
+      cardPool = positiveCards.length > 0 ? positiveCards : allCards;
+    } else {
+      // Neutral card
+      cardPool = neutralCards.length > 0 ? neutralCards : allCards;
     }
+    
+    // Filter out already distributed cards
+    let availableCards = cardPool.filter(c => !distributedCardIds.has(c.id));
+    
+    // If all cards in this pool are used, fall back to any unused card
+    if (availableCards.length === 0) {
+      availableCards = allCards.filter(c => !distributedCardIds.has(c.id));
+    }
+    
+    // If somehow ALL cards have been distributed, skip (shouldn't happen with 50 cards)
+    if (availableCards.length === 0) break;
+    
+    const card = availableCards[Math.floor(Math.random() * availableCards.length)];
+    distributedCardIds.add(card.id);
+    grantCard(guildId, userId, card.id);
   }
   
   return totalCards;
@@ -937,6 +975,12 @@ function calculateCardEffect(guildId, card, rentAmount, userBalance, portfolioVa
   // Apply sign based on card type
   if (card.type === 'negative') {
     amount = -Math.abs(amount);
+    // CAP negative losses at 80% of rent - you always keep at least 20% of base rent
+    const maxLoss = Math.round(rentAmount * 0.8);
+    if (Math.abs(amount) > maxLoss) {
+      amount = -maxLoss;
+      description += ` (capped at ${maxLoss})`;
+    }
   }
   
   return { amount, description, roll };
