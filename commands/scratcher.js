@@ -438,6 +438,76 @@ async function handleActiveCards(interaction, guildId, userId) {
   });
 }
 
+// Show the result of an already-completed ticket (for when UI failed to update)
+async function showCompletedTicketResult(interaction, ticket, guildId) {
+  const config = getCardConfig(ticket.card_type);
+  
+  // Generate revealed card image
+  const imageBuffer = generateRevealedCard(ticket.card_type, ticket.symbols, ticket.id);
+  const attachment = new AttachmentBuilder(imageBuffer, { name: `scratch-${ticket.id}-revealed.png` });
+
+  // Build result embed based on win_type
+  let resultColor, resultTitle, resultDesc;
+  const winnings = ticket.prize || 0;
+  const winType = ticket.win_type || 'NONE';
+  
+  if (winType === 'JACKPOT' || winType === 'MEGA JACKPOT') {
+    resultColor = 0xFFD700;
+    resultTitle = `🎉 ${winType}! ${config.emoji} ${config.name}`;
+    resultDesc = `This card hit the **${winType}**!\n\n💎 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
+  } else if (winType === 'MEGA WIN') {
+    resultColor = 0xE91E63;
+    resultTitle = `🎊 MEGA WIN! ${config.emoji} ${config.name}`;
+    resultDesc = `This card got a **MEGA WIN**!\n\n🏆 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
+  } else if (winType === 'WIN') {
+    resultColor = 0x4CAF50;
+    resultTitle = `✨ Winner! ${config.emoji} ${config.name}`;
+    resultDesc = `This card matched 3!\n\n💰 **Won: ${winnings.toLocaleString()}** ${getCurrency(guildId)}`;
+  } else if (winType === 'FREE_TICKET') {
+    resultColor = 0x9C27B0;
+    resultTitle = `🎟️ Free Ticket! ${config.emoji} ${config.name}`;
+    resultDesc = `This card won a **FREE ticket**! (Already claimed)`;
+  } else {
+    resultColor = 0x9E9E9E;
+    resultTitle = `${config.emoji} ${config.name} - No Win`;
+    resultDesc = `Better luck next time!\n\n❌ **No matches**`;
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(resultColor)
+    .setTitle(resultTitle)
+    .setDescription(resultDesc)
+    .setImage(`attachment://scratch-${ticket.id}-revealed.png`)
+    .setFooter({ text: `Ticket #${ticket.id} (Already completed)` })
+    .setTimestamp();
+
+  // Show symbol counts
+  const symbolCounts = {};
+  for (const sym of ticket.symbols) {
+    symbolCounts[sym] = (symbolCounts[sym] || 0) + 1;
+  }
+  const countsText = Object.entries(symbolCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([sym, count]) => `${sym} x${count}`)
+    .join('  ');
+  
+  embed.addFields({ name: '🎲 Symbols', value: countsText });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('scratcher_shop')
+      .setLabel('🏪 Back to Shop')
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  return interaction.reply({
+    embeds: [embed],
+    files: [attachment],
+    components: [row],
+    flags: 64
+  });
+}
+
 async function handlePlayCard(interaction, guildId, userId, ticketId) {
   const ticket = getScratchTicket(ticketId);
   
@@ -456,10 +526,8 @@ async function handlePlayCard(interaction, guildId, userId, ticketId) {
   }
 
   if (ticket.is_complete) {
-    return interaction.reply({
-      content: '❌ This card has already been completed!',
-      flags: 64
-    });
+    // Show the completed result instead of just an error
+    return showCompletedTicketResult(interaction, ticket, guildId);
   }
 
   const config = getCardConfig(ticket.card_type);
@@ -565,10 +633,8 @@ async function handleScratchBox(interaction, guildId, userId, ticketId, boxIndex
   }
 
   if (ticket.is_complete) {
-    return interaction.reply({
-      content: '❌ This card has already been completed!',
-      flags: 64
-    });
+    // Show the completed result instead of just an error
+    return showCompletedTicketResult(interaction, ticket, guildId);
   }
 
   if (ticket.scratched[boxIndex]) {
@@ -663,10 +729,8 @@ async function handleRevealAll(interaction, guildId, userId, ticketId) {
   }
 
   if (ticket.is_complete) {
-    return interaction.reply({
-      content: '❌ This card has already been completed!',
-      flags: 64
-    });
+    // Show the completed result instead of just an error
+    return showCompletedTicketResult(interaction, ticket, guildId);
   }
 
   // Check if called from ephemeral message
