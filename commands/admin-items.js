@@ -1399,7 +1399,7 @@ async function updateGiveItemPanel(interaction, state) {
     const option = {
       label: item.name.length > 95 ? item.name.substring(0, 92) + '...' : item.name,
       value: item.id.toString(),
-      description: `${item.price.toLocaleString()} ${getCurrency(guildId)} - ${item.category}`,
+      description: `${item.price.toLocaleString()} ${getCurrency(state.guildId)} - ${item.category}`,
       default: item.id === state.itemId
     };
     // Add emoji separately (properly parsed for select menus)
