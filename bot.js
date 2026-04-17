@@ -911,6 +911,18 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Handle purge-users buttons
+  if (interaction.isButton() && interaction.customId.startsWith('purge_')) {
+    try {
+      const { handlePurgeButton } = require('./commands/purge-users');
+      await handlePurgeButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'purge button', error });
+    }
+    return;
+  }
+
   // Handle stock panel buttons
   if (interaction.isButton() && interaction.customId.startsWith('stock_')) {
     try {
