@@ -195,7 +195,7 @@ module.exports.handlePurgeButton = async function(interaction) {
       const currentPrice = calculateStockPrice(userId, guildId);
       let userCompensation = 0;
       let userFees = 0;
-      let userShareholders = 0;
+      const shareholderPayouts = []; // Track individual payouts
       
       for (const holder of shareholders) {
         if (holder.ownerId === userId) continue; // Skip self
@@ -208,20 +208,28 @@ module.exports.handlePurgeButton = async function(interaction) {
           await addToBank(guildId, holder.ownerId, netCompensation, `Liquidation: ${username} left server`);
           userCompensation += netCompensation;
           userFees += fee;
-          userShareholders++;
           results.shareholdersCompensated++;
+          
+          // Track this payout
+          shareholderPayouts.push({
+            holderId: holder.ownerId,
+            shares: holder.shares,
+            compensation: netCompensation
+          });
         }
       }
       
-      if (userShareholders > 0) {
+      if (shareholderPayouts.length > 0) {
         results.liquidated++;
         results.totalCompensation += userCompensation;
         results.totalFees += userFees;
         results.liquidationDetails.push({
           username,
-          shareholders: userShareholders,
+          userId,
+          shareholders: shareholderPayouts.length,
           compensation: userCompensation,
-          fees: userFees
+          fees: userFees,
+          payouts: shareholderPayouts
         });
       }
     }
@@ -307,16 +315,32 @@ module.exports.handlePurgeButton = async function(interaction) {
       { name: '👥 Shareholders Paid', value: results.shareholdersCompensated.toString(), inline: true }
     );
     
-    // Show liquidation breakdown (max 10)
-    if (results.liquidationDetails.length > 0) {
-      const breakdown = results.liquidationDetails.slice(0, 10).map(d => 
-        `• **${d.username}** — ${d.shareholders} shareholder(s) → ${d.compensation.toLocaleString()}`
-      ).join('\n');
+    // Show detailed liquidation breakdown per user
+    const currency = getCurrency(guildId);
+    for (const detail of results.liquidationDetails.slice(0, 5)) {
+      // Build payout list for this liquidated user
+      const payoutLines = detail.payouts.slice(0, 8).map(p => 
+        `  └ <@${p.holderId}>: ${p.shares} shares → **${p.compensation.toLocaleString()}** ${currency}`
+      );
       
-      embed.addFields({ 
-        name: '📋 Liquidation Breakdown', 
-        value: breakdown + (results.liquidationDetails.length > 10 ? `\n... and ${results.liquidationDetails.length - 10} more` : ''),
-        inline: false 
+      if (detail.payouts.length > 8) {
+        payoutLines.push(`  └ ... and ${detail.payouts.length - 8} more`);
+      }
+      
+      embed.addFields({
+        name: `💸 ${detail.username}`,
+        value: `Total: **${detail.compensation.toLocaleString()}** ${currency}\n${payoutLines.join('\n')}`,
+        inline: false
+      });
+    }
+    
+    if (results.liquidationDetails.length > 5) {
+      embed.addFields({
+        name: '📋 Additional Liquidations',
+        value: results.liquidationDetails.slice(5).map(d => 
+          `• **${d.username}** — ${d.shareholders} shareholder(s) → ${d.compensation.toLocaleString()} ${currency}`
+        ).join('\n').slice(0, 1000),
+        inline: false
       });
     }
   }
