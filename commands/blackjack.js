@@ -71,12 +71,14 @@ module.exports = {
     try {
       // Check for immediate win/push (natural blackjack)
       if (game.status === 'blackjack') {
-        const winnings = applyGamblingBonus(guildId, userId, Math.floor(bet * 2.5)); // Blackjack pays 3:2
-        await addMoney(guildId, userId, winnings, 'Blackjack win');
-        updateBlackjackStats(userId, 'blackjack', winnings - bet);
+        const profit = Math.floor(bet * 1.5); // Blackjack pays 3:2 profit
+        const boostedProfit = applyGamblingBonus(guildId, userId, profit);
+        const totalPayout = bet + boostedProfit; // Return bet + boosted profit
+        await addMoney(guildId, userId, totalPayout, 'Blackjack win');
+        updateBlackjackStats(userId, 'blackjack', boostedProfit);
         endBlackjackGame(guildId, userId);
 
-        const { embed, attachment } = await createGameEmbed(game, interaction.user, true, winnings - bet, guildId);
+        const { embed, attachment } = await createGameEmbed(game, interaction.user, true, boostedProfit, guildId);
         return interaction.editReply({ embeds: [embed], files: [attachment] });
       }
 
@@ -525,10 +527,11 @@ async function playDealerTurnAnimated(interaction, userId, guildId, game) {
   // Determine winnings and update stats
   let winnings = 0;
   if (finalGame.status === 'playerWin' || finalGame.status === 'dealerBust') {
-    winnings = finalGame.bet;
-    const payout = applyGamblingBonus(guildId, userId, finalGame.bet * 2);
-    await addMoney(guildId, userId, payout, 'Blackjack win');
-    updateBlackjackStats(userId, 'win', winnings);
+    const boostedProfit = applyGamblingBonus(guildId, userId, finalGame.bet);
+    winnings = boostedProfit;
+    const totalPayout = finalGame.bet + boostedProfit; // Return bet + boosted profit
+    await addMoney(guildId, userId, totalPayout, 'Blackjack win');
+    updateBlackjackStats(userId, 'win', boostedProfit);
   } else if (finalGame.status === 'push') {
     await addMoney(guildId, userId, finalGame.bet, 'Blackjack push');
     updateBlackjackStats(userId, 'push', 0);
@@ -704,16 +707,18 @@ async function resolveSplitAndShow(interaction, userId, guildId, game) {
   let splitWin = 0;
   
   if (finalGame.mainResult === 'win') {
-    mainWin = finalGame.bet;
-    const mainPayout = applyGamblingBonus(guildId, userId, finalGame.bet * 2);
+    const mainBoostedProfit = applyGamblingBonus(guildId, userId, finalGame.bet);
+    mainWin = mainBoostedProfit;
+    const mainPayout = finalGame.bet + mainBoostedProfit; // Return bet + boosted profit
     await addMoney(guildId, userId, mainPayout, 'Blackjack win (Hand 1)');
   } else if (finalGame.mainResult === 'push') {
     await addMoney(guildId, userId, finalGame.bet, 'Blackjack push (Hand 1)');
   }
   
   if (finalGame.splitResult === 'win') {
-    splitWin = finalGame.splitBet;
-    const splitPayout = applyGamblingBonus(guildId, userId, finalGame.splitBet * 2);
+    const splitBoostedProfit = applyGamblingBonus(guildId, userId, finalGame.splitBet);
+    splitWin = splitBoostedProfit;
+    const splitPayout = finalGame.splitBet + splitBoostedProfit; // Return bet + boosted profit
     await addMoney(guildId, userId, splitPayout, 'Blackjack win (Hand 2)');
   } else if (finalGame.splitResult === 'push') {
     await addMoney(guildId, userId, finalGame.splitBet, 'Blackjack push (Hand 2)');

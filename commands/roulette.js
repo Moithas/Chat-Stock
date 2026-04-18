@@ -156,15 +156,17 @@ async function spinWheel(table) {
     const won = checkRouletteBet(bet.choice, number);
     
     if (won) {
-      const winnings = applyGamblingBonus(table.guildId, bet.userId, bet.amount * bet.payout);
-      await addMoney(table.guildId, bet.userId, winnings, 'Roulette win');
-      updateRouletteStats(bet.userId, true, winnings - bet.amount);
-      totalWon += winnings - bet.amount;
+      const profit = bet.amount * (bet.payout - 1); // Profit only (payout includes original bet)
+      const boostedProfit = applyGamblingBonus(table.guildId, bet.userId, profit);
+      const totalPayout = bet.amount + boostedProfit; // Return bet + boosted profit
+      await addMoney(table.guildId, bet.userId, totalPayout, 'Roulette win');
+      updateRouletteStats(bet.userId, true, boostedProfit);
+      totalWon += boostedProfit;
       
       results.push({
         ...bet,
         won: true,
-        winnings: winnings - bet.amount
+        winnings: boostedProfit
       });
     } else {
       updateRouletteStats(bet.userId, false, bet.amount);
