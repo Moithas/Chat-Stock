@@ -154,6 +154,12 @@ async function spinWheel(table) {
     ['low', 'high']
   ];
   
+  // Full coverage bets (all three = covers all 36 numbers)
+  const FULL_COVERAGE = [
+    ['col1', 'col2', 'col3'],
+    ['1st12', '2nd12', '3rd12']
+  ];
+  
   const hedgedPlayers = new Set();
   const playerChoices = new Map();
   
@@ -165,8 +171,16 @@ async function spinWheel(table) {
   }
   
   for (const [odId, choices] of playerChoices) {
+    // Check opposing 1:1 bets
     for (const [a, b] of OPPOSING_BETS) {
       if (choices.has(a) && choices.has(b)) {
+        hedgedPlayers.add(odId);
+        break;
+      }
+    }
+    // Check full coverage (all three columns or all three dozens)
+    for (const trio of FULL_COVERAGE) {
+      if (trio.every(c => choices.has(c))) {
         hedgedPlayers.add(odId);
         break;
       }
