@@ -147,6 +147,32 @@ async function spinWheel(table) {
   const color = getNumberColor(number);
   recordRouletteSpin(number);
 
+  // Detect hedged bets (opposing outcomes) - players with hedges don't get gambling bonus
+  const OPPOSING_BETS = [
+    ['red', 'black'],
+    ['odd', 'even'],
+    ['low', 'high']
+  ];
+  
+  const hedgedPlayers = new Set();
+  const playerChoices = new Map();
+  
+  for (const bet of table.bets) {
+    if (!playerChoices.has(bet.userId)) {
+      playerChoices.set(bet.userId, new Set());
+    }
+    playerChoices.get(bet.userId).add(bet.choice);
+  }
+  
+  for (const [odId, choices] of playerChoices) {
+    for (const [a, b] of OPPOSING_BETS) {
+      if (choices.has(a) && choices.has(b)) {
+        hedgedPlayers.add(odId);
+        break;
+      }
+    }
+  }
+
   // Process all bets
   const results = [];
   let totalWon = 0;
@@ -154,10 +180,12 @@ async function spinWheel(table) {
 
   for (const bet of table.bets) {
     const won = checkRouletteBet(bet.choice, number);
+    const isHedged = hedgedPlayers.has(bet.userId);
     
     if (won) {
       const profit = bet.amount * (bet.payout - 1); // Profit only (payout includes original bet)
-      const boostedProfit = applyGamblingBonus(table.guildId, bet.userId, profit);
+      // No gambling bonus if player hedged their bets
+      const boostedProfit = isHedged ? profit : applyGamblingBonus(table.guildId, bet.userId, profit);
       const totalPayout = bet.amount + boostedProfit; // Return bet + boosted profit
       await addMoney(table.guildId, bet.userId, totalPayout, 'Roulette win');
       updateRouletteStats(bet.userId, true, boostedProfit);
@@ -166,7 +194,8 @@ async function spinWheel(table) {
       results.push({
         ...bet,
         won: true,
-        winnings: boostedProfit
+        winnings: boostedProfit,
+        hedged: isHedged
       });
     } else {
       updateRouletteStats(bet.userId, false, bet.amount);
@@ -175,7 +204,8 @@ async function spinWheel(table) {
       results.push({
         ...bet,
         won: false,
-        winnings: -bet.amount
+        winnings: -bet.amount,
+        hedged: isHedged
       });
     }
   }
@@ -208,6 +238,7 @@ async function spinWheel(table) {
 
   // Add field for each player's results
   for (const [odId, data] of playerResults) {
+    const isHedged = data.results.some(r => r.hedged);
     const resultLines = data.results.map(r => {
       const icon = r.won ? '✅' : '❌';
       const amount = r.won ? `+${r.winnings.toLocaleString()}` : `${r.winnings.toLocaleString()}`;
@@ -219,9 +250,11 @@ async function spinWheel(table) {
       ? `+${data.netWinnings.toLocaleString()}` 
       : data.netWinnings.toLocaleString();
     
-    // Pet gambling bonus tag for winners
+    // Pet gambling bonus tag for winners (but not if hedged)
     let playerPetTag = '';
-    if (data.netWinnings > 0) {
+    if (isHedged) {
+      playerPetTag = ' ⚖️ *hedged*';
+    } else if (data.netWinnings > 0) {
       try {
         const bonus = getPetBonusDecimal(table.guildId, odId, 'gambling') * 100;
         if (bonus > 0) playerPetTag = ` (🐾 +${bonus.toFixed(1)}%)`;
