@@ -70,6 +70,56 @@ function calculateMaxAffordableShares(guildId, userId, balance, price, feePercen
   return maxShares;
 }
 
+// Build price breakdown string for buy/sell confirmations
+function buildPriceBreakdown(guildId, userId, targetUserId, shares, isSelling = false) {
+  const currency = getCurrency(guildId);
+  
+  // Get base price without any modifiers (excludeEvents=true, lpModifier=0)
+  const excludeBuyer = isSelling ? userId : null;
+  const basePrice = calculateStockPrice(targetUserId, guildId, excludeBuyer, true, 0);
+  
+  // Get LP modifier
+  const lpMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
+  
+  // Get market event
+  const activeEvent = getActiveMarketEvent(guildId);
+  const eventMod = activeEvent ? (activeEvent.multiplier - 1) * 100 : 0; // Convert to percentage
+  
+  // Calculate final price with both modifiers
+  const finalPrice = calculateStockPrice(targetUserId, guildId, excludeBuyer, false, lpMod);
+  
+  // Build breakdown lines
+  const lines = [];
+  lines.push(`📊 **Base Price:** ${Math.round(basePrice).toLocaleString()} ${currency}/share`);
+  
+  if (activeEvent && eventMod !== 0) {
+    const eventSign = eventMod > 0 ? '+' : '';
+    const eventEmoji = eventMod > 0 ? '📈' : '📉';
+    lines.push(`${eventEmoji} **${activeEvent.name}:** ${eventSign}${eventMod.toFixed(1)}%`);
+  }
+  
+  if (lpMod !== 0) {
+    const lpSign = lpMod > 0 ? '+' : '';
+    const lpEmoji = lpMod > 0 ? '🍀' : '🪙';
+    lines.push(`${lpEmoji} **Lucky Penny:** ${lpSign}${lpMod}%`);
+  }
+  
+  // Show final price if there are modifiers
+  if (activeEvent || lpMod !== 0) {
+    lines.push(`💵 **Final Price:** ${Math.round(finalPrice).toLocaleString()} ${currency}/share`);
+  }
+  
+  return {
+    breakdown: lines.join('\n'),
+    basePrice,
+    finalPrice,
+    lpMod,
+    eventMod,
+    activeEvent,
+    hasModifiers: activeEvent || lpMod !== 0
+  };
+}
+
 // Generate price chart
 async function generatePriceChart(userId, username, timeRange, currentPrice) {
   const range = TIME_RANGES[timeRange];
@@ -980,11 +1030,9 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
     username = user.username;
   } catch (e) {}
   
-  const basePrice = calculateStockPrice(targetUserId, guildId);
-  const lpBuyMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
-  const currentPrice = lpBuyMod !== 0
-    ? calculateStockPrice(targetUserId, guildId, null, false, lpBuyMod)
-    : basePrice;
+  // Build price breakdown with all modifiers
+  const priceInfo = buildPriceBreakdown(guildId, userId, targetUserId, 1, false);
+  const currentPrice = priceInfo.finalPrice;
   
   // Get balance and calculate max shares
   let balance = 0;
@@ -1028,35 +1076,31 @@ async function showBuyConfirmation(interaction, guildId, userId, targetUserId, a
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle('📋 Confirm Purchase')
-    .setDescription(`You are about to buy shares of **${username}**`)
-    .addFields(
-      { name: '📊 Shares', value: `${shares.toLocaleString()}`, inline: true },
-      { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '\u200b', value: '\u200b', inline: true },
-      { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '💰 Trading Fee', value: `${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '\u200b', value: '\u200b', inline: true }
-    );
+    .setDescription(`You are about to buy **${shares.toLocaleString()}** shares of **${username}**`);
+  
+  // Add price breakdown if there are modifiers
+  if (priceInfo.hasModifiers) {
+    embed.addFields({ name: '💹 Price Breakdown', value: priceInfo.breakdown, inline: false });
+  } else {
+    embed.addFields({ name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true });
+  }
+  
+  // Cost breakdown
+  embed.addFields(
+    { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+    { name: '💰 Trading Fee', value: `${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
+  );
   
   // Add infamy surcharge line if applicable
   if (feeBreakdown.infamyFee > 0) {
     embed.addFields(
-      { name: `🔥 Infamy Surcharge (+${feeBreakdown.infamyRate}%)`, value: `${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
+      { name: `🔥 Infamy (+${feeBreakdown.infamyRate}%)`, value: `${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     );
   }
   
   embed.addFields(
     { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
   );
-  
-  // Add Lucky Penny modifier line if active
-  if (lpBuyMod !== 0) {
-    const lpDiff = subtotal - Math.round(basePrice * shares);
-    const lpSign = lpDiff >= 0 ? '+' : '';
-    embed.spliceFields(3, 0,
-      { name: `🪙 Lucky Penny (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
-    );
-  }
   
   embed.setFooter({ text: 'Do you want to proceed with this purchase?' });
   
@@ -1086,11 +1130,9 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
     username = user.username;
   } catch (e) {}
   
-  const basePrice = calculateStockPrice(targetUserId, guildId);
-  const lpBuyMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
-  const currentPrice = lpBuyMod !== 0
-    ? calculateStockPrice(targetUserId, guildId, null, false, lpBuyMod)
-    : basePrice;
+  // Build price breakdown with all modifiers
+  const priceInfo = buildPriceBreakdown(guildId, userId, targetUserId, 1, false);
+  const currentPrice = priceInfo.finalPrice;
   
   // Get balance and calculate max shares
   let balance = 0;
@@ -1134,35 +1176,31 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle('📋 Confirm Purchase')
-    .setDescription(`You are about to buy shares of **${username}**`)
-    .addFields(
-      { name: '📊 Shares', value: `${shares.toLocaleString()}`, inline: true },
-      { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '\u200b', value: '\u200b', inline: true },
-      { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '💰 Trading Fee', value: `${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '\u200b', value: '\u200b', inline: true }
-    );
+    .setDescription(`You are about to buy **${shares.toLocaleString()}** shares of **${username}**`);
+  
+  // Add price breakdown if there are modifiers
+  if (priceInfo.hasModifiers) {
+    embed.addFields({ name: '💹 Price Breakdown', value: priceInfo.breakdown, inline: false });
+  } else {
+    embed.addFields({ name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true });
+  }
+  
+  // Cost breakdown
+  embed.addFields(
+    { name: '📝 Subtotal', value: `${subtotal.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+    { name: '💰 Trading Fee', value: `${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
+  );
   
   // Add infamy surcharge line if applicable
   if (feeBreakdown.infamyFee > 0) {
     embed.addFields(
-      { name: `🔥 Infamy Surcharge (+${feeBreakdown.infamyRate}%)`, value: `${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
+      { name: `🔥 Infamy (+${feeBreakdown.infamyRate}%)`, value: `${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     );
   }
   
   embed.addFields(
     { name: '💳 Total Cost', value: `**${totalCost.toLocaleString()}** ${getCurrency(guildId)}`, inline: false }
   );
-  
-  // Add Lucky Penny modifier line if active
-  if (lpBuyMod !== 0) {
-    const lpDiff = subtotal - Math.round(basePrice * shares);
-    const lpSign = lpDiff >= 0 ? '+' : '';
-    embed.spliceFields(3, 0,
-      { name: `🪙 Lucky Penny (${lpBuyMod > 0 ? '+' : ''}${lpBuyMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
-    );
-  }
   
   embed.setFooter({ text: 'Do you want to proceed with this purchase?' });
   
@@ -1226,11 +1264,10 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
     username = user.username;
   } catch (e) {}
   
-  const baseSellPrice = calculateStockPrice(targetUserId, guildId, userId);
-  const lpSellMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
-  const currentPrice = lpSellMod !== 0
-    ? calculateStockPrice(targetUserId, guildId, userId, false, lpSellMod)
-    : baseSellPrice;
+  // Build price breakdown with all modifiers (isSelling=true excludes self from demand calc)
+  const priceInfo = buildPriceBreakdown(guildId, userId, targetUserId, shares, true);
+  const currentPrice = priceInfo.finalPrice;
+  
   const grossValue = Math.round(currentPrice * shares);
   const feeBreakdown = calculateSellFeeBreakdown(guildId, grossValue, userId);
   const fee = feeBreakdown.total;
@@ -1244,29 +1281,25 @@ async function showSellConfirmation(interaction, guildId, userId, targetUserId, 
   const embed = new EmbedBuilder()
     .setColor(0xe74c3c)
     .setTitle('📋 Confirm Sale')
-    .setDescription(`You are about to sell shares of **${username}**`)
-    .addFields(
-      { name: '📊 Shares', value: `${shares.toLocaleString()}`, inline: true },
-      { name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '\u200b', value: '\u200b', inline: true },
-      { name: '📝 Gross Sale', value: `${grossValue.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '💰 Trading Fee', value: `-${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-      { name: '\u200b', value: '\u200b', inline: true }
-    );
+    .setDescription(`You are about to sell **${shares.toLocaleString()}** shares of **${username}**`);
+  
+  // Add price breakdown if there are modifiers
+  if (priceInfo.hasModifiers) {
+    embed.addFields({ name: '💹 Price Breakdown', value: priceInfo.breakdown, inline: false });
+  } else {
+    embed.addFields({ name: '💵 Price/Share', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true });
+  }
+  
+  // Gross sale value
+  embed.addFields(
+    { name: '📝 Gross Sale', value: `${grossValue.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+    { name: '💰 Trading Fee', value: `-${feeBreakdown.baseFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
+  );
   
   // Add infamy surcharge line if applicable
   if (feeBreakdown.infamyFee > 0) {
     embed.addFields(
-      { name: `🔥 Infamy Surcharge (+${feeBreakdown.infamyRate}%)`, value: `-${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
-    );
-  }
-  
-  // Add Lucky Penny modifier line if active
-  if (lpSellMod !== 0) {
-    const lpDiff = grossValue - Math.round(baseSellPrice * shares);
-    const lpSign = lpDiff >= 0 ? '+' : '';
-    embed.addFields(
-      { name: `🪙 Lucky Penny (${lpSellMod > 0 ? '+' : ''}${lpSellMod}%)`, value: `${lpSign}${lpDiff.toLocaleString()} ${getCurrency(guildId)}`, inline: false }
+      { name: `🔥 Infamy (+${feeBreakdown.infamyRate}%)`, value: `-${feeBreakdown.infamyFee.toLocaleString()} ${getCurrency(guildId)}`, inline: true }
     );
   }
   
