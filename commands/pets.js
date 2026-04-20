@@ -824,7 +824,7 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
       .setDisabled(!settings.breedingEnabled || !breedCheck.canBreed),
     new ButtonBuilder()
       .setCustomId(`pet_transfer_${pet.id}_u_${userId}`)
-      .setLabel('Give/Sell')
+      .setLabel('Sell')
       .setEmoji('🎁')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!settings.transferEnabled || !transferCheck.canTransfer),
