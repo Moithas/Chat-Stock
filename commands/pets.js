@@ -785,26 +785,37 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   const canTrain = phase.canTrain && trainCd <= 0;
   const isFull = effective.hunger >= 100 && effective.happiness >= 100;
 
+  // Row 3 setup (breeding, transfer, lineage)
+  const breedCheck = canBreed(pet, guildId);
+  const transferCheck = canTransferPet(pet, guildId);
+  const hasLineage = pet.source === 'bred' && (pet.mother_id || pet.father_id);
+
+  // Row 1: Feed, Play, Train
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`pet_feedmenu_${pet.id}_u_${userId}`).setLabel('Feed').setEmoji('🍖').setStyle(ButtonStyle.Success).setDisabled(isFull),
     new ButtonBuilder().setCustomId(`pet_play_${pet.id}_u_${userId}`).setLabel('Play').setEmoji('🎮').setStyle(ButtonStyle.Primary).setDisabled(!canPlay),
     new ButtonBuilder().setCustomId(`pet_train_${pet.id}_u_${userId}`).setLabel('Train').setEmoji('📚').setStyle(ButtonStyle.Primary).setDisabled(!canTrain),
-    new ButtonBuilder().setCustomId(`pet_active_${pet.id}_u_${userId}`).setLabel(isActive ? 'Active' : 'Set Active').setEmoji('⚔️').setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(isActive),
   );
 
+  // Row 2: Set Active, All Pets
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`pet_rename_${pet.id}_u_${userId}`).setLabel('Rename').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`pet_release_${pet.id}_u_${userId}`).setLabel('Release').setEmoji('🔓').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`pet_active_${pet.id}_u_${userId}`).setLabel(isActive ? 'Active' : 'Set Active').setEmoji('⚔️').setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(isActive),
     new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('All Pets').setEmoji('🐾').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
   );
 
-  // Row 3: Breeding, Transfer, and Lineage buttons
-  const breedCheck = canBreed(pet, guildId);
-  const transferCheck = canTransferPet(pet, guildId);
-  const hasLineage = pet.source === 'bred' && (pet.mother_id || pet.father_id);
-  
+  // Row 3: Rename, Family Tree
   const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_rename_${pet.id}_u_${userId}`).setLabel('Rename').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`pet_lineage_${pet.id}_u_${userId}`)
+      .setLabel('Family Tree')
+      .setEmoji('🧬')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!hasLineage),
+  );
+
+  // Row 4: Breed, Give/Sell, Release
+  const row4 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`pet_breed_${pet.id}_u_${userId}`)
       .setLabel('Breed')
@@ -817,15 +828,15 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
       .setEmoji('🎁')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!settings.transferEnabled || !transferCheck.canTransfer),
-    new ButtonBuilder()
-      .setCustomId(`pet_lineage_${pet.id}_u_${userId}`)
-      .setLabel('Family Tree')
-      .setEmoji('🧬')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(!hasLineage),
+    new ButtonBuilder().setCustomId(`pet_release_${pet.id}_u_${userId}`).setLabel('Release').setEmoji('🔓').setStyle(ButtonStyle.Danger),
   );
 
-  return interaction.update({ embeds: [embed], components: [row1, row2, row3], files });
+  // Row 5: Back
+  const row5 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
+  );
+
+  return interaction.update({ embeds: [embed], components: [row1, row2, row3, row4, row5], files });
 }
 
 // ================== PET ACTIONS ==================
