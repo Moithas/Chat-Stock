@@ -795,9 +795,7 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   const canTrain = phase.canTrain && trainCd <= 0;
   const isFull = effective.hunger >= 100 && effective.happiness >= 100;
 
-  // Row 3 setup (breeding, transfer, lineage)
-  const breedCheck = canBreed(pet, guildId);
-  const transferCheck = canTransferPet(pet, guildId);
+  // Row 3 setup (lineage)
   const hasLineage = pet.source === 'bred' && (pet.mother_id || pet.father_id);
 
   // Row 1: Feed, Play, Train
@@ -813,40 +811,24 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
     new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('All Pets').setEmoji('🐾').setStyle(ButtonStyle.Secondary),
   );
 
-  // Row 3: Rename, Family Tree
+  // Row 3: Rename, Ancestry
   const row3 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`pet_rename_${pet.id}_u_${userId}`).setLabel('Rename').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`pet_lineage_${pet.id}_u_${userId}`)
-      .setLabel('Family Tree')
+      .setLabel('Ancestry')
       .setEmoji('🧬')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!hasLineage),
   );
 
-  // Row 4: Breed, Give/Sell, Release
+  // Row 4: Release, Back
   const row4 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`pet_breed_${pet.id}_u_${userId}`)
-      .setLabel('Breed')
-      .setEmoji('💕')
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(!settings.breedingEnabled || !breedCheck.canBreed),
-    new ButtonBuilder()
-      .setCustomId(`pet_transfer_${pet.id}_u_${userId}`)
-      .setLabel('Sell')
-      .setEmoji('🎁')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(!settings.transferEnabled || !transferCheck.canTransfer),
     new ButtonBuilder().setCustomId(`pet_release_${pet.id}_u_${userId}`).setLabel('Release').setEmoji('🔓').setStyle(ButtonStyle.Danger),
-  );
-
-  // Row 5: Back
-  const row5 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
   );
 
-  return interaction.update({ embeds: [embed], components: [row1, row2, row3, row4, row5], files });
+  return interaction.update({ embeds: [embed], components: [row1, row2, row3, row4], files });
 }
 
 // ================== PET ACTIONS ==================
