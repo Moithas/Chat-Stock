@@ -318,7 +318,7 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
 
   // Check for births ready
   const birthsReady = gestating.filter(p => p.gestation_end <= Date.now()).length;
-  const breedingLabel = birthsReady > 0 ? `Breeding (${birthsReady} ready!)` : 'Breeding';
+  const breedingLabel = birthsReady > 0 ? `Breed (${birthsReady} ready!)` : 'Breed';
   const breedingStyle = birthsReady > 0 ? ButtonStyle.Success : ButtonStyle.Secondary;
 
   // Row 1: My Pets, My Eggs
@@ -333,15 +333,15 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
     new ButtonBuilder().setCustomId(`pet_panel_kennel_u_${userId}`).setLabel('Kennel').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
   );
 
-  // Row 3: Sell, Trade
+  // Row 3: Breed, Sell, Trade
   const row3 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`pet_transfer_menu_u_${userId}`).setLabel('Sell').setEmoji('🔄').setStyle(ButtonStyle.Secondary).setDisabled(!settings.transferEnabled || pets.length === 0),
+    new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel(breedingLabel).setEmoji('💕').setStyle(breedingStyle).setDisabled(!settings.breedingEnabled),
+    new ButtonBuilder().setCustomId(`pet_transfer_menu_u_${userId}`).setLabel('Sell').setEmoji('🎁').setStyle(ButtonStyle.Secondary).setDisabled(!settings.transferEnabled || pets.length === 0),
     new ButtonBuilder().setCustomId(`pet_trade_menu_u_${userId}`).setLabel('Trade').setEmoji('🤝').setStyle(ButtonStyle.Secondary).setDisabled(!settings.transferEnabled || pets.length === 0),
   );
 
-  // Row 4: Breeding, Dismiss
+  // Row 4: Dismiss
   const row4 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel(breedingLabel).setEmoji('💕').setStyle(breedingStyle).setDisabled(!settings.breedingEnabled),
     new ButtonBuilder().setCustomId(`pet_dismiss_u_${userId}`).setLabel('Dismiss').setEmoji('❌').setStyle(ButtonStyle.Danger),
   );
 
