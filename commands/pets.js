@@ -321,21 +321,31 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
   const breedingLabel = birthsReady > 0 ? `Breeding (${birthsReady} ready!)` : 'Breeding';
   const breedingStyle = birthsReady > 0 ? ButtonStyle.Success : ButtonStyle.Secondary;
 
+  // Row 1: My Pets, My Eggs
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`pet_panel_shop_u_${userId}`).setLabel('Pet Shop').setEmoji('🛒').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('My Pets').setEmoji('🐾').setStyle(ButtonStyle.Primary).setDisabled(pets.length === 0),
     new ButtonBuilder().setCustomId(`pet_myeggs_u_${userId}`).setLabel('My Eggs').setEmoji('🥚').setStyle(ButtonStyle.Primary).setDisabled(eggs.length === 0),
+  );
+
+  // Row 2: Pet Shop, Kennel
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_panel_shop_u_${userId}`).setLabel('Pet Shop').setEmoji('🛒').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`pet_panel_kennel_u_${userId}`).setLabel('Kennel').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
   );
 
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel(breedingLabel).setEmoji('💕').setStyle(breedingStyle).setDisabled(!settings.breedingEnabled),
-    new ButtonBuilder().setCustomId(`pet_transfer_menu_u_${userId}`).setLabel('Give/Sell').setEmoji('🔄').setStyle(ButtonStyle.Secondary).setDisabled(!settings.transferEnabled || pets.length === 0),
+  // Row 3: Sell, Trade
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_transfer_menu_u_${userId}`).setLabel('Sell').setEmoji('🔄').setStyle(ButtonStyle.Secondary).setDisabled(!settings.transferEnabled || pets.length === 0),
     new ButtonBuilder().setCustomId(`pet_trade_menu_u_${userId}`).setLabel('Trade').setEmoji('🤝').setStyle(ButtonStyle.Secondary).setDisabled(!settings.transferEnabled || pets.length === 0),
+  );
+
+  // Row 4: Breeding, Dismiss
+  const row4 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_breed_menu_u_${userId}`).setLabel(breedingLabel).setEmoji('💕').setStyle(breedingStyle).setDisabled(!settings.breedingEnabled),
     new ButtonBuilder().setCustomId(`pet_dismiss_u_${userId}`).setLabel('Dismiss').setEmoji('❌').setStyle(ButtonStyle.Danger),
   );
 
-  const options = { embeds: [embed], components: [row1, row2] };
+  const options = { embeds: [embed], components: [row1, row2, row3, row4] };
   if (isDeferred) return interaction.editReply(options);
   if (isUpdate) return interaction.update(options);
   return interaction.reply(options);
