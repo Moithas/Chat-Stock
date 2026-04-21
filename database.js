@@ -741,6 +741,19 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
     price *= demandMultiplier;
   }
 
+  // Apply temporary demand momentum from fresh net buys/sells.
+  if (guildId) {
+    try {
+      const { getPendingDemandMomentum } = require('./market');
+      const demandMomentum = getPendingDemandMomentum(guildId, userId);
+      if (demandMomentum !== 0) {
+        price *= (1 + demandMomentum);
+      }
+    } catch (e) {
+      // Market module not loaded yet, skip momentum bonus
+    }
+  }
+
   // Apply price modifier from splits
   const priceModifier = user.price_modifier || 1.0;
   price *= priceModifier;

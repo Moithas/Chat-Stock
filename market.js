@@ -319,6 +319,43 @@ function getEffectiveShareCount(guildId, stockUserId, actualShares) {
   return Math.max(0, actualShares - pendingImpact);
 }
 
+// Temporary demand momentum from recent net buy/sell pressure.
+// This lets fresh buying matter even when long-term demand cap is already reached.
+function getPendingDemandMomentum(guildId, stockUserId) {
+  const settings = getMarketSettings(guildId);
+
+  if (!settings.priceImpactEnabled || !db) {
+    return 0;
+  }
+
+  const delayMs = settings.priceImpactDelayMinutes * 60 * 1000;
+  const now = Date.now();
+
+  const result = db.exec(`
+    SELECT * FROM pending_impacts
+    WHERE guild_id = ? AND stock_user_id = ? AND fully_applied = 0
+  `, [guildId, stockUserId]);
+
+  if (result.length === 0 || result[0].values.length === 0) {
+    return 0;
+  }
+
+  let netPendingShares = 0;
+
+  for (const row of result[0].values) {
+    const cols = result[0].columns;
+    const impact = cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
+
+    const elapsed = now - impact.timestamp;
+    const progress = Math.min(elapsed / delayMs, 1);
+    const unappliedRatio = 1 - progress;
+    netPendingShares += impact.shares_delta * unappliedRatio;
+  }
+
+  // 1000 net pending shares => +/-2% momentum; capped to +/-8% for safety.
+  return Math.max(-0.08, Math.min(netPendingShares * 0.00002, 0.08));
+}
+
 // Clean up old fully applied impacts periodically
 function cleanupOldImpacts() {
   if (!db) return;
@@ -481,6 +518,7 @@ module.exports = {
   checkSellCooldown,
   recordPriceImpact,
   getEffectiveShareCount,
+  getPendingDemandMomentum,
   calculateCapitalGainsTax,
   previewCapitalGainsTax,
   updateSellCooldown,
