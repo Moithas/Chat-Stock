@@ -169,6 +169,8 @@ module.exports = {
     if (customId.startsWith('pet_trade_confirm_')) return handleTradeConfirm(interaction, guildId, userId, settings);
     // Lineage button
     if (customId.startsWith('pet_lineage_')) return handleLineageView(interaction, guildId, userId, settings);
+
+    return interaction.reply({ content: '❌ Unsupported pet interaction. Please reopen `/pets` and try again.', flags: 64 }).catch(() => {});
   },
 
   async handleSelectMenu(interaction) {
@@ -3973,114 +3975,133 @@ async function handleTradeDecline(interaction, guildId, userId, settings) {
 // ================== LINEAGE / FAMILY TREE ==================
 
 async function handleLineageView(interaction, guildId, userId, settings) {
-  const petId = parsePetIdFromCustomId(interaction.customId);
-  const pet = getPet(petId);
+  try {
+    const petId = parsePetIdFromCustomId(interaction.customId);
+    const pet = getPet(petId);
 
-  if (!pet) {
-    return interaction.reply({ content: '❌ Pet not found.', flags: 64 });
-  }
+    if (!pet) {
+      return interaction.reply({ content: '❌ Pet not found.', flags: 64 });
+    }
 
-  await interaction.deferUpdate();
+    await interaction.deferUpdate();
 
-  const speciesData = SPECIES[pet.species];
-  const rarityData = RARITIES[pet.rarity];
+    const speciesData = SPECIES[pet.species] || { emoji: '🐾', name: 'Unknown' };
+    const rarityData = RARITIES[pet.rarity] || { name: 'Unknown', color: 0x95a5a6 };
+    const safeName = (value, fallback = '(unknown)', max = 48) => {
+      if (value == null) return fallback;
+      const text = String(value).trim();
+      if (!text) return fallback;
+      return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+    };
 
-  // Build the family tree
-  let treeDesc = '';
+    // Build the family tree
+    let treeDesc = '';
 
-  // The pet itself
-  const sexEmoji = pet.sex === 'M' ? '♂️' : '♀️';
-  const shinyStr = pet.shiny ? '✨ ' : '';
-  treeDesc += `**${shinyStr}${speciesData.emoji} ${pet.name}** ${sexEmoji}\n`;
-  treeDesc += `${rarityData.name} ${speciesData.name}\n\n`;
+    // The pet itself
+    const sexEmoji = pet.sex === 'M' ? '♂️' : '♀️';
+    const shinyStr = pet.shiny ? '✨ ' : '';
+    treeDesc += `**${shinyStr}${speciesData.emoji} ${safeName(pet.name, 'Unnamed')}** ${sexEmoji}\n`;
+    treeDesc += `${rarityData.name} ${speciesData.name}\n\n`;
 
-  // Parents
-  treeDesc += '**─── Parents ───**\n';
-  const motherName = pet.mother_name || '(unknown)';
-  const fatherName = pet.father_name || '(unknown)';
-  
-  // Try to get parent species if they still exist
-  const mother = pet.mother_id ? getPet(pet.mother_id) : null;
-  const father = pet.father_id ? getPet(pet.father_id) : null;
-  
-  const motherSpecies = mother ? SPECIES[mother.species] : null;
-  const fatherSpecies = father ? SPECIES[father.species] : null;
-  
-  treeDesc += `👩 Mother: **${motherName}**`;
-  if (motherSpecies) treeDesc += ` ${motherSpecies.emoji}`;
-  treeDesc += '\n';
-  
-  treeDesc += `👨 Father: **${fatherName}**`;
-  if (fatherSpecies) treeDesc += ` ${fatherSpecies.emoji}`;
-  treeDesc += '\n\n';
+    // Parents
+    treeDesc += '**─── Parents ───**\n';
+    const motherName = safeName(pet.mother_name);
+    const fatherName = safeName(pet.father_name);
 
-  // Grandparents (maternal side)
-  const hasMaternalGrandparents = pet.maternal_grandmother_name || pet.maternal_grandfather_name;
-  const hasPaternalGrandparents = pet.paternal_grandmother_name || pet.paternal_grandfather_name;
+    // Try to get parent species if they still exist
+    const mother = pet.mother_id ? getPet(pet.mother_id) : null;
+    const father = pet.father_id ? getPet(pet.father_id) : null;
 
-  if (hasMaternalGrandparents || hasPaternalGrandparents) {
-    treeDesc += '**─── Grandparents ───**\n';
-    
-    if (hasMaternalGrandparents) {
-      treeDesc += `*Maternal side (${motherName}):*\n`;
-      if (pet.maternal_grandmother_name) {
-        treeDesc += `  👵 Grandmother: **${pet.maternal_grandmother_name}**\n`;
+    const motherSpecies = mother ? SPECIES[mother.species] : null;
+    const fatherSpecies = father ? SPECIES[father.species] : null;
+
+    treeDesc += `👩 Mother: **${motherName}**`;
+    if (motherSpecies) treeDesc += ` ${motherSpecies.emoji}`;
+    treeDesc += '\n';
+
+    treeDesc += `👨 Father: **${fatherName}**`;
+    if (fatherSpecies) treeDesc += ` ${fatherSpecies.emoji}`;
+    treeDesc += '\n\n';
+
+    // Grandparents (maternal side)
+    const hasMaternalGrandparents = pet.maternal_grandmother_name || pet.maternal_grandfather_name;
+    const hasPaternalGrandparents = pet.paternal_grandmother_name || pet.paternal_grandfather_name;
+
+    if (hasMaternalGrandparents || hasPaternalGrandparents) {
+      treeDesc += '**─── Grandparents ───**\n';
+
+      if (hasMaternalGrandparents) {
+        treeDesc += `*Maternal side (${motherName}):*\n`;
+        if (pet.maternal_grandmother_name) {
+          treeDesc += `  👵 Grandmother: **${safeName(pet.maternal_grandmother_name)}**\n`;
+        }
+        if (pet.maternal_grandfather_name) {
+          treeDesc += `  👴 Grandfather: **${safeName(pet.maternal_grandfather_name)}**\n`;
+        }
       }
-      if (pet.maternal_grandfather_name) {
-        treeDesc += `  👴 Grandfather: **${pet.maternal_grandfather_name}**\n`;
+
+      if (hasPaternalGrandparents) {
+        treeDesc += `*Paternal side (${fatherName}):*\n`;
+        if (pet.paternal_grandmother_name) {
+          treeDesc += `  👵 Grandmother: **${safeName(pet.paternal_grandmother_name)}**\n`;
+        }
+        if (pet.paternal_grandfather_name) {
+          treeDesc += `  👴 Grandfather: **${safeName(pet.paternal_grandfather_name)}**\n`;
+        }
       }
     }
-    
-    if (hasPaternalGrandparents) {
-      treeDesc += `*Paternal side (${fatherName}):*\n`;
-      if (pet.paternal_grandmother_name) {
-        treeDesc += `  👵 Grandmother: **${pet.paternal_grandmother_name}**\n`;
-      }
-      if (pet.paternal_grandfather_name) {
-        treeDesc += `  👴 Grandfather: **${pet.paternal_grandfather_name}**\n`;
-      }
+
+    // Keep embed description under Discord limits.
+    if (treeDesc.length > 3800) {
+      treeDesc = `${treeDesc.slice(0, 3797)}...`;
     }
+
+    // Count generations
+    let generations = 1;
+    if (pet.mother_name || pet.father_name) generations = 2;
+    if (hasMaternalGrandparents || hasPaternalGrandparents) generations = 3;
+
+    const embed = new EmbedBuilder()
+      .setColor(rarityData.color)
+      .setTitle(`🧬 Family Tree: ${safeName(pet.name, 'Unnamed', 64)}`)
+      .setDescription(treeDesc)
+      .setFooter({ text: `${generations} generation${generations !== 1 ? 's' : ''} of lineage recorded` })
+      .setTimestamp();
+
+    // Attach pet image
+    const phase = getPhase(pet.level);
+    const petImage = await getPetImage(pet.species, phase.name.toLowerCase(), pet.variant || 1, pet.shiny);
+    let files = [];
+    if (petImage) {
+      const attachment = new AttachmentBuilder(petImage.data, { name: petImage.fileName });
+      embed.setThumbnail(`attachment://${petImage.fileName}`);
+      files.push(attachment);
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`pet_view_${pet.id}_u_${userId}`)
+        .setLabel('Back to Pet')
+        .setEmoji('◀️')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`pet_panel_mypets_u_${userId}`)
+        .setLabel('All Pets')
+        .setEmoji('🐾')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`pet_dismiss_u_${userId}`)
+        .setLabel('Dismiss')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger),
+    );
+
+    await interaction.editReply({ embeds: [embed], components: [row], files });
+  } catch (error) {
+    // Avoid silent timeouts if lineage rendering fails unexpectedly.
+    if (!interaction.replied && !interaction.deferred) {
+      return interaction.reply({ content: '❌ Could not load ancestry right now. Please try again.', flags: 64 }).catch(() => {});
+    }
+    return interaction.editReply({ content: '❌ Could not load ancestry right now. Please try again.', embeds: [], components: [], files: [] }).catch(() => {});
   }
-
-  // Count generations
-  let generations = 1;
-  if (pet.mother_name || pet.father_name) generations = 2;
-  if (hasMaternalGrandparents || hasPaternalGrandparents) generations = 3;
-
-  const embed = new EmbedBuilder()
-    .setColor(rarityData.color)
-    .setTitle(`🧬 Family Tree: ${pet.name}`)
-    .setDescription(treeDesc)
-    .setFooter({ text: `${generations} generation${generations !== 1 ? 's' : ''} of lineage recorded` })
-    .setTimestamp();
-
-  // Attach pet image
-  const phase = getPhase(pet.level);
-  const petImage = await getPetImage(pet.species, phase.name.toLowerCase(), pet.variant || 1, pet.shiny);
-  let files = [];
-  if (petImage) {
-    const attachment = new AttachmentBuilder(petImage.data, { name: petImage.fileName });
-    embed.setThumbnail(`attachment://${petImage.fileName}`);
-    files.push(attachment);
-  }
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`pet_view_${pet.id}_u_${userId}`)
-      .setLabel('Back to Pet')
-      .setEmoji('◀️')
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(`pet_panel_mypets_u_${userId}`)
-      .setLabel('All Pets')
-      .setEmoji('🐾')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`pet_dismiss_u_${userId}`)
-      .setLabel('Dismiss')
-      .setEmoji('❌')
-      .setStyle(ButtonStyle.Danger),
-  );
-
-  await interaction.editReply({ embeds: [embed], components: [row], files });
 }
