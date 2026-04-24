@@ -414,6 +414,16 @@ async function buildMarketDashboard(guildId = null) {
 
   const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
   const stockData = [];
+  const db = getDb();
+
+  // Traditional market cap is price multiplied by outstanding shares.
+  const sharesResult = db.exec('SELECT stock_user_id, SUM(shares) as total FROM stocks WHERE shares > 0 GROUP BY stock_user_id');
+  const sharesMap = new Map();
+  if (sharesResult.length > 0) {
+    for (const row of sharesResult[0].values) {
+      sharesMap.set(row[0], row[1] || 0);
+    }
+  }
 
   // Get users who split in the last 24 hours (exclude from losers since splits aren't negative)
   const recentSplitters = getRecentSplitters(oneDayAgo);
@@ -421,6 +431,7 @@ async function buildMarketDashboard(guildId = null) {
   for (const user of users) {
     const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
     const dayHistory = getPriceHistoryByTimeRange(user.user_id, oneDayAgo);
+    const totalShares = sharesMap.get(user.user_id) || 0;
     
     let dayAgoPrice = currentPrice;
     if (dayHistory.length > 0) {
@@ -433,6 +444,7 @@ async function buildMarketDashboard(guildId = null) {
       userId: user.user_id,
       username: user.username,
       currentPrice: currentPrice,
+      totalShares,
       dayAgoPrice: dayAgoPrice,
       changePercent: changePercent,
       recentlySplit: recentSplitters.has(user.user_id)
@@ -446,7 +458,7 @@ async function buildMarketDashboard(guildId = null) {
   const losers = [...stockData].filter(s => s.changePercent < 0 && !s.recentlySplit).sort((a, b) => a.changePercent - b.changePercent).slice(0, dashboardSettings.topMoversCount);
 
   // Market summary
-  const totalMarketCap = stockData.reduce((sum, s) => sum + s.currentPrice, 0);
+  const totalMarketCap = stockData.reduce((sum, s) => sum + (s.currentPrice * s.totalShares), 0);
   const avgChange = stockData.length > 0 ? stockData.reduce((sum, s) => sum + s.changePercent, 0) / stockData.length : 0;
   const marketTrend = avgChange > 1 ? '📈 Bullish' : avgChange < -1 ? '📉 Bearish' : '➡️ Stable';
 
