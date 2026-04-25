@@ -2330,18 +2330,22 @@ async function handleBreedConfirm(interaction, guildId, userId, settings) {
 
   const parts = interaction.customId.split('_');
   // pet_breed_confirm_<maleId>_<femaleId>_u_<userId>
-  const maleId = parseInt(parts[3]);
-  const femaleId = parseInt(parts[4]);
+  const petAId = parseInt(parts[3]);
+  const petBId = parseInt(parts[4]);
 
-  const male = getPet(maleId);
-  const female = getPet(femaleId);
+  const petA = getPet(petAId);
+  const petB = getPet(petBId);
 
-  if (!male || !female) {
+  if (!petA || !petB) {
     return interaction.editReply({ content: '❌ Pet not found.', embeds: [], components: [] });
   }
 
+  // Always derive female/male from actual sex, regardless of customId order
+  const female = petA.sex === 'F' ? petA : petB;
+  const male = petA.sex === 'M' ? petA : petB;
+
   // Re-verify everything
-  if (male.owner_id !== userId || female.owner_id !== userId) {
+  if (petA.owner_id !== userId || petB.owner_id !== userId) {
     return interaction.editReply({ content: '❌ These are not your pets.', embeds: [], components: [] });
   }
 
@@ -2372,7 +2376,7 @@ async function handleBreedConfirm(interaction, guildId, userId, settings) {
   }
 
   // Start gestation
-  const result = startGestation(guildId, femaleId, maleId, userId);
+  const result = startGestation(guildId, female.id, male.id, userId);
   if (!result.success) {
     await addMoney(guildId, userId, fee, 'wallet'); // Refund
     return interaction.editReply({ content: `❌ ${result.reason}`, embeds: [], components: [] });
@@ -2991,8 +2995,8 @@ async function handleStudAcceptSubmit(interaction, guildId, userId, settings) {
   const requesterId = request.requester_id;
   const partnerId = request.partner_id;
   const speciesData = SPECIES[requesterPet.species];
-  const female = requesterPet.sex === 'F' ? requesterPet : partnerPet;
-  const male = requesterPet.sex === 'M' ? requesterPet : partnerPet;
+  const female = (requesterPet.sex || '').toUpperCase() === 'F' ? requesterPet : partnerPet;
+  const male = (requesterPet.sex || '').toUpperCase() === 'M' ? requesterPet : partnerPet;
   const highRarity = RARITY_ORDER.indexOf(male.rarity) >= RARITY_ORDER.indexOf(female.rarity) ? male.rarity : female.rarity;
   const isExotic = speciesData.type === 'exotic';
   const breedingFee = getBreedingFee(guildId, highRarity, isExotic);
@@ -3070,9 +3074,9 @@ async function handleStudFeeAccept(interaction, guildId, userId, settings) {
   const requesterId = request.requester_id;
   const partnerId = request.partner_id;
 
-  // Calculate breeding fee
-  const female = requesterPet.sex === 'F' ? requesterPet : partnerPet;
-  const male = requesterPet.sex === 'M' ? requesterPet : partnerPet;
+  // Calculate breeding fee — always derive female/male from actual sex field
+  const female = (requesterPet.sex || '').toUpperCase() === 'F' ? requesterPet : partnerPet;
+  const male = (requesterPet.sex || '').toUpperCase() === 'M' ? requesterPet : partnerPet;
   const highRarity = RARITY_ORDER.indexOf(male.rarity) >= RARITY_ORDER.indexOf(female.rarity) ? male.rarity : female.rarity;
   const speciesData = SPECIES[female.species];
   const isExotic = speciesData.type === 'exotic';
