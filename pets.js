@@ -1747,6 +1747,15 @@ function getBreedingFee(guildId, rarity, isExotic) {
   return isExotic ? Math.round(baseFee * settings.breedingExoticMultiplier) : baseFee;
 }
 
+// Normalize sex field — accepts 'M','m','male','Male' → 'M'; 'F','f','female','Female' → 'F'
+function normalizeSex(sex) {
+  if (!sex) return '';
+  const s = sex.toString().toLowerCase();
+  if (s === 'm' || s === 'male') return 'M';
+  if (s === 'f' || s === 'female') return 'F';
+  return sex.toString().toUpperCase();
+}
+
 function canBreed(pet, guildId) {
   if (!pet) return { canBreed: false, reason: 'Pet not found' };
   
@@ -1756,7 +1765,7 @@ function canBreed(pet, guildId) {
   if (pet.gestating) return { canBreed: false, reason: 'This pet is currently gestating.' };
   
   const now = Date.now();
-  if (pet.sex === 'F' && pet.breeding_cooldown_end && now < pet.breeding_cooldown_end) {
+  if (normalizeSex(pet.sex) === 'F' && pet.breeding_cooldown_end && now < pet.breeding_cooldown_end) {
     const remaining = pet.breeding_cooldown_end - now;
     return { canBreed: false, reason: 'cooldown', remaining };
   }
@@ -1768,7 +1777,9 @@ function canBreedTogether(pet1, pet2) {
   if (!pet1 || !pet2) return { canBreed: false, reason: 'Pet not found' };
   if (pet1.id === pet2.id) return { canBreed: false, reason: 'Cannot breed a pet with itself' };
   if (pet1.species !== pet2.species) return { canBreed: false, reason: 'Pets must be the same species' };
-  if (pet1.sex === pet2.sex) return { canBreed: false, reason: 'Breeding requires one male and one female' };
+  const sex1 = normalizeSex(pet1.sex);
+  const sex2 = normalizeSex(pet2.sex);
+  if (sex1 === sex2) return { canBreed: false, reason: 'Breeding requires one male and one female' };
   
   const check1 = canBreed(pet1);
   if (!check1.canBreed) return check1;
@@ -2260,6 +2271,7 @@ module.exports = {
   rollEggResult,
   // Breeding
   getBreedingFee,
+  normalizeSex,
   canBreed,
   canBreedTogether,
   rollBreedingRarity,

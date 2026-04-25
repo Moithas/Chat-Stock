@@ -17,7 +17,7 @@ const {
   generateShopStock, getPetImagePath, getPetImage, setActivePet, getActivePet,
   EGG_TYPES, getEggPrice, getUserEggs, getUserEggCount, getEgg, buyEgg, warmEgg, hatchEgg, deleteEgg,
   // Breeding
-  getBreedingFee, canBreed, canBreedTogether, startGestation,
+  getBreedingFee, normalizeSex, canBreed, canBreedTogether, startGestation,
   getGestatingPets, getMyGestatingPets, giveBirth,
   createBreedingRequest, getBreedingRequest, getPendingBreedingRequests,
   getOutgoingBreedingRequests, updateBreedingRequestStatus, updateBreedingRequestStudFee, deleteBreedingRequest,
@@ -2108,9 +2108,9 @@ async function showBreedingPanel(interaction, guildId, userId, settings, initial
   if (breedablePets.length === 0) {
     embed.addFields({ name: 'Your Pets', value: 'No breedable pets. Pets must be Adult (L26+) or Elder (L41+) to breed.' });
   } else {
-    const males = breedablePets.filter(p => p.sex === 'M');
+    const males = breedablePets.filter(p => normalizeSex(p.sex) === 'M');
     const females = breedablePets.filter(p => {
-      if (p.sex !== 'F') return false;
+      if (normalizeSex(p.sex) !== 'F') return false;
       // Check cooldown
       const now = Date.now();
       return !p.breeding_cooldown_end || now >= p.breeding_cooldown_end;
@@ -2136,7 +2136,7 @@ async function showBreedingPanel(interaction, guildId, userId, settings, initial
 
     // Show females on cooldown
     const cooldownFemales = breedablePets.filter(p => {
-      if (p.sex !== 'F') return false;
+      if (normalizeSex(p.sex) !== 'F') return false;
       const now = Date.now();
       return p.breeding_cooldown_end && now < p.breeding_cooldown_end;
     });
@@ -2183,9 +2183,9 @@ async function showBreedingPanel(interaction, guildId, userId, settings, initial
   }
 
   // Create select menus for breeding if we have valid pairs
-  const males = breedablePets.filter(p => p.sex === 'M');
+  const males = breedablePets.filter(p => normalizeSex(p.sex) === 'M');
   const availableFemales = breedablePets.filter(p => {
-    if (p.sex !== 'F') return false;
+    if (normalizeSex(p.sex) !== 'F') return false;
     const now = Date.now();
     return !p.breeding_cooldown_end || now >= p.breeding_cooldown_end;
   });
@@ -2738,10 +2738,10 @@ async function handleStudTargetUserSelect(interaction, guildId, userId, settings
   const targetPets = getUserPets(guildId, targetUserId);
   
   // Find compatible pets (same species, opposite sex, breedable)
-  const oppositeSex = myPet.sex === 'M' ? 'F' : 'M';
+  const oppositeSex = normalizeSex(myPet.sex) === 'M' ? 'F' : 'M';
   const compatiblePets = targetPets.filter(p => {
     if (p.species !== myPet.species) return false;
-    if (p.sex !== oppositeSex) return false;
+    if (normalizeSex(p.sex) !== oppositeSex) return false;
     const phase = getPhase(p.level);
     if (!phase.canBreed || p.gestating) return false;
     if (p.sex === 'F') {
@@ -2850,8 +2850,8 @@ async function handleStudPartnerSelect(interaction, guildId, userId, settings) {
 
   const speciesData = SPECIES[myPet.species];
   const currency = getCurrency(guildId);
-  const female = myPet.sex === 'F' ? myPet : theirPet;
-  const male = myPet.sex === 'M' ? myPet : theirPet;
+  const female = normalizeSex(myPet.sex) === 'F' ? myPet : theirPet;
+  const male = normalizeSex(myPet.sex) === 'M' ? myPet : theirPet;
   const highRarity = RARITY_ORDER.indexOf(male.rarity) >= RARITY_ORDER.indexOf(female.rarity) ? male.rarity : female.rarity;
   const isExotic = speciesData.type === 'exotic';
   const breedingFee = getBreedingFee(guildId, highRarity, isExotic);
@@ -2862,7 +2862,7 @@ async function handleStudPartnerSelect(interaction, guildId, userId, settings) {
     .setTitle('💕 Breeding Request')
     .setDescription(
       `<@${userId}> wants to breed with <@${targetUserId}>!\n\n` +
-      `${speciesData.emoji} **${myPet.name}** (${myPet.sex === 'M' ? '♂' : '♀'}) × **${theirPet.name}** (${theirPet.sex === 'M' ? '♂' : '♀'})\n\n` +
+      `${speciesData.emoji} **${myPet.name}** (${normalizeSex(myPet.sex) === 'M' ? '♂' : '♀'}) × **${theirPet.name}** (${normalizeSex(theirPet.sex) === 'M' ? '♂' : '♀'})\n\n` +
       `📋 **Breeding Fee:** ${breedingFee.toLocaleString()} ${currency} (paid by requester)\n\n` +
       `<@${targetUserId}>, do you accept? You can set a stud fee.\n` +
       `*Expires in 24 hours.*`
@@ -2995,8 +2995,8 @@ async function handleStudAcceptSubmit(interaction, guildId, userId, settings) {
   const requesterId = request.requester_id;
   const partnerId = request.partner_id;
   const speciesData = SPECIES[requesterPet.species];
-  const female = (requesterPet.sex || '').toUpperCase() === 'F' ? requesterPet : partnerPet;
-  const male = (requesterPet.sex || '').toUpperCase() === 'M' ? requesterPet : partnerPet;
+  const female = normalizeSex(requesterPet.sex) === 'F' ? requesterPet : partnerPet;
+  const male = normalizeSex(requesterPet.sex) === 'M' ? requesterPet : partnerPet;
   const highRarity = RARITY_ORDER.indexOf(male.rarity) >= RARITY_ORDER.indexOf(female.rarity) ? male.rarity : female.rarity;
   const isExotic = speciesData.type === 'exotic';
   const breedingFee = getBreedingFee(guildId, highRarity, isExotic);
@@ -3075,8 +3075,8 @@ async function handleStudFeeAccept(interaction, guildId, userId, settings) {
   const partnerId = request.partner_id;
 
   // Calculate breeding fee — always derive female/male from actual sex field
-  const female = (requesterPet.sex || '').toUpperCase() === 'F' ? requesterPet : partnerPet;
-  const male = (requesterPet.sex || '').toUpperCase() === 'M' ? requesterPet : partnerPet;
+  const female = normalizeSex(requesterPet.sex) === 'F' ? requesterPet : partnerPet;
+  const male = normalizeSex(requesterPet.sex) === 'M' ? requesterPet : partnerPet;
   const highRarity = RARITY_ORDER.indexOf(male.rarity) >= RARITY_ORDER.indexOf(female.rarity) ? male.rarity : female.rarity;
   const speciesData = SPECIES[female.species];
   const isExotic = speciesData.type === 'exotic';
