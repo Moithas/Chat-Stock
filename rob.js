@@ -430,7 +430,9 @@ function calculateSuccessRate(targetCash, robberTotal, skillBonus = 0) {
     return 0; // Can't rob someone with no cash
   }
   
-  const denominator = targetCash + robberTotal;
+  // Clamp robberTotal to 0 — a negative portfolio shouldn't reduce success rate to 0
+  const robberWealth = Math.max(0, robberTotal);
+  const denominator = targetCash + robberWealth;
   if (denominator === 0) {
     return 0;
   }
@@ -458,13 +460,15 @@ function calculateStolenAmount(targetCash, settings, minStealBonus = 0, maxSteal
 }
 
 function calculateFine(robberTotal, settings, fineReduction = 0) {
+  // If robber has no positive wealth, use a flat minimum fine of 1
+  if (robberTotal <= 0) return 1;
   const minFine = Math.floor(robberTotal * (settings.fineMinPercent / 100));
   const maxFine = Math.floor(robberTotal * (settings.fineMaxPercent / 100));
   // Random fine between min and max
   const baseFine = Math.floor(Math.random() * (maxFine - minFine + 1)) + minFine;
   // Apply skill reduction
   const fine = Math.floor(baseFine * (1 - fineReduction / 100));
-  return Math.max(fine, robberTotal > 0 ? 1 : 0);
+  return Math.max(fine, 1);
 }
 
 function recordRob(guildId, robberId, targetId, success, amount) {
