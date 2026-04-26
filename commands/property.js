@@ -693,13 +693,30 @@ async function showUpgradesPanel(interaction, guildId, userId, settings, isUpdat
   if (isEconomyEnabled()) {
     balanceData = await economy.getBalance(guildId, userId);
   }
+
+  // Show active pet property-speed bonus on this panel (same source used by upgrade timing)
+  let petBonusLine = '';
+  try {
+    const { getPetBonusDecimal, getActivePet, SPECIES } = require('../pets');
+    const activePet = getActivePet(guildId, userId);
+    if (activePet) {
+      const propertyBonus = getPetBonusDecimal(guildId, userId, 'property');
+      const petPropertyBoost = Math.round(Math.min(propertyBonus, 0.5) * 100);
+      const speciesData = SPECIES[activePet.species];
+      const petEmoji = speciesData?.emoji || '🐾';
+      const petName = activePet.name || 'Active Pet';
+      petBonusLine = petPropertyBoost > 0
+        ? `\n🐾 Active Pet: ${petEmoji} **${petName}** — **-${petPropertyBoost}%** upgrade time`
+        : `\n🐾 Active Pet: ${petEmoji} **${petName}** — no property speed bonus`;
+    }
+  } catch (e) { /* pets not loaded */ }
   
   const embed = new EmbedBuilder()
     .setColor(0xf39c12)
     .setTitle('🔨 Property Upgrades')
     .setDescription('Select a property to upgrade. Each stage costs currency and time.\n\n' +
       '**Stages:** 🔧 Renovate → 🏗️ Remodel → 📐 Expand → ⬆️ Upgrade\n' +
-      '━━━━━━━━━━━━━━━━━━━━━━')
+      `━━━━━━━━━━━━━━━━━━━━━━${petBonusLine}`)
     .setFooter({ text: `💰 Balance: ${Math.round(balanceData.total).toLocaleString()} ` })
     .setTimestamp();
   
