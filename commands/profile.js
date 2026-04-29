@@ -396,6 +396,33 @@ function getGamblingData(guildId, userId) {
       };
     }
   } catch (e) {}
+
+  // Video Poker stats
+  let vpStats = {
+    played: 0,
+    wagered: 0,
+    totalWon: 0,
+    totalLost: 0,
+    royalFlushes: 0,
+    straightFlushes: 0,
+    fourOfAKinds: 0
+  };
+  try {
+    const result = db.exec('SELECT * FROM videopoker_stats WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+    if (result.length > 0 && result[0].values.length > 0) {
+      const cols = result[0].columns;
+      const row = cols.reduce((obj, col, i) => ({ ...obj, [col]: result[0].values[0][i] }), {});
+      vpStats = {
+        played: row.games_played || 0,
+        wagered: row.total_wagered || 0,
+        totalWon: row.total_won || 0,
+        totalLost: row.total_lost || 0,
+        royalFlushes: row.royal_flushes || 0,
+        straightFlushes: row.straight_flushes || 0,
+        fourOfAKinds: row.four_of_a_kinds || 0
+      };
+    }
+  } catch (e) {}
   
   // Scratch card stats (aggregated across card types)
   let scratchStats = { purchased: 0, spent: 0, won: 0, jackpots: 0 };
@@ -436,10 +463,11 @@ function getGamblingData(guildId, userId) {
     (lirStats.totalWon - lirStats.totalLost) +
     (tcpStats.totalWon - tcpStats.totalLost) +
     (synStats.totalWon - synStats.totalLost) +
+    (vpStats.totalWon - vpStats.totalLost) +
     (scratchStats.won - scratchStats.spent) +
     lotteryStats.totalPrize;
   
-  return { bjStats, rouletteStats, ibStats, lirStats, tcpStats, synStats, scratchStats, lotteryStats, totalPL };
+  return { bjStats, rouletteStats, ibStats, lirStats, tcpStats, synStats, vpStats, scratchStats, lotteryStats, totalPL };
 }
 
 function getFightData(guildId, userId) {
@@ -666,6 +694,7 @@ function buildGamblingEmbed(guildId, userId, displayName, avatarUrl) {
       { name: '🏇 Let It Ride', value: `${data.lirStats.played} games\nP/L: ${(data.lirStats.totalWon - data.lirStats.totalLost) >= 0 ? '+' : ''}${Math.round(data.lirStats.totalWon - data.lirStats.totalLost).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '🃏 Three Card Poker', value: `${data.tcpStats.played} games | ${data.tcpStats.won}W-${data.tcpStats.lost}L\nP/L: ${(data.tcpStats.totalWon - data.tcpStats.totalLost) >= 0 ? '+' : ''}${Math.round(data.tcpStats.totalWon - data.tcpStats.totalLost).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '🔄 SYN', value: `${data.synStats.played} games | ${data.synStats.won}W\nP/L: ${(data.synStats.totalWon - data.synStats.totalLost) >= 0 ? '+' : ''}${Math.round(data.synStats.totalWon - data.synStats.totalLost).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+      { name: '🎥 Video Poker', value: `${data.vpStats.played} games | ${data.vpStats.royalFlushes} RF\nP/L: ${(data.vpStats.totalWon - data.vpStats.totalLost) >= 0 ? '+' : ''}${Math.round(data.vpStats.totalWon - data.vpStats.totalLost).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '🎰 Scratch Cards', value: `${data.scratchStats.purchased} cards | ${data.scratchStats.jackpots} jackpots\nP/L: ${(data.scratchStats.won - data.scratchStats.spent) >= 0 ? '+' : ''}${Math.round(data.scratchStats.won - data.scratchStats.spent).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '🎟️ Lottery', value: `${data.lotteryStats.tickets} tickets | ${data.lotteryStats.wins} wins\nPrize: ${Math.round(data.lotteryStats.totalPrize).toLocaleString()} ${getCurrency(guildId)}`, inline: true },
       { name: '\u200b', value: '\u200b', inline: true },
