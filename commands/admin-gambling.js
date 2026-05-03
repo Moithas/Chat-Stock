@@ -8,7 +8,7 @@ const { logAdminAction, getCurrency } = require('../admin');
 const BUTTON_IDS = [
   'gambling_edit_blackjack', 'gambling_lottery_settings', 'gambling_toggle_scratch', 'gambling_scratch_config',
   'gambling_scratch_stats', 'gambling_inbetween_settings', 'gambling_letitride_settings', 'gambling_threecardpoker_settings',
-  'lottery_toggle_auto', 'lottery_edit_schedule', 'lottery_edit_prizes', 'lottery_edit_ticket_price', 'lottery_set_channel', 'lottery_edit_range',
+  'lottery_toggle_auto', 'lottery_edit_schedule', 'lottery_edit_prizes', 'lottery_edit_ticket_price', 'lottery_set_channel', 'lottery_edit_range', 'lottery_edit_jackpot',
   'vault_toggle', 'vault_spawn', 'vault_reward', 'vault_channel', 'vault_force_spawn',
   'inbetween_toggle', 'inbetween_edit_settings', 'inbetween_reset_pot',
   'letitride_toggle', 'letitride_edit_settings',
@@ -16,7 +16,7 @@ const BUTTON_IDS = [
   'videopoker_toggle', 'videopoker_edit_settings', 'gambling_videopoker_settings',
   'back_gambling'
 ];
-const MODAL_IDS = ['modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_lottery_range', 'modal_vault_spawn', 'modal_vault_reward', 'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings', 'modal_videopoker_settings'];
+const MODAL_IDS = ['modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_lottery_range', 'modal_lottery_jackpot', 'modal_vault_spawn', 'modal_vault_reward', 'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings', 'modal_videopoker_settings'];
 const SELECT_IDS = ['scratch_select_card', 'lottery_channel_select', 'vault_channel_select'];
 
 // Scratch card modal IDs are dynamic: modal_scratch_cheese, modal_scratch_cash, etc.
@@ -91,6 +91,12 @@ async function handleInteraction(interaction, guildId) {
         const { getGamblingSettings } = require('../gambling');
         const settings = getGamblingSettings(guildId);
         const modal = createLotteryRangeModal(settings);
+        await interaction.showModal(modal);
+      }
+      else if (customId === 'lottery_edit_jackpot') {
+        const { getLotteryInfo } = require('../gambling');
+        const lotteryInfo = getLotteryInfo(guildId);
+        const modal = createLotteryJackpotModal(lotteryInfo);
         await interaction.showModal(modal);
       }
       else if (customId === 'lottery_set_channel') {
@@ -400,6 +406,19 @@ async function handleInteraction(interaction, guildId) {
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set lottery number range to ${minVal}-${maxVal}`);
         await interaction.reply({ content: `✅ Lottery number range set to **${minVal} – ${maxVal}**!\n⚠️ Note: Re-deploy the bot to update the in-Discord number hint in /lottery buy.`, flags: 64 });
       }
+      else if (customId === 'modal_lottery_jackpot') {
+        const { setJackpot } = require('../gambling');
+        const amount = parseInt(interaction.fields.getTextInputValue('jackpot_amount'));
+
+        if (isNaN(amount) || amount < 1000) {
+          await interaction.reply({ content: '❌ Jackpot must be a whole number of at least 1000.', flags: 64 });
+          return true;
+        }
+
+        setJackpot(guildId, amount);
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set lottery jackpot to ${amount}`);
+        await interaction.reply({ content: `✅ Lottery jackpot set to **${amount.toLocaleString()}** ${getCurrency(guildId)}!`, flags: 64 });
+      }
       else if (customId === 'modal_vault_spawn') {
         const { updateVaultSettings } = require('../events');
         const minMessages = parseInt(interaction.fields.getTextInputValue('min_messages'));
@@ -707,13 +726,18 @@ async function showLotteryPanel(interaction, guildId) {
     .setLabel('🔢 Number Range')
     .setStyle(ButtonStyle.Secondary);
 
+  const jackpotBtn = new ButtonBuilder()
+    .setCustomId('lottery_edit_jackpot')
+    .setLabel('💰 Set Jackpot')
+    .setStyle(ButtonStyle.Secondary);
+
   const backBtn = new ButtonBuilder()
     .setCustomId('back_gambling')
     .setLabel('◀️ Back')
     .setStyle(ButtonStyle.Secondary);
 
   const row1 = new ActionRowBuilder().addComponents(toggleAutoBtn, scheduleBtn, prizesBtn, ticketPriceBtn);
-  const row2 = new ActionRowBuilder().addComponents(channelBtn, rangeBtn, backBtn);
+  const row2 = new ActionRowBuilder().addComponents(channelBtn, rangeBtn, jackpotBtn, backBtn);
 
   await interaction.editReply({ embeds: [embed], components: [row1, row2] });
 }
@@ -1041,6 +1065,23 @@ function createLotteryRangeModal(settings) {
           .setLabel('Maximum Number (max 99)')
           .setPlaceholder('29')
           .setValue(String(settings.lottery_number_max ?? 29))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
+function createLotteryJackpotModal(lotteryInfo) {
+  return new ModalBuilder()
+    .setCustomId('modal_lottery_jackpot')
+    .setTitle('Set Lottery Jackpot')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('jackpot_amount')
+          .setLabel('Jackpot Amount')
+          .setPlaceholder('10000')
+          .setValue(String(lotteryInfo?.jackpot || 10000))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
       )

@@ -6,7 +6,6 @@ const {
   getUserTickets, 
   getAllTickets,
   drawLottery,
-  setJackpot,
   getRecentWinners,
   getGamblingSettings,
   getLotteryTicketPrice
@@ -37,11 +36,7 @@ module.exports = {
         .setDescription('View your current tickets'))
     .addSubcommand(sub =>
       sub.setName('draw')
-        .setDescription('Draw the winning numbers (Admin only)'))
-    .addSubcommand(sub =>
-      sub.setName('setjackpot')
-        .setDescription('Set the jackpot amount (Admin only)')
-        .addIntegerOption(opt => opt.setName('amount').setDescription('New jackpot amount').setRequired(true).setMinValue(1000))),
+        .setDescription('Draw the winning numbers (Admin only)')),
 
   async execute(interaction) {
     const subcommand = interaction.options.getSubcommand();
@@ -57,8 +52,6 @@ module.exports = {
         return handleTickets(interaction, guildId, userId);
       case 'draw':
         return handleDraw(interaction, guildId, userId);
-      case 'setjackpot':
-        return handleSetJackpot(interaction, guildId, userId);
     }
   }
 };
@@ -313,24 +306,4 @@ async function handleDraw(interaction, guildId, userId) {
   logAdminAction(guildId, userId, interaction.user.username, 'Drew lottery', `${result.totalTickets} tickets, ${winners.length} winners`);
 
   await interaction.editReply({ embeds: [embed] });
-}
-
-async function handleSetJackpot(interaction, guildId, userId) {
-  // Admin check
-  if (!hasAdminPermission(interaction.member, guildId)) {
-    return interaction.reply({
-      content: '❌ Only admins can set the jackpot!',
-      flags: 64
-    });
-  }
-
-  const amount = interaction.options.getInteger('amount');
-  setJackpot(guildId, amount);
-
-  logAdminAction(guildId, userId, interaction.user.username, 'Set lottery jackpot', `${amount.toLocaleString()} ${getCurrency(guildId)}`);
-
-  await interaction.reply({
-    content: `✅ Lottery jackpot set to **${amount.toLocaleString()}** ${getCurrency(guildId)}`,
-    flags: 64
-  });
 }
