@@ -146,7 +146,7 @@ async function handleInfo(interaction, guildId) {
   const embed = new EmbedBuilder()
     .setColor(0x9b59b6)
     .setTitle('🎰 Pick 4 Lottery')
-    .setDescription('Pick 4 numbers from 0-29. Match numbers in any order to win!')
+    .setDescription('Pick 4 numbers from 0-14. Match numbers in any order to win!')
     .addFields(
       { name: '🏆 Current Jackpot', value: `**${lotteryInfo.jackpot.toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
       { name: '🎟️ Tickets Sold', value: `**${tickets.length}**`, inline: true },
