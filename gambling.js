@@ -60,6 +60,8 @@ function initGambling(database) {
   migrateAddColumn(db, 'gambling_settings', 'lottery_prize_2match INTEGER DEFAULT 1000');
   migrateAddColumn(db, 'gambling_settings', 'lottery_prize_3match INTEGER DEFAULT 5000');
   migrateAddColumn(db, 'gambling_settings', 'lottery_ticket_price INTEGER DEFAULT 1000');
+  migrateAddColumn(db, 'gambling_settings', 'lottery_number_min INTEGER DEFAULT 0');
+  migrateAddColumn(db, 'gambling_settings', 'lottery_number_max INTEGER DEFAULT 29');
   // Scratch card settings
   migrateAddColumn(db, 'gambling_settings', 'scratch_enabled INTEGER DEFAULT 1');
   
