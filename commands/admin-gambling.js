@@ -8,7 +8,7 @@ const { logAdminAction, getCurrency } = require('../admin');
 const BUTTON_IDS = [
   'gambling_edit_blackjack', 'gambling_lottery_settings', 'gambling_toggle_scratch', 'gambling_scratch_config',
   'gambling_scratch_stats', 'gambling_inbetween_settings', 'gambling_letitride_settings', 'gambling_threecardpoker_settings',
-  'lottery_toggle_auto', 'lottery_edit_schedule', 'lottery_edit_prizes', 'lottery_edit_ticket_price', 'lottery_set_channel',
+  'lottery_toggle_auto', 'lottery_edit_schedule', 'lottery_edit_prizes', 'lottery_edit_ticket_price', 'lottery_set_channel', 'lottery_edit_range',
   'vault_toggle', 'vault_spawn', 'vault_reward', 'vault_channel', 'vault_force_spawn',
   'inbetween_toggle', 'inbetween_edit_settings', 'inbetween_reset_pot',
   'letitride_toggle', 'letitride_edit_settings',
@@ -16,7 +16,7 @@ const BUTTON_IDS = [
   'videopoker_toggle', 'videopoker_edit_settings', 'gambling_videopoker_settings',
   'back_gambling'
 ];
-const MODAL_IDS = ['modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_vault_spawn', 'modal_vault_reward', 'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings', 'modal_videopoker_settings'];
+const MODAL_IDS = ['modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_lottery_range', 'modal_vault_spawn', 'modal_vault_reward', 'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings', 'modal_videopoker_settings'];
 const SELECT_IDS = ['scratch_select_card', 'lottery_channel_select', 'vault_channel_select'];
 
 // Scratch card modal IDs are dynamic: modal_scratch_cheese, modal_scratch_cash, etc.
@@ -85,6 +85,12 @@ async function handleInteraction(interaction, guildId) {
         const { getGamblingSettings } = require('../gambling');
         const settings = getGamblingSettings(guildId);
         const modal = createLotteryTicketPriceModal(settings);
+        await interaction.showModal(modal);
+      }
+      else if (customId === 'lottery_edit_range') {
+        const { getGamblingSettings } = require('../gambling');
+        const settings = getGamblingSettings(guildId);
+        const modal = createLotteryRangeModal(settings);
         await interaction.showModal(modal);
       }
       else if (customId === 'lottery_set_channel') {
@@ -371,7 +377,29 @@ async function handleInteraction(interaction, guildId) {
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set lottery ticket price to ${price}`);
         await interaction.reply({ content: `✅ Lottery ticket price set to **${price.toLocaleString()}** ${getCurrency(guildId)}!`, flags: 64 });
       }
-      // Vault spawn modal (message trigger range)
+      // Lottery number range modal
+      else if (customId === 'modal_lottery_range') {
+        const { updateGamblingSettings } = require('../gambling');
+        const minVal = parseInt(interaction.fields.getTextInputValue('range_min'));
+        const maxVal = parseInt(interaction.fields.getTextInputValue('range_max'));
+
+        if (isNaN(minVal) || isNaN(maxVal)) {
+          await interaction.reply({ content: '❌ Min and max must be valid numbers.', flags: 64 });
+          return true;
+        }
+        if (minVal < 0 || maxVal > 99) {
+          await interaction.reply({ content: '❌ Range must be between 0 and 99.', flags: 64 });
+          return true;
+        }
+        if (maxVal - minVal < 3) {
+          await interaction.reply({ content: '❌ Range must span at least 4 numbers so players can pick 4 unique values.', flags: 64 });
+          return true;
+        }
+
+        updateGamblingSettings(guildId, { lottery_number_min: minVal, lottery_number_max: maxVal });
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set lottery number range to ${minVal}-${maxVal}`);
+        await interaction.reply({ content: `✅ Lottery number range set to **${minVal} – ${maxVal}**!\n⚠️ Note: Re-deploy the bot to update the in-Discord number hint in /lottery buy.`, flags: 64 });
+      }
       else if (customId === 'modal_vault_spawn') {
         const { updateVaultSettings } = require('../events');
         const minMessages = parseInt(interaction.fields.getTextInputValue('min_messages'));
@@ -645,7 +673,8 @@ async function showLotteryPanel(interaction, guildId) {
       { name: '⏰ Draw Time', value: drawTime, inline: true },
       { name: '📢 Draw Channel', value: settings.lottery_channel_id ? `<#${settings.lottery_channel_id}>` : 'Not Set', inline: true },
       { name: '🥈 2-Match Prize', value: `${getCurrency(guildId)} ${settings.lottery_prize_2match?.toLocaleString() || 1000}`, inline: true },
-      { name: '🥉 3-Match Prize', value: `${getCurrency(guildId)} ${settings.lottery_prize_3match?.toLocaleString() || 5000}`, inline: true }
+      { name: '🥉 3-Match Prize', value: `${getCurrency(guildId)} ${settings.lottery_prize_3match?.toLocaleString() || 5000}`, inline: true },
+      { name: '🔢 Number Range', value: `${settings.lottery_number_min ?? 0} – ${settings.lottery_number_max ?? 29}`, inline: true }
     );
 
   const toggleAutoBtn = new ButtonBuilder()
@@ -673,13 +702,18 @@ async function showLotteryPanel(interaction, guildId) {
     .setLabel('📢 Channel')
     .setStyle(ButtonStyle.Secondary);
 
+  const rangeBtn = new ButtonBuilder()
+    .setCustomId('lottery_edit_range')
+    .setLabel('🔢 Number Range')
+    .setStyle(ButtonStyle.Secondary);
+
   const backBtn = new ButtonBuilder()
     .setCustomId('back_gambling')
     .setLabel('◀️ Back')
     .setStyle(ButtonStyle.Secondary);
 
   const row1 = new ActionRowBuilder().addComponents(toggleAutoBtn, scheduleBtn, prizesBtn, ticketPriceBtn);
-  const row2 = new ActionRowBuilder().addComponents(channelBtn, backBtn);
+  const row2 = new ActionRowBuilder().addComponents(channelBtn, rangeBtn, backBtn);
 
   await interaction.editReply({ embeds: [embed], components: [row1, row2] });
 }
@@ -981,6 +1015,32 @@ function createLotteryTicketPriceModal(settings) {
           .setLabel('Ticket Price')
           .setPlaceholder('1000')
           .setValue(String(settings.lottery_ticket_price || 1000))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
+function createLotteryRangeModal(settings) {
+  return new ModalBuilder()
+    .setCustomId('modal_lottery_range')
+    .setTitle('Lottery Number Range')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('range_min')
+          .setLabel('Minimum Number')
+          .setPlaceholder('0')
+          .setValue(String(settings.lottery_number_min ?? 0))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('range_max')
+          .setLabel('Maximum Number (max 99)')
+          .setPlaceholder('29')
+          .setValue(String(settings.lottery_number_max ?? 29))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
       )

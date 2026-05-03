@@ -184,6 +184,8 @@ function getGamblingSettings(guildId) {
         lottery_auto_draw: row.lottery_auto_draw === 1,
         lottery_prize_2match: row.lottery_prize_2match || 1000,
         lottery_prize_3match: row.lottery_prize_3match || 5000,
+        lottery_number_min: row.lottery_number_min ?? 0,
+        lottery_number_max: row.lottery_number_max ?? 29,
         scratch_enabled: row.scratch_enabled !== 0 // Default true
       };
       guildGamblingSettings.set(guildId, settings);
@@ -201,6 +203,8 @@ function getGamblingSettings(guildId) {
     lottery_auto_draw: false,
     lottery_prize_2match: 1000,
     lottery_prize_3match: 5000,
+    lottery_number_min: 0,
+    lottery_number_max: 29,
     scratch_enabled: true
   };
 }
@@ -212,8 +216,8 @@ function updateGamblingSettings(guildId, updates) {
   const settings = { ...current, ...updates };
   
   db.run(`
-    INSERT OR REPLACE INTO gambling_settings (guild_id, blackjack_decks, lottery_draw_day, lottery_draw_hour, lottery_draw_minute, lottery_channel_id, lottery_auto_draw, lottery_prize_2match, lottery_prize_3match, scratch_enabled)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO gambling_settings (guild_id, blackjack_decks, lottery_draw_day, lottery_draw_hour, lottery_draw_minute, lottery_channel_id, lottery_auto_draw, lottery_prize_2match, lottery_prize_3match, lottery_number_min, lottery_number_max, scratch_enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     guildId, 
     settings.blackjack_decks,
@@ -224,6 +228,8 @@ function updateGamblingSettings(guildId, updates) {
     settings.lottery_auto_draw ? 1 : 0,
     settings.lottery_prize_2match,
     settings.lottery_prize_3match,
+    settings.lottery_number_min ?? 0,
+    settings.lottery_number_max ?? 29,
     settings.scratch_enabled ? 1 : 0
   ]);
   
@@ -935,14 +941,18 @@ function getLotteryInfo(guildId) {
 function buyLotteryTicket(guildId, userId, numbers) {
   if (!db) return null;
   
-  // Validate numbers (4 numbers, 0-29)
+  // Validate numbers (4 numbers within configured range)
+  const rangeSettings = getGamblingSettings(guildId);
+  const lottMin = rangeSettings.lottery_number_min ?? 0;
+  const lottMax = rangeSettings.lottery_number_max ?? 29;
+
   if (!Array.isArray(numbers) || numbers.length !== 4) {
     return { success: false, error: 'Must pick exactly 4 numbers' };
   }
   
   for (const num of numbers) {
-    if (num < 0 || num > 29 || !Number.isInteger(num)) {
-      return { success: false, error: 'Numbers must be between 0 and 29' };
+    if (num < lottMin || num > lottMax || !Number.isInteger(num)) {
+      return { success: false, error: `Numbers must be between ${lottMin} and ${lottMax}` };
     }
   }
   
@@ -1025,10 +1035,14 @@ function drawLottery(guildId) {
   const lotteryInfo = getLotteryInfo(guildId);
   const tickets = getAllTickets(guildId);
   
-  // Generate 4 random winning numbers (0-29, no duplicates)
+  // Generate 4 random winning numbers within configured range (no duplicates)
+  const drawSettings = getGamblingSettings(guildId);
+  const drawMin = drawSettings.lottery_number_min ?? 0;
+  const drawMax = drawSettings.lottery_number_max ?? 29;
+  const drawRange = drawMax - drawMin + 1;
   const winningNumbers = [];
   while (winningNumbers.length < 4) {
-    const num = Math.floor(Math.random() * 30);
+    const num = drawMin + Math.floor(Math.random() * drawRange);
     if (!winningNumbers.includes(num)) {
       winningNumbers.push(num);
     }

@@ -11,6 +11,9 @@ const {
   getGamblingSettings,
   getLotteryTicketPrice
 } = require('../gambling');
+
+// Slash command options use a wide fixed range (0-99).
+// Actual per-guild min/max is enforced at runtime in handleBuy.
 const { hasAdminPermission, logAdminAction, getCurrency } = require('../admin');
 
 
@@ -22,10 +25,10 @@ module.exports = {
     .addSubcommand(sub =>
       sub.setName('buy')
         .setDescription('Buy a lottery ticket')
-        .addIntegerOption(opt => opt.setName('num1').setDescription('First number (0-29)').setRequired(true).setMinValue(0).setMaxValue(29))
-        .addIntegerOption(opt => opt.setName('num2').setDescription('Second number (0-29)').setRequired(true).setMinValue(0).setMaxValue(29))
-        .addIntegerOption(opt => opt.setName('num3').setDescription('Third number (0-29)').setRequired(true).setMinValue(0).setMaxValue(29))
-        .addIntegerOption(opt => opt.setName('num4').setDescription('Fourth number (0-29)').setRequired(true).setMinValue(0).setMaxValue(29)))
+        .addIntegerOption(opt => opt.setName('num1').setDescription('First number').setRequired(true).setMinValue(0).setMaxValue(99))
+        .addIntegerOption(opt => opt.setName('num2').setDescription('Second number').setRequired(true).setMinValue(0).setMaxValue(99))
+        .addIntegerOption(opt => opt.setName('num3').setDescription('Third number').setRequired(true).setMinValue(0).setMaxValue(99))
+        .addIntegerOption(opt => opt.setName('num4').setDescription('Fourth number').setRequired(true).setMinValue(0).setMaxValue(99)))
     .addSubcommand(sub =>
       sub.setName('info')
         .setDescription('View current jackpot and lottery info'))
@@ -67,8 +70,21 @@ async function handleBuy(interaction, guildId, userId) {
   const num4 = interaction.options.getInteger('num4');
   const numbers = [num1, num2, num3, num4];
 
-  // Get ticket price for this guild
+  // Get ticket price and configured range for this guild
   const ticketPrice = getLotteryTicketPrice(guildId);
+  const lotterySettings = getGamblingSettings(guildId);
+  const lottMin = lotterySettings.lottery_number_min ?? 0;
+  const lottMax = lotterySettings.lottery_number_max ?? 29;
+
+  // Validate against configured range
+  for (const num of numbers) {
+    if (num < lottMin || num > lottMax) {
+      return interaction.reply({
+        content: `❌ Numbers must be between **${lottMin}** and **${lottMax}**!`,
+        flags: 64
+      });
+    }
+  }
 
   // Check for duplicates
   if (new Set(numbers).size !== 4) {
