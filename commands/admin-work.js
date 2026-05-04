@@ -869,6 +869,12 @@ async function showRobPanel(interaction, guildId) {
   const uniqueTargetsStr = uniqueTargets > 0 
     ? `${uniqueTargets} unique targets` 
     : 'Disabled';
+
+  // Format gift protection display
+  const giftProtectionHours = settings.giftProtectionHours !== undefined ? settings.giftProtectionHours : 24;
+  const giftProtectionStr = giftProtectionHours > 0
+    ? `${giftProtectionHours} hour${giftProtectionHours === 1 ? '' : 's'}`
+    : 'Disabled';
   
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
@@ -880,6 +886,7 @@ async function showRobPanel(interaction, guildId) {
       { name: '⏱️ Robber Cooldown', value: `${settings.cooldownMinutes} minutes`, inline: true },
       { name: '🎯 Target Protection', value: targetCooldownStr, inline: true },
       { name: '🔄 XP Farm Protection', value: uniqueTargetsStr, inline: true },
+      { name: '🎁 Gift→Rob Lock', value: giftProtectionStr, inline: true },
       { name: '💸 Fine Range', value: `${settings.fineMinPercent}% - ${settings.fineMaxPercent}%`, inline: true },
       { name: '🛡️ Defenses', value: settings.defensesEnabled ? '✅ Enabled' : '❌ Disabled', inline: true },
       { name: '🛡️ Immune Roles', value: immuneRoles.length > 0 ? immuneRoles.map(r => `<@&${r}>`).join(', ') : 'None', inline: false }
@@ -1239,6 +1246,15 @@ async function showTargetCooldownModal(interaction, guildId) {
           .setValue(String(settings.uniqueTargetsRequired || 0))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('gift_protection_hours')
+          .setLabel('Gift Protection (hours, 0=off)')
+          .setPlaceholder('24')
+          .setValue(String(settings.giftProtectionHours !== undefined ? settings.giftProtectionHours : 24))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
       )
     );
   await interaction.showModal(modal);
@@ -1247,22 +1263,29 @@ async function showTargetCooldownModal(interaction, guildId) {
 async function handleTargetCooldownModal(interaction, guildId) {
   const cooldownSeconds = parseInt(interaction.fields.getTextInputValue('target_cooldown')) || 60;
   const uniqueTargets = parseInt(interaction.fields.getTextInputValue('unique_targets')) || 0;
+  const giftProtectionHours = parseInt(interaction.fields.getTextInputValue('gift_protection_hours')) || 0;
   
   // Validate: minimum 0 (no protection), maximum 3600 (1 hour)
   const validatedCooldown = Math.max(0, Math.min(3600, cooldownSeconds));
   // Validate: minimum 0 (disabled), maximum 10
   const validatedUnique = Math.max(0, Math.min(10, uniqueTargets));
+  // Validate: minimum 0 (disabled), maximum 168 (7 days)
+  const validatedGiftProtection = Math.max(0, Math.min(168, giftProtectionHours));
   
   updateRobSettings(guildId, { 
     targetCooldownSeconds: validatedCooldown,
-    uniqueTargetsRequired: validatedUnique
+    uniqueTargetsRequired: validatedUnique,
+    giftProtectionHours: validatedGiftProtection
   });
-  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated rob target protection: ${validatedCooldown}s cooldown, ${validatedUnique} unique targets required`);
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, `Updated rob target protection: ${validatedCooldown}s cooldown, ${validatedUnique} unique targets required, ${validatedGiftProtection}h gift protection`);
   
   const uniqueMsg = validatedUnique > 0 
     ? `\n🔄 Anti-farm: Must rob ${validatedUnique} unique targets before re-robbing same person` 
     : '\n🔄 Anti-farm: Disabled';
-  await interaction.reply({ content: `✅ Target protection updated to ${validatedCooldown} seconds!${uniqueMsg}`, flags: 64 });
+  const giftMsg = validatedGiftProtection > 0
+    ? `\n🎁 Gift lock: Cannot rob users you gave money to for ${validatedGiftProtection} hour(s)`
+    : '\n🎁 Gift lock: Disabled';
+  await interaction.reply({ content: `✅ Target protection updated to ${validatedCooldown} seconds!${uniqueMsg}${giftMsg}`, flags: 64 });
   await showRobPanel(interaction, guildId);
 }
 
