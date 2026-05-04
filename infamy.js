@@ -108,6 +108,22 @@ function initInfamy(database, discordClient) {
   // Add peak_infamy column if missing (migration)
   migrateAddColumn(db, 'infamy_tracker', 'peak_infamy REAL DEFAULT 0');
 
+  // Repair legacy/corrupted rows where numeric fields ended up NULL.
+  // NULL math in SQLite (NULL + x) stays NULL and blocks future infamy gains.
+  db.run(`
+    UPDATE infamy_tracker SET
+      infamy_points = COALESCE(infamy_points, 0),
+      total_earned = COALESCE(total_earned, 0),
+      total_decayed = COALESCE(total_decayed, 0),
+      total_reduced = COALESCE(total_reduced, 0),
+      bounties_posted = COALESCE(bounties_posted, 0),
+      bounties_claimed_on = COALESCE(bounties_claimed_on, 0),
+      peak_infamy = COALESCE(peak_infamy, 0),
+      probation_until = COALESCE(probation_until, 0),
+      probation_tier = COALESCE(probation_tier, 0),
+      last_updated = COALESCE(last_updated, 0)
+  `);
+
   console.log('🏴‍☠️ Infamy & Bounty system initialized');
 }
 
@@ -197,9 +213,9 @@ function addInfamy(guildId, userId, amount, source = 'unknown') {
     INSERT INTO infamy_tracker (guild_id, user_id, infamy_points, total_earned, peak_infamy, last_updated)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id, user_id) DO UPDATE SET
-      infamy_points = infamy_points + ?,
-      total_earned = total_earned + ?,
-      peak_infamy = MAX(peak_infamy, infamy_points + ?),
+      infamy_points = COALESCE(infamy_points, 0) + ?,
+      total_earned = COALESCE(total_earned, 0) + ?,
+      peak_infamy = MAX(COALESCE(peak_infamy, 0), COALESCE(infamy_points, 0) + ?),
       last_updated = ?
   `, [guildId, userId, amount, amount, amount, Date.now(), amount, amount, amount, Date.now()]);
 
