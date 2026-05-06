@@ -239,50 +239,68 @@ module.exports.handlePurgeButton = async function(interaction) {
     results.stocksDeleted += portfolio.filter(p => p.stock_user_id !== userId).length;
     
     // === PURGE PHASE ===
-    // Delete all user data
-    db.run('DELETE FROM users WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM balances WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM stocks WHERE owner_id = ? OR stock_user_id = ?', [userId, userId]);
-    db.run('DELETE FROM transactions WHERE buyer_id = ? OR stock_user_id = ?', [userId, userId]);
-    db.run('DELETE FROM economy_transactions WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM stock_purchases WHERE owner_id = ? OR stock_user_id = ?', [userId, userId]);
-    db.run('DELETE FROM price_history WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM work_history WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM work_tracker WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM crime_history WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM crime_tracker WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM slut_history WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM slut_tracker WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM rob_history WHERE robber_id = ? OR target_id = ?', [userId, userId]);
-    db.run('DELETE FROM rob_tracker WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM passive_income_history WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM passive_income_tracker WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM role_income_history WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM role_income_tracker WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM dividend_history WHERE stock_user_id = ? OR shareholder_id = ?', [userId, userId]);
-    db.run('DELETE FROM self_dividend_history WHERE stock_user_id = ?', [userId]);
-    db.run('DELETE FROM gambling_stats WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM scratch_stats WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM scratch_tickets WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM lottery_tickets WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM lottery_history WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM owned_properties WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM card_cooldowns WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM loans WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM active_bonds WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM loan_payments WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM bond_history WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM user_cards WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM admin_logs WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM infamy_tracker WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM bounty_board WHERE target_user_id = ?', [userId]);
-    db.run('DELETE FROM insider_trading_snapshots WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM dungeon_stats WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM dungeon_cooldowns WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM skill_stats WHERE user_id = ?', [userId]);
-    db.run('DELETE FROM pets WHERE owner_id = ?', [userId]);
-    db.run('DELETE FROM pet_gestations WHERE gestating_for_user = ?', [userId]);
-    
+    // Delete all user data. Each statement is wrapped in try/catch so a
+    // single missing/renamed table can't abort the entire batch (which
+    // previously caused the loop to stop after the first user).
+    const deletes = [
+      ['users', 'DELETE FROM users WHERE user_id = ?', [userId]],
+      ['balances', 'DELETE FROM balances WHERE user_id = ?', [userId]],
+      ['stocks', 'DELETE FROM stocks WHERE owner_id = ? OR stock_user_id = ?', [userId, userId]],
+      ['transactions', 'DELETE FROM transactions WHERE buyer_id = ? OR stock_user_id = ?', [userId, userId]],
+      ['economy_transactions', 'DELETE FROM economy_transactions WHERE user_id = ?', [userId]],
+      ['stock_purchases', 'DELETE FROM stock_purchases WHERE owner_id = ? OR stock_user_id = ?', [userId, userId]],
+      ['price_history', 'DELETE FROM price_history WHERE user_id = ?', [userId]],
+      ['work_history', 'DELETE FROM work_history WHERE user_id = ?', [userId]],
+      ['work_tracker', 'DELETE FROM work_tracker WHERE user_id = ?', [userId]],
+      ['crime_history', 'DELETE FROM crime_history WHERE user_id = ?', [userId]],
+      ['crime_tracker', 'DELETE FROM crime_tracker WHERE user_id = ?', [userId]],
+      ['slut_history', 'DELETE FROM slut_history WHERE user_id = ?', [userId]],
+      ['slut_tracker', 'DELETE FROM slut_tracker WHERE user_id = ?', [userId]],
+      ['rob_history', 'DELETE FROM rob_history WHERE robber_id = ? OR target_id = ?', [userId, userId]],
+      ['rob_tracker', 'DELETE FROM rob_tracker WHERE user_id = ?', [userId]],
+      ['passive_income_history', 'DELETE FROM passive_income_history WHERE user_id = ?', [userId]],
+      ['passive_income_tracker', 'DELETE FROM passive_income_tracker WHERE user_id = ?', [userId]],
+      ['role_income_history', 'DELETE FROM role_income_history WHERE user_id = ?', [userId]],
+      ['role_income_tracker', 'DELETE FROM role_income_tracker WHERE user_id = ?', [userId]],
+      ['dividend_history', 'DELETE FROM dividend_history WHERE stock_user_id = ? OR shareholder_id = ?', [userId, userId]],
+      ['self_dividend_history', 'DELETE FROM self_dividend_history WHERE stock_user_id = ?', [userId]],
+      ['gambling_stats', 'DELETE FROM gambling_stats WHERE user_id = ?', [userId]],
+      ['scratch_stats', 'DELETE FROM scratch_stats WHERE user_id = ?', [userId]],
+      ['scratch_tickets', 'DELETE FROM scratch_tickets WHERE user_id = ?', [userId]],
+      ['lottery_tickets', 'DELETE FROM lottery_tickets WHERE user_id = ?', [userId]],
+      ['lottery_history', 'DELETE FROM lottery_history WHERE user_id = ?', [userId]],
+      ['owned_properties', 'DELETE FROM owned_properties WHERE user_id = ?', [userId]],
+      ['card_cooldowns', 'DELETE FROM card_cooldowns WHERE user_id = ?', [userId]],
+      ['loans', 'DELETE FROM loans WHERE user_id = ?', [userId]],
+      ['active_bonds', 'DELETE FROM active_bonds WHERE user_id = ?', [userId]],
+      ['loan_payments', 'DELETE FROM loan_payments WHERE user_id = ?', [userId]],
+      ['bond_history', 'DELETE FROM bond_history WHERE user_id = ?', [userId]],
+      ['user_cards', 'DELETE FROM user_cards WHERE user_id = ?', [userId]],
+      ['admin_logs', 'DELETE FROM admin_logs WHERE user_id = ?', [userId]],
+      ['infamy_tracker', 'DELETE FROM infamy_tracker WHERE user_id = ?', [userId]],
+      ['bounty_board', 'DELETE FROM bounty_board WHERE target_user_id = ?', [userId]],
+      ['insider_trading_snapshots', 'DELETE FROM insider_trading_snapshots WHERE user_id = ?', [userId]],
+      ['dungeon_tracker', 'DELETE FROM dungeon_tracker WHERE user_id = ?', [userId]],
+      ['dungeon_history', 'DELETE FROM dungeon_history WHERE user_id = ?', [userId]],
+      ['user_skills', 'DELETE FROM user_skills WHERE user_id = ?', [userId]],
+      ['pets', 'DELETE FROM pets WHERE owner_id = ?', [userId]],
+      // Clear gestation flag on any other player's pet that was gestating for this user
+      ['pets (gestation cleanup)', "UPDATE pets SET gestating = 0, gestation_end = 0, gestating_for_user = NULL, gestating_male_id = NULL WHERE gestating_for_user = ?", [userId]],
+    ];
+
+    for (const [label, sql, params] of deletes) {
+      try {
+        db.run(sql, params);
+      } catch (err) {
+        // Ignore "no such table" errors so renamed/removed tables don't
+        // abort the rest of the purge for this user or the next user.
+        const msg = String(err && err.message || err);
+        if (!/no such table/i.test(msg)) {
+          console.error(`[purge-users] ${label} failed for ${userId}:`, msg);
+        }
+      }
+    }
+
     results.purged++;
   }
 
