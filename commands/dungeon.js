@@ -360,6 +360,155 @@ async function startDungeonRun(interaction, guildId, userId, tier, key) {
 
   startRoundTimer();
 
+  // Helper: perform an escape using the current run state. Used both by the
+  // direct escape button handler and by the deferred handler that fires when
+  // the user clicked Escape while a previous click was still resolving (the
+  // "pending escape" path — fixes escapes being silently dropped between
+  // rounds while combat continues).
+  async function performEscape(currentRun) {
+    if (!currentRun) return;
+    if (roundTimer) clearTimeout(roundTimer);
+
+    // === BETWEEN FLOORS (enemy already dead) — free escape, no penalty ===
+    if (currentRun.enemy.hp <= 0) {
+      const goldEarned = currentRun.goldEarned;
+      if (goldEarned > 0) {
+        await addMoney(guildId, userId, goldEarned, 'Dungeon run (escaped)');
+      }
+      const floorsCleared = currentRun.floor;
+      recordDungeonRun(guildId, userId, floorsCleared, settings.maxFloors, goldEarned, 'escaped', tier);
+      clearActiveRun(guildId, userId);
+      collector.stop('escaped');
+
+      const stats = getDungeonStats(guildId, userId);
+      const escapeAttach = getMonsterAttachment(currentRun.enemy.name);
+      const escapeEmbed = new EmbedBuilder()
+        .setColor(0xf39c12)
+        .setTitle('🏃 ESCAPED THE DUNGEON!')
+        .setDescription(`You escaped after clearing Floor ${currentRun.floor}!`)
+        .addFields(
+          { name: '🏰 Floors Cleared', value: `${floorsCleared} / ${settings.maxFloors}`, inline: true },
+          { name: '💰 Gold Earned', value: `${goldEarned.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
+          { name: '❤️ HP Remaining', value: `${currentRun.playerHp}%`, inline: true },
+          { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths}`, inline: false }
+        )
+        .setTimestamp();
+      if (escapeAttach) escapeEmbed.setImage('attachment://monster.png');
+      try { await message.edit({ embeds: [escapeEmbed], components: [], attachments: [], files: escapeAttach ? [escapeAttach] : [] }); } catch {}
+      return;
+    }
+
+    // === DURING COMBAT — roll to escape ===
+    const escapeChance = Math.min(currentRun.playerHp + 25, 99);
+    const escapeRoll = Math.floor(Math.random() * 100) + 1;
+    const escaped = escapeRoll <= escapeChance;
+
+    if (escaped) {
+      const penalty = Math.floor(currentRun.goldEarned * 0.25);
+      const goldEarned = currentRun.goldEarned - penalty;
+      if (goldEarned > 0) {
+        await addMoney(guildId, userId, goldEarned, 'Dungeon run (combat escape)');
+      }
+      const floorsCleared = currentRun.floor - 1;
+      recordDungeonRun(guildId, userId, floorsCleared, settings.maxFloors, goldEarned, 'escaped', tier);
+      clearActiveRun(guildId, userId);
+      collector.stop('escaped');
+
+      const stats = getDungeonStats(guildId, userId);
+      const escapeAttach = getMonsterAttachment(currentRun.enemy.name);
+      const escapeEmbed = new EmbedBuilder()
+        .setColor(0xf39c12)
+        .setTitle('🏃 ESCAPED MID-COMBAT!')
+        .setDescription(
+          `You scrambled away from ${currentRun.enemy.emoji} **${currentRun.enemy.name}**!\n\n` +
+          `🎲 Escape roll: **${escapeRoll}** vs **${escapeChance}%** chance — ✅ Success!\n` +
+          `⚠️ **−25% gold penalty** for fleeing mid-fight`
+        )
+        .addFields(
+          { name: '🏰 Floors Cleared', value: `${floorsCleared} / ${settings.maxFloors}`, inline: true },
+          { name: '💰 Gold Earned', value: `${goldEarned.toLocaleString()} ${getCurrency(guildId)}${penalty > 0 ? ` (−${penalty.toLocaleString()})` : ''}`, inline: true },
+          { name: '❤️ HP Remaining', value: `${currentRun.playerHp}%`, inline: true },
+          { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths}`, inline: false }
+        )
+        .setTimestamp();
+      if (escapeAttach) escapeEmbed.setImage('attachment://monster.png');
+      try { await message.edit({ embeds: [escapeEmbed], components: [], attachments: [], files: escapeAttach ? [escapeAttach] : [] }); } catch {}
+      return;
+    }
+
+    // === FAILED ESCAPE — enemy gets a free attack ===
+    const attackMoves = [
+      { name: 'exploit', weight: currentRun.enemy.bias.exploit },
+      { name: 'corrupt', weight: currentRun.enemy.bias.corrupt },
+      { name: 'isolate', weight: currentRun.enemy.bias.isolate },
+      { name: 'spam', weight: currentRun.enemy.bias.spam },
+      { name: 'override', weight: currentRun.enemy.bias.override }
+    ];
+    const totalWeight = attackMoves.reduce((sum, m) => sum + m.weight, 0);
+    let attackRoll = Math.random() * totalWeight;
+    let enemyAttack = attackMoves[0].name;
+    for (const m of attackMoves) {
+      attackRoll -= m.weight;
+      if (attackRoll <= 0) { enemyAttack = m.name; break; }
+    }
+    const freeHitDamage = {
+      exploit: DAMAGE.EXPLOIT, corrupt: DAMAGE.CORRUPT,
+      isolate: DAMAGE.ISOLATE, spam: DAMAGE.SPAM, override: DAMAGE.OVERRIDE
+    };
+    const freeDmg = freeHitDamage[enemyAttack] || 15;
+    const freeMoveName = enemyAttack.toUpperCase();
+
+    currentRun.playerHp -= freeDmg;
+    if (currentRun.playerHp < 0) currentRun.playerHp = 0;
+    currentRun.roundLog.push({
+      playerMove: 'escape (failed)',
+      enemyMove: enemyAttack,
+      description: `🏃 Escape failed! (Roll: **${escapeRoll}** vs **${escapeChance}%** — ❌)\n${currentRun.enemy.emoji} **${freeMoveName}** hits for **${freeDmg}%** damage!`
+    });
+
+    if (currentRun.playerHp <= 0) {
+      const penaltyPercent = settings.deathPenaltyPercent / 100;
+      const goldEarned = Math.floor(currentRun.goldEarned * (1 - penaltyPercent));
+      if (goldEarned > 0) {
+        await addMoney(guildId, userId, goldEarned, 'Dungeon run (died escaping)');
+      }
+      const floorsCleared = currentRun.floor - 1;
+      recordDungeonRun(guildId, userId, floorsCleared, settings.maxFloors, goldEarned, 'died', tier);
+      clearActiveRun(guildId, userId);
+      collector.stop('died');
+
+      const stats = getDungeonStats(guildId, userId);
+      const deathAttach = getMonsterAttachment(currentRun.enemy.name, false, currentRun.bossEnraged);
+      const deathEmbed = new EmbedBuilder()
+        .setColor(0xe74c3c)
+        .setTitle('💀 ESCAPE FAILED — YOU DIED!')
+        .setDescription(
+          `You tried to flee but ${currentRun.enemy.emoji} **${currentRun.enemy.name}** caught you!\n\n` +
+          `🎲 Escape roll: **${escapeRoll}** vs **${escapeChance}%** chance — ❌ Failed!\n` +
+          `${currentRun.enemy.emoji} **${freeMoveName}** hits for **${freeDmg}%** damage!`
+        )
+        .addFields(
+          { name: '🏰 Floors Cleared', value: `${floorsCleared} / ${settings.maxFloors}`, inline: true },
+          { name: '💰 Gold Earned', value: `${goldEarned.toLocaleString()} ${getCurrency(guildId)} (−${settings.deathPenaltyPercent}% penalty)`, inline: true },
+          { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths}`, inline: false }
+        )
+        .setTimestamp();
+      if (deathAttach) deathEmbed.setImage('attachment://monster.png');
+      try { await message.edit({ embeds: [deathEmbed], components: [], attachments: [], files: deathAttach ? [deathAttach] : [] }); } catch {}
+      return;
+    }
+
+    // Player survived — back to combat
+    setActiveRun(guildId, userId, currentRun);
+    startRoundTimer();
+    const combatEmbed = buildCombatEmbed(interaction.user, currentRun, settings);
+    const isEnraged = currentRun.bossEnraged && currentRun.enemy.boss;
+    const combatAttach = await getScaledMonsterAttachment(currentRun.enemy.name, false, isEnraged);
+    const newMoveRow = buildMoveButtons(userId, currentRun.restoreCooldown);
+    const newRestoreEscapeRow = buildRestoreEscapeRow(userId, currentRun.restoreCooldown, currentRun.playerHp);
+    try { await message.edit({ embeds: [combatEmbed], components: [newMoveRow, newRestoreEscapeRow], attachments: [], files: combatAttach ? [combatAttach] : [] }); } catch {}
+  }
+
   collector.on('collect', async (buttonInteraction) => {
     if (roundExpired) return;
 
@@ -370,8 +519,19 @@ async function startDungeonRun(interaction, guildId, userId, tier, key) {
       return;
     }
 
-    // Prevent double-click race conditions — only one button processed at a time
-    if (currentRun.processing) return;
+    // If a previous click is still resolving (combat resolution + DB write +
+    // Discord message edit can take 100-500ms), acknowledge this click so
+    // Discord doesn't show the user "interaction failed". If it was an
+    // Escape click, remember it so we can honor it after the in-flight op
+    // completes — otherwise users mashing Escape between rounds were having
+    // their escape silently dropped while combat continued.
+    if (currentRun.processing) {
+      try { await buttonInteraction.deferUpdate(); } catch {}
+      if (buttonInteraction.customId === `dungeon_escape_${userId}`) {
+        currentRun.pendingEscape = true;
+      }
+      return;
+    }
     currentRun.processing = true;
 
     try {
@@ -381,166 +541,7 @@ async function startDungeonRun(interaction, guildId, userId, tier, key) {
     // ==================== ESCAPE ====================
     if (customId === `dungeon_escape_${userId}`) {
       try { await buttonInteraction.deferUpdate(); } catch {}
-
-      // === BETWEEN FLOORS (enemy already dead) — free escape, no penalty ===
-      if (currentRun.enemy.hp <= 0) {
-        if (roundTimer) clearTimeout(roundTimer);
-
-        const goldEarned = currentRun.goldEarned;
-        if (goldEarned > 0) {
-          await addMoney(guildId, userId, goldEarned, 'Dungeon run (escaped)');
-        }
-
-        const floorsCleared = currentRun.floor;
-        recordDungeonRun(guildId, userId, floorsCleared, settings.maxFloors, goldEarned, 'escaped', tier);
-        clearActiveRun(guildId, userId);
-        collector.stop('escaped');
-
-        const stats = getDungeonStats(guildId, userId);
-
-        const escapeAttach = getMonsterAttachment(currentRun.enemy.name);
-        const escapeEmbed = new EmbedBuilder()
-          .setColor(0xf39c12)
-          .setTitle('🏃 ESCAPED THE DUNGEON!')
-          .setDescription(`You escaped after clearing Floor ${currentRun.floor}!`)
-          .addFields(
-            { name: '🏰 Floors Cleared', value: `${floorsCleared} / ${settings.maxFloors}`, inline: true },
-            { name: '💰 Gold Earned', value: `${goldEarned.toLocaleString()} ${getCurrency(guildId)}`, inline: true },
-            { name: '❤️ HP Remaining', value: `${currentRun.playerHp}%`, inline: true },
-            { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths}`, inline: false }
-          )
-          .setTimestamp();
-        if (escapeAttach) escapeEmbed.setImage('attachment://monster.png');
-
-        try { await message.edit({ embeds: [escapeEmbed], components: [], attachments: [], files: escapeAttach ? [escapeAttach] : [] }); } catch {}
-        return;
-      }
-
-      // === DURING COMBAT — roll to escape ===
-      if (roundTimer) clearTimeout(roundTimer);
-
-      const escapeChance = Math.min(currentRun.playerHp + 25, 99);
-      const escapeRoll = Math.floor(Math.random() * 100) + 1; // 1–100
-      const escaped = escapeRoll <= escapeChance;
-
-      if (escaped) {
-        // Successful mid-combat escape — 25% gold penalty
-        const penalty = Math.floor(currentRun.goldEarned * 0.25);
-        const goldEarned = currentRun.goldEarned - penalty;
-
-        if (goldEarned > 0) {
-          await addMoney(guildId, userId, goldEarned, 'Dungeon run (combat escape)');
-        }
-
-        const floorsCleared = currentRun.floor - 1; // Didn't clear current floor
-        recordDungeonRun(guildId, userId, floorsCleared, settings.maxFloors, goldEarned, 'escaped', tier);
-        clearActiveRun(guildId, userId);
-        collector.stop('escaped');
-
-        const stats = getDungeonStats(guildId, userId);
-
-        const escapeAttach = getMonsterAttachment(currentRun.enemy.name);
-        const escapeEmbed = new EmbedBuilder()
-          .setColor(0xf39c12)
-          .setTitle('🏃 ESCAPED MID-COMBAT!')
-          .setDescription(
-            `You scrambled away from ${currentRun.enemy.emoji} **${currentRun.enemy.name}**!\n\n` +
-            `🎲 Escape roll: **${escapeRoll}** vs **${escapeChance}%** chance — ✅ Success!\n` +
-            `⚠️ **−25% gold penalty** for fleeing mid-fight`
-          )
-          .addFields(
-            { name: '🏰 Floors Cleared', value: `${floorsCleared} / ${settings.maxFloors}`, inline: true },
-            { name: '💰 Gold Earned', value: `${goldEarned.toLocaleString()} ${getCurrency(guildId)}${penalty > 0 ? ` (−${penalty.toLocaleString()})` : ''}`, inline: true },
-            { name: '❤️ HP Remaining', value: `${currentRun.playerHp}%`, inline: true },
-            { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths}`, inline: false }
-          )
-          .setTimestamp();
-        if (escapeAttach) escapeEmbed.setImage('attachment://monster.png');
-
-        try { await message.edit({ embeds: [escapeEmbed], components: [], attachments: [], files: escapeAttach ? [escapeAttach] : [] }); } catch {}
-        return;
-      }
-
-      // === FAILED ESCAPE — enemy gets a free attack ===
-      const attackMoves = [
-        { name: 'exploit', weight: currentRun.enemy.bias.exploit },
-        { name: 'corrupt', weight: currentRun.enemy.bias.corrupt },
-        { name: 'isolate', weight: currentRun.enemy.bias.isolate },
-        { name: 'spam', weight: currentRun.enemy.bias.spam },
-        { name: 'override', weight: currentRun.enemy.bias.override }
-      ];
-      const totalWeight = attackMoves.reduce((sum, m) => sum + m.weight, 0);
-      let attackRoll = Math.random() * totalWeight;
-      let enemyAttack = attackMoves[0].name;
-      for (const m of attackMoves) {
-        attackRoll -= m.weight;
-        if (attackRoll <= 0) { enemyAttack = m.name; break; }
-      }
-
-      const freeHitDamage = {
-        exploit: DAMAGE.EXPLOIT, corrupt: DAMAGE.CORRUPT,
-        isolate: DAMAGE.ISOLATE, spam: DAMAGE.SPAM, override: DAMAGE.OVERRIDE
-      };
-      const freeDmg = freeHitDamage[enemyAttack] || 15;
-      const freeMoveName = enemyAttack.toUpperCase();
-
-      currentRun.playerHp -= freeDmg;
-      if (currentRun.playerHp < 0) currentRun.playerHp = 0;
-
-      currentRun.roundLog.push({
-        playerMove: 'escape (failed)',
-        enemyMove: enemyAttack,
-        description: `🏃 Escape failed! (Roll: **${escapeRoll}** vs **${escapeChance}%** — ❌)\n${currentRun.enemy.emoji} **${freeMoveName}** hits for **${freeDmg}%** damage!`
-      });
-
-      // Check if player died from the free hit
-      if (currentRun.playerHp <= 0) {
-        const penaltyPercent = settings.deathPenaltyPercent / 100;
-        const goldEarned = Math.floor(currentRun.goldEarned * (1 - penaltyPercent));
-
-        if (goldEarned > 0) {
-          await addMoney(guildId, userId, goldEarned, 'Dungeon run (died escaping)');
-        }
-
-        const floorsCleared = currentRun.floor - 1;
-        recordDungeonRun(guildId, userId, floorsCleared, settings.maxFloors, goldEarned, 'died', tier);
-        clearActiveRun(guildId, userId);
-        collector.stop('died');
-
-        const stats = getDungeonStats(guildId, userId);
-
-        const deathAttach = getMonsterAttachment(currentRun.enemy.name, false, currentRun.bossEnraged);
-        const deathEmbed = new EmbedBuilder()
-          .setColor(0xe74c3c)
-          .setTitle('💀 ESCAPE FAILED — YOU DIED!')
-          .setDescription(
-            `You tried to flee but ${currentRun.enemy.emoji} **${currentRun.enemy.name}** caught you!\n\n` +
-            `🎲 Escape roll: **${escapeRoll}** vs **${escapeChance}%** chance — ❌ Failed!\n` +
-            `${currentRun.enemy.emoji} **${freeMoveName}** hits for **${freeDmg}%** damage!`
-          )
-          .addFields(
-            { name: '🏰 Floors Cleared', value: `${floorsCleared} / ${settings.maxFloors}`, inline: true },
-            { name: '💰 Gold Earned', value: `${goldEarned.toLocaleString()} ${getCurrency(guildId)} (−${settings.deathPenaltyPercent}% penalty)`, inline: true },
-            { name: '📊 Lifetime Stats', value: `Runs: ${stats.totalRuns} | Clears: ${stats.clears} | Deaths: ${stats.deaths}`, inline: false }
-          )
-          .setTimestamp();
-        if (deathAttach) deathEmbed.setImage('attachment://monster.png');
-
-        try { await message.edit({ embeds: [deathEmbed], components: [], attachments: [], files: deathAttach ? [deathAttach] : [] }); } catch {}
-        return;
-      }
-
-      // Player survived — back to combat
-      setActiveRun(guildId, userId, currentRun);
-      startRoundTimer();
-
-      const combatEmbed = buildCombatEmbed(interaction.user, currentRun, settings);
-      const isEnraged = currentRun.bossEnraged && currentRun.enemy.boss;
-      const combatAttach = await getScaledMonsterAttachment(currentRun.enemy.name, false, isEnraged);
-      const newMoveRow = buildMoveButtons(userId, currentRun.restoreCooldown);
-      const newRestoreEscapeRow = buildRestoreEscapeRow(userId, currentRun.restoreCooldown, currentRun.playerHp);
-
-      try { await message.edit({ embeds: [combatEmbed], components: [newMoveRow, newRestoreEscapeRow], attachments: [], files: combatAttach ? [combatAttach] : [] }); } catch {}
+      await performEscape(currentRun);
       return;
     }
 
@@ -820,9 +821,18 @@ async function startDungeonRun(interaction, guildId, userId, tier, key) {
     try { await message.edit({ embeds: [combatEmbed], components: [newMoveRow, newRestoreEscapeRow], attachments: [], files: combatAttach ? [combatAttach] : [] }); } catch {}
 
     } finally {
-      // Clear processing lock if run is still active
+      // Clear processing lock if run is still active. If the user pressed
+      // Escape while the previous click was still resolving, honor it now
+      // so combat doesn't simply continue past their escape attempt.
       const still = getActiveRun(guildId, userId);
-      if (still) still.processing = false;
+      if (still) {
+        still.processing = false;
+        if (still.pendingEscape) {
+          still.pendingEscape = false;
+          try { await performEscape(still); }
+          catch (e) { console.error('[dungeon] pending escape failed:', e); }
+        }
+      }
     }
   });
 
