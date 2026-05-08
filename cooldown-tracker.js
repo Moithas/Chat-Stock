@@ -428,6 +428,11 @@ async function updateCooldownTracker(guildId) {
       // Discord is temporarily unreachable, will retry on next interval
       return;
     }
+    // Discord API outage / transient server-side errors - log one line, no stack
+    if (error.status >= 500 && error.status < 600) {
+      console.warn(`[CooldownTracker] Discord API ${error.status} ${error.method || ''} (transient, will retry)`);
+      return;
+    }
     console.error('Error updating cooldown tracker:', error);
   }
 }
