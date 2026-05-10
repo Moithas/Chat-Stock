@@ -467,6 +467,30 @@ function initPets(database) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_eggs_owner ON eggs(guild_id, owner_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_breeding_requests_guild ON breeding_requests(guild_id)`);
 
+  // Runaway pets: stash full pet snapshot when they run away so user can recover
+  db.run(`
+    CREATE TABLE IF NOT EXISTS pet_runaways (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      pet_name TEXT NOT NULL,
+      species TEXT NOT NULL,
+      ran_away_at INTEGER NOT NULL,
+      snapshot TEXT NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_pet_runaways_owner ON pet_runaways(guild_id, owner_id)`);
+
+  // Per-user runaway recovery counter — drives doubling cost
+  db.run(`
+    CREATE TABLE IF NOT EXISTS pet_runaway_recoveries (
+      guild_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      recovery_count INTEGER DEFAULT 0,
+      PRIMARY KEY (guild_id, owner_id)
+    )
+  `);
+
   // Migration: add is_active column
   migrateAddColumn(db, 'pets', 'is_active INTEGER DEFAULT 0');
   // Migration: add bond columns
@@ -902,6 +926,8 @@ function processDecay(guildId, userId) {
   for (const pet of pets) {
     const effective = getEffectiveStats(pet, settings);
     if (effective.ranAway) {
+      // Snapshot the pet so it can be recovered later
+      stashRunaway(pet, now);
       ranAway.push(pet);
       deletePet(pet.id);
     } else {
@@ -916,6 +942,120 @@ function processDecay(guildId, userId) {
   if (ranAway.length > 0) saveDatabase();
   return ranAway;
 }
+
+// ============ RUNAWAY RECOVERY ============
+// Pricing: 1st recovery is free, 2nd is 5,000, doubles each subsequent recovery.
+function getRunawayRecoveryCost(count) {
+  if (count <= 0) return 0;
+  return 5000 * Math.pow(2, count - 1);
+}
+
+function stashRunaway(pet, ranAwayAt) {
+  if (!db) return;
+  db.run(
+    'INSERT INTO pet_runaways (guild_id, owner_id, pet_name, species, ran_away_at, snapshot) VALUES (?, ?, ?, ?, ?, ?)',
+    [pet.guild_id, pet.owner_id, pet.name, pet.species, ranAwayAt, JSON.stringify(pet)]
+  );
+}
+
+function getRunawayPets(guildId, userId) {
+  if (!db) return [];
+  const stmt = db.prepare('SELECT id, pet_name, species, ran_away_at, snapshot FROM pet_runaways WHERE guild_id = ? AND owner_id = ? ORDER BY ran_away_at');
+  stmt.bind([guildId, userId]);
+  const rows = [];
+  while (stmt.step()) {
+    const row = stmt.getAsObject();
+    let snap = null;
+    try { snap = JSON.parse(row.snapshot); } catch (e) { snap = null; }
+    rows.push({ id: row.id, name: row.pet_name, species: row.species, ranAwayAt: row.ran_away_at, snapshot: snap });
+  }
+  stmt.free();
+  return rows;
+}
+
+function getRunawayPet(runawayId) {
+  if (!db) return null;
+  const stmt = db.prepare('SELECT id, guild_id, owner_id, pet_name, species, ran_away_at, snapshot FROM pet_runaways WHERE id = ?');
+  stmt.bind([runawayId]);
+  let row = null;
+  if (stmt.step()) row = stmt.getAsObject();
+  stmt.free();
+  if (!row) return null;
+  let snap = null;
+  try { snap = JSON.parse(row.snapshot); } catch (e) { return null; }
+  return { id: row.id, guildId: row.guild_id, ownerId: row.owner_id, name: row.pet_name, species: row.species, ranAwayAt: row.ran_away_at, snapshot: snap };
+}
+
+function getRunawayRecoveryCount(guildId, userId) {
+  if (!db) return 0;
+  const stmt = db.prepare('SELECT recovery_count FROM pet_runaway_recoveries WHERE guild_id = ? AND owner_id = ?');
+  stmt.bind([guildId, userId]);
+  let n = 0;
+  if (stmt.step()) n = stmt.getAsObject().recovery_count;
+  stmt.free();
+  return n;
+}
+
+function incrementRunawayRecoveryCount(guildId, userId) {
+  if (!db) return;
+  db.run(`
+    INSERT INTO pet_runaway_recoveries (guild_id, owner_id, recovery_count)
+    VALUES (?, ?, 1)
+    ON CONFLICT(guild_id, owner_id) DO UPDATE SET recovery_count = recovery_count + 1
+  `, [guildId, userId]);
+}
+
+// Restore a runaway pet to the user's roster. Returns the new pet row.
+function recoverRunaway(runawayId) {
+  if (!db) return null;
+  const runaway = getRunawayPet(runawayId);
+  if (!runaway || !runaway.snapshot) return null;
+  const p = runaway.snapshot;
+  const now = Date.now();
+  // Restore hunger/happiness to a reasonable level so they don't immediately run away again
+  const restoredHunger = Math.max(50, p.hunger || 0);
+  const restoredHappiness = Math.max(50, p.happiness || 0);
+
+  db.run(
+    `INSERT INTO pets (
+      guild_id, owner_id, species, name, rarity, sex, shiny, level, xp,
+      hunger, happiness, last_decay_time, last_fed, last_played, last_trained,
+      born_at, source, is_active, bond_streak, last_care_day, variant,
+      gestating, gestation_end, breeding_cooldown_end, gestating_for_user, gestating_male_id,
+      mother_id, father_id, mother_name, father_name,
+      maternal_grandmother_name, maternal_grandfather_name,
+      paternal_grandmother_name, paternal_grandfather_name
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      p.guild_id, p.owner_id, p.species, p.name, p.rarity, p.sex, p.shiny || 0, p.level || 1, p.xp || 0,
+      restoredHunger, restoredHappiness, now, p.last_fed || null, p.last_played || null, p.last_trained || null,
+      p.born_at || now, p.source || 'recovered', p.bond_streak || 0, p.last_care_day || 0, p.variant || 1,
+      p.gestating || 0, p.gestation_end || 0, p.breeding_cooldown_end || 0, p.gestating_for_user || null, p.gestating_male_id || null,
+      p.mother_id || null, p.father_id || null, p.mother_name || null, p.father_name || null,
+      p.maternal_grandmother_name || null, p.maternal_grandfather_name || null,
+      p.paternal_grandmother_name || null, p.paternal_grandfather_name || null
+    ]
+  );
+
+  // Get the newly inserted pet
+  const stmt = db.prepare('SELECT * FROM pets WHERE guild_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1');
+  stmt.bind([p.guild_id, p.owner_id]);
+  let newPet = null;
+  if (stmt.step()) newPet = stmt.getAsObject();
+  stmt.free();
+
+  // Remove the runaway entry
+  db.run('DELETE FROM pet_runaways WHERE id = ?', [runawayId]);
+  saveDatabase();
+  return newPet;
+}
+
+function deleteRunaway(runawayId) {
+  if (!db) return;
+  db.run('DELETE FROM pet_runaways WHERE id = ?', [runawayId]);
+  saveDatabase();
+}
+
 
 // ============ FEEDING ============
 function calculateFoodCost(pet, settings, foodType = 'basic') {
@@ -2225,6 +2365,14 @@ module.exports = {
   // Decay
   getEffectiveStats,
   processDecay,
+  // Runaway recovery
+  getRunawayPets,
+  getRunawayPet,
+  getRunawayRecoveryCount,
+  getRunawayRecoveryCost,
+  incrementRunawayRecoveryCount,
+  recoverRunaway,
+  deleteRunaway,
   // Care
   calculateFoodCost,
   feedPet,
