@@ -305,36 +305,36 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
     
     const num1Input = new TextInputBuilder()
       .setCustomId('lottery_num1')
-      .setLabel('First Number (0-29)')
+      .setLabel('First Number (0-14)')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Enter a number 0-29')
+      .setPlaceholder('Enter a number 0-14')
       .setRequired(true)
       .setMinLength(1)
       .setMaxLength(2);
     
     const num2Input = new TextInputBuilder()
       .setCustomId('lottery_num2')
-      .setLabel('Second Number (0-29)')
+      .setLabel('Second Number (0-14)')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Enter a number 0-29')
+      .setPlaceholder('Enter a number 0-14')
       .setRequired(true)
       .setMinLength(1)
       .setMaxLength(2);
     
     const num3Input = new TextInputBuilder()
       .setCustomId('lottery_num3')
-      .setLabel('Third Number (0-29)')
+      .setLabel('Third Number (0-14)')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Enter a number 0-29')
+      .setPlaceholder('Enter a number 0-14')
       .setRequired(true)
       .setMinLength(1)
       .setMaxLength(2);
     
     const num4Input = new TextInputBuilder()
       .setCustomId('lottery_num4')
-      .setLabel('Fourth Number (0-29)')
+      .setLabel('Fourth Number (0-14)')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Enter a number 0-29')
+      .setPlaceholder('Enter a number 0-14')
       .setRequired(true)
       .setMinLength(1)
       .setMaxLength(2);
@@ -926,10 +926,10 @@ async function handleLotteryTicketModal(interaction) {
     });
   }
   
-  // Validate range (0-29)
+  // Validate range (0-14)
   if ([num1, num2, num3, num4].some(n => n < 0 || n > 29)) {
     return interaction.reply({ 
-      content: '❌ All numbers must be between 0 and 29!', 
+      content: '❌ All numbers must be between 0 and 14!', 
       ephemeral: true 
     });
   }
