@@ -720,7 +720,11 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
     targetUser = { username: 'Unknown User', displayAvatarURL: () => null };
   }
   
-  const stockPrice = calculateStockPrice(targetUserId, guildId);
+  // Viewer's perspective — LP applies to the user viewing the panel
+  const viewerId = interaction.user.id;
+  const basePrice = calculateStockPrice(targetUserId, guildId, null, true, 0);
+  const lpMod = getLuckyPennyEffect(guildId, viewerId, LP_EFFECT_TYPES.STOCK_PRICES);
+  const stockPrice = calculateStockPrice(targetUserId, guildId, null, false, lpMod);
   const shareholders = getAllStockHolders(targetUserId);
   const stockRank = getStockRank(targetUserId, guildId);
   const streakInfo = calculateStreakInfo(targetUserId);
@@ -750,6 +754,30 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
   
   // Check for active market event
   const activeEvent = getActiveMarketEvent(guildId);
+  const eventPct = activeEvent ? activeEvent.percentChange : 0;
+  const hasModifiers = (activeEvent && eventPct !== 0) || lpMod !== 0;
+  
+  const currency = getCurrency(guildId);
+  
+  // Build price field — show breakdown if any modifiers apply
+  let priceFieldValue;
+  if (hasModifiers) {
+    const lines = [`**${Math.round(stockPrice).toLocaleString()}** ${currency}`];
+    lines.push(`└ Base: ${Math.round(basePrice).toLocaleString()}`);
+    if (activeEvent && eventPct !== 0) {
+      const sign = eventPct > 0 ? '+' : '';
+      const emoji = eventPct > 0 ? '📈' : '📉';
+      lines.push(`└ ${emoji} ${activeEvent.name}: ${sign}${eventPct}%`);
+    }
+    if (lpMod !== 0) {
+      const sign = lpMod > 0 ? '+' : '';
+      const emoji = lpMod > 0 ? '🍀' : '🪙';
+      lines.push(`└ ${emoji} Lucky Penny: ${sign}${lpMod}%`);
+    }
+    priceFieldValue = lines.join('\n');
+  } else {
+    priceFieldValue = `**${Math.round(stockPrice).toLocaleString()}** ${currency}`;
+  }
   
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
@@ -757,9 +785,9 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
     .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
     .setDescription(`📅 **Chat Streak:** ${streakText}`)
     .addFields(
-      { name: '💰 Current Price', value: `**${Math.round(stockPrice).toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+      { name: '💰 Current Price', value: priceFieldValue, inline: false },
       { name: '📈 Total Shares', value: `**${totalShares.toLocaleString()}**`, inline: true },
-      { name: '🏦 Market Cap', value: `**${Math.round(marketCap).toLocaleString()}** ${getCurrency(guildId)}`, inline: true },
+      { name: '🏦 Market Cap', value: `**${Math.round(marketCap).toLocaleString()}** ${currency}`, inline: true },
       { name: '👥 Shareholders', value: `**${shareholders.length}**`, inline: true },
       { name: '🏆 Stock Rank', value: stockRank ? `${getRankEmoji(stockRank.rank)} of ${stockRank.total}` : 'Unranked', inline: true }
     )
@@ -767,8 +795,8 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
   
   // Add market event indicator if active
   if (activeEvent) {
-    const eventEmoji = activeEvent.percentChange > 0 ? '📈' : '📉';
-    const changeText = activeEvent.percentChange > 0 ? `+${activeEvent.percentChange}%` : `${activeEvent.percentChange}%`;
+    const eventEmoji = eventPct > 0 ? '📈' : '📉';
+    const changeText = eventPct > 0 ? `+${eventPct}%` : `${eventPct}%`;
     const remainingMinutes = Math.ceil((activeEvent.expiresAt - Date.now()) / 60000);
     embed.addFields({
       name: `${eventEmoji} Market Event Active`,
