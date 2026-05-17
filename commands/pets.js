@@ -330,10 +330,11 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
     for (const r of runaways) {
       const sp = SPECIES[r.species];
       const emoji = sp ? sp.emoji : '🐾';
-      desc += `${emoji} **${r.name}** — ran away <t:${Math.floor(r.ranAwayAt / 1000)}:R>\n`;
+      const expiryStr = r.recoveryExpiresAt ? ` — recovery expires <t:${Math.floor(r.recoveryExpiresAt / 1000)}:R>` : '';
+      desc += `${emoji} **${r.name}** — ran away <t:${Math.floor(r.ranAwayAt / 1000)}:R>${expiryStr}\n`;
     }
     const costLabel = nextRecoveryCost === 0 ? 'FREE' : `${nextRecoveryCost.toLocaleString()} ${currency}`;
-    desc += `\n💡 Bring back the next pet for **${costLabel}**. Cost doubles each recovery after the first.`;
+    desc += `\n💡 Bring back the next pet for **${costLabel}**. Cost doubles each recovery after the first.\n⏳ Each runaway can be recovered within **24 hours** of first appearing here.`;
   }
 
   desc += extraMsg;
@@ -1459,6 +1460,11 @@ async function handleRecoverRunaway(interaction, guildId, userId, settings) {
   const runaway = getRunawayPet(runawayId);
   if (!runaway || runaway.guildId !== guildId || runaway.ownerId !== userId) {
     return interaction.followUp({ content: '❌ That pet is no longer recoverable.', flags: 64 }).catch(() => {});
+  }
+
+  // Reject if the 24h recovery window has already elapsed.
+  if (runaway.recoveryExpiresAt && runaway.recoveryExpiresAt > 0 && runaway.recoveryExpiresAt < Date.now()) {
+    return interaction.followUp({ content: `❌ The recovery window for **${runaway.name}** has expired. They've moved on for good.`, flags: 64 }).catch(() => {});
   }
 
   // Slot capacity check

@@ -480,6 +480,8 @@ function initPets(database) {
     )
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_pet_runaways_owner ON pet_runaways(guild_id, owner_id)`);
+  // Recovery window: 0 = not yet surfaced to user; timer starts on first listing
+  migrateAddColumn(db, 'pet_runaways', 'recovery_expires_at INTEGER DEFAULT 0');
 
   // Per-user runaway recovery counter — drives doubling cost
   db.run(`
@@ -950,32 +952,64 @@ function getRunawayRecoveryCost(count) {
   return 5000 * Math.pow(2, count - 1);
 }
 
+// Runaway snapshots expire 24h after the user first sees them in the panel.
+// recovery_expires_at = 0 means the timer hasn't started yet.
+const RUNAWAY_RECOVERY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 function stashRunaway(pet, ranAwayAt) {
   if (!db) return;
   db.run(
-    'INSERT INTO pet_runaways (guild_id, owner_id, pet_name, species, ran_away_at, snapshot) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO pet_runaways (guild_id, owner_id, pet_name, species, ran_away_at, snapshot, recovery_expires_at) VALUES (?, ?, ?, ?, ?, ?, 0)',
     [pet.guild_id, pet.owner_id, pet.name, pet.species, ranAwayAt, JSON.stringify(pet)]
   );
 }
 
+// Delete any runaway snapshots whose recovery window has elapsed.
+function expireRunaways() {
+  if (!db) return 0;
+  const now = Date.now();
+  db.run('DELETE FROM pet_runaways WHERE recovery_expires_at > 0 AND recovery_expires_at < ?', [now]);
+  return now;
+}
+
 function getRunawayPets(guildId, userId) {
   if (!db) return [];
-  const stmt = db.prepare('SELECT id, pet_name, species, ran_away_at, snapshot FROM pet_runaways WHERE guild_id = ? AND owner_id = ? ORDER BY ran_away_at');
+  // Drop any that have already expired.
+  expireRunaways();
+  const now = Date.now();
+  const stmt = db.prepare('SELECT id, pet_name, species, ran_away_at, snapshot, recovery_expires_at FROM pet_runaways WHERE guild_id = ? AND owner_id = ? ORDER BY ran_away_at');
   stmt.bind([guildId, userId]);
   const rows = [];
+  const newlyStarted = [];
   while (stmt.step()) {
     const row = stmt.getAsObject();
     let snap = null;
     try { snap = JSON.parse(row.snapshot); } catch (e) { snap = null; }
-    rows.push({ id: row.id, name: row.pet_name, species: row.species, ranAwayAt: row.ran_away_at, snapshot: snap });
+    let expiresAt = row.recovery_expires_at;
+    // First time the user is seeing this runaway — start the 24h timer now.
+    if (!expiresAt || expiresAt === 0) {
+      expiresAt = now + RUNAWAY_RECOVERY_WINDOW_MS;
+      newlyStarted.push({ id: row.id, expiresAt });
+    }
+    rows.push({ id: row.id, name: row.pet_name, species: row.species, ranAwayAt: row.ran_away_at, recoveryExpiresAt: expiresAt, snapshot: snap });
   }
   stmt.free();
+
+  if (newlyStarted.length > 0) {
+    for (const r of newlyStarted) {
+      db.run('UPDATE pet_runaways SET recovery_expires_at = ? WHERE id = ?', [r.expiresAt, r.id]);
+    }
+    saveDatabase();
+  }
+
   return rows;
 }
 
 function getRunawayPet(runawayId) {
   if (!db) return null;
-  const stmt = db.prepare('SELECT id, guild_id, owner_id, pet_name, species, ran_away_at, snapshot FROM pet_runaways WHERE id = ?');
+  // Clean up first so an expired snapshot isn't accidentally recovered via a stale button.
+  expireRunaways();
+  const stmt = db.prepare('SELECT id, guild_id, owner_id, pet_name, species, ran_away_at, snapshot, recovery_expires_at FROM pet_runaways WHERE id = ?');
   stmt.bind([runawayId]);
   let row = null;
   if (stmt.step()) row = stmt.getAsObject();
@@ -983,7 +1017,7 @@ function getRunawayPet(runawayId) {
   if (!row) return null;
   let snap = null;
   try { snap = JSON.parse(row.snapshot); } catch (e) { return null; }
-  return { id: row.id, guildId: row.guild_id, ownerId: row.owner_id, name: row.pet_name, species: row.species, ranAwayAt: row.ran_away_at, snapshot: snap };
+  return { id: row.id, guildId: row.guild_id, ownerId: row.owner_id, name: row.pet_name, species: row.species, ranAwayAt: row.ran_away_at, recoveryExpiresAt: row.recovery_expires_at, snapshot: snap };
 }
 
 function getRunawayRecoveryCount(guildId, userId) {
