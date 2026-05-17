@@ -1305,7 +1305,11 @@ client.on('interactionCreate', async (interaction) => {
     'bank_pay_full', 'bank_pay_custom', 'bank_pay_custom_modal', 'bank_bond_select',
     'bank_security', 'bank_immunity_select', 'bounty_board'
   ];
-  if ((interaction.isButton() && (bankUserIds.includes(interaction.customId) || interaction.customId.startsWith('bank_loan_confirm_'))) ||
+  if ((interaction.isButton() && (
+      bankUserIds.includes(interaction.customId) ||
+      interaction.customId.startsWith('bank_loan_confirm_') ||
+      interaction.customId.startsWith('bank_history_page_')
+    )) ||
       (interaction.isStringSelectMenu() && (interaction.customId === 'bank_bond_select' || interaction.customId === 'bank_immunity_select')) ||
       (interaction.isModalSubmit() && (interaction.customId === 'bank_loan_modal' || interaction.customId === 'bank_pay_custom_modal'))) {
     try {

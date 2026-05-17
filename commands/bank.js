@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const { getBalance, addMoney, removeFromBank, removeMoney } = require('../economy');
+const { getBalance, addMoney, removeFromBank, removeMoney, getTransactionHistory } = require('../economy');
 const { 
   getBankSettings, 
   getUserActiveLoan, 
@@ -38,6 +38,9 @@ const {
 } = require('../rob');
 const { getWealthTaxSettings, calculateUserWealth, calculateTaxForWealth, getDayName } = require('../wealth-tax');
 const { getCurrency } = require('../admin');
+
+const HISTORY_ITEMS_PER_PAGE = 10;
+const HISTORY_MAX_ITEMS = 50;
 
 
 
@@ -533,10 +536,15 @@ async function showBondShop(interaction, guildId, userId) {
 
 // ============ HISTORY ============
 
-async function showHistory(interaction, guildId, userId) {
+async function showHistory(interaction, guildId, userId, page = 0) {
   const loanHistory = getUserLoanHistory(guildId, userId, 5);
   const bondHist = getBondHistory(guildId, userId, 5);
   const totalBondIncomeCollected = getTotalBondIncomeCollected(guildId, userId);
+  const txHistory = getTransactionHistory(guildId, userId, HISTORY_MAX_ITEMS);
+  const totalPages = Math.max(1, Math.ceil(txHistory.length / HISTORY_ITEMS_PER_PAGE));
+  const safePage = Math.max(0, Math.min(page, totalPages - 1));
+  const pageStart = safePage * HISTORY_ITEMS_PER_PAGE;
+  const pageItems = txHistory.slice(pageStart, pageStart + HISTORY_ITEMS_PER_PAGE);
   
   const creditInfo = getUserCreditScore(guildId, userId);
   const creditTier = getCreditTier(creditInfo.score, guildId);
@@ -595,8 +603,38 @@ async function showHistory(interaction, guildId, userId) {
   } else {
     embed.addFields({ name: '🛡️ Recent Protection', value: 'No protection history', inline: false });
   }
+
+  // Economy transaction history (money in/out)
+  if (txHistory.length > 0) {
+    const txText = pageItems.map(t => {
+      const sign = t.amount >= 0 ? '+' : '';
+      const direction = t.amount >= 0 ? '🟢' : '🔴';
+      const typeIcon = t.balance_type === 'bank' ? '🏦' : '💵';
+      const date = new Date(t.timestamp).toLocaleString();
+      const reason = t.reason && t.reason.length > 44 ? `${t.reason.slice(0, 44)}...` : (t.reason || 'Transaction');
+      return `${direction} ${sign}${Math.abs(t.amount).toLocaleString()} ${getCurrency(guildId)} ${typeIcon} • ${reason}\n└ ${date}`;
+    }).join('\n\n');
+
+    embed.addFields({
+      name: `💸 Recent Money Flow (In/Out) — Page ${safePage + 1}/${totalPages}`,
+      value: txText,
+      inline: false
+    });
+  } else {
+    embed.addFields({ name: '💸 Recent Money Flow (In/Out)', value: 'No transaction history yet.', inline: false });
+  }
   
   const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`bank_history_page_${safePage - 1}`)
+      .setLabel('◀️ Previous')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(safePage === 0 || txHistory.length === 0),
+    new ButtonBuilder()
+      .setCustomId(`bank_history_page_${safePage + 1}`)
+      .setLabel('Next ▶️')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(safePage >= totalPages - 1 || txHistory.length === 0),
     new ButtonBuilder()
       .setCustomId('bank_panel_back')
       .setLabel('Back to Bank')
@@ -734,7 +772,15 @@ async function handleBankInteraction(interaction) {
   }
   
   if (customId === 'bank_history') {
-    return showHistory(interaction, guildId, userId);
+    return showHistory(interaction, guildId, userId, 0);
+  }
+
+  if (customId.startsWith('bank_history_page_')) {
+    const page = parseInt(customId.replace('bank_history_page_', ''), 10);
+    if (Number.isNaN(page)) {
+      return interaction.reply({ content: '❌ Invalid history page.', flags: 64 });
+    }
+    return showHistory(interaction, guildId, userId, page);
   }
   
   if (customId === 'bank_refresh' || customId === 'bank_panel_back') {
