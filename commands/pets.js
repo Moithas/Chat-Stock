@@ -1447,9 +1447,18 @@ async function handleRecoverRunaway(interaction, guildId, userId, settings) {
   const runawayId = parseInt(parts[2], 10);
   if (!runawayId) return interaction.reply({ content: '❌ Invalid recovery request.', flags: 64 });
 
+  // Defer immediately — recoverRunaway + saveDatabase on a large DB can exceed 3s
+  // and we need to keep the interaction token alive for the panel refresh.
+  try {
+    await interaction.deferUpdate();
+  } catch (e) {
+    // If defer fails, the token is already dead — nothing we can do.
+    return;
+  }
+
   const runaway = getRunawayPet(runawayId);
   if (!runaway || runaway.guildId !== guildId || runaway.ownerId !== userId) {
-    return interaction.reply({ content: '❌ That pet is no longer recoverable.', flags: 64 });
+    return interaction.followUp({ content: '❌ That pet is no longer recoverable.', flags: 64 }).catch(() => {});
   }
 
   // Slot capacity check
@@ -1458,7 +1467,7 @@ async function handleRecoverRunaway(interaction, guildId, userId, settings) {
     + getMyGestatingPets(guildId, userId).length;
   const maxSlots = getMaxPetSlots(guildId, userId);
   if (usedSlots >= maxSlots) {
-    return interaction.reply({ content: `❌ No slots available (${usedSlots}/${maxSlots}). Release a pet or upgrade your kennel first.`, flags: 64 });
+    return interaction.followUp({ content: `❌ No slots available (${usedSlots}/${maxSlots}). Release a pet or upgrade your kennel first.`, flags: 64 }).catch(() => {});
   }
 
   // Cost check based on prior recovery count
@@ -1469,10 +1478,10 @@ async function handleRecoverRunaway(interaction, guildId, userId, settings) {
   if (cost > 0) {
     const balance = await getBalance(guildId, userId);
     if (balance.total < cost) {
-      return interaction.reply({
+      return interaction.followUp({
         content: `❌ You need **${cost.toLocaleString()} ${currency}** to bring back **${runaway.name}** (you have ${Math.round(balance.total).toLocaleString()}).`,
         flags: 64,
-      });
+      }).catch(() => {});
     }
     await removeFromTotal(guildId, userId, cost);
   }
@@ -1481,7 +1490,7 @@ async function handleRecoverRunaway(interaction, guildId, userId, settings) {
   if (!newPet) {
     // Refund if recovery failed unexpectedly
     if (cost > 0) await addMoney(guildId, userId, cost);
-    return interaction.reply({ content: '❌ Failed to bring your pet back. Please try again.', flags: 64 });
+    return interaction.followUp({ content: '❌ Failed to bring your pet back. Please try again.', flags: 64 }).catch(() => {});
   }
 
   incrementRunawayRecoveryCount(guildId, userId);
@@ -1494,8 +1503,8 @@ async function handleRecoverRunaway(interaction, guildId, userId, settings) {
   const nextCost = getRunawayRecoveryCost(getRunawayRecoveryCount(guildId, userId));
   const nextMsg = `\nNext recovery will cost **${nextCost.toLocaleString()} ${currency}**.`;
 
-  // Refresh main panel
-  return showMainPanel(interaction, guildId, userId, settings, true, false, `\n\n${costMsg}${nextMsg}`);
+  // Refresh main panel via editReply since we deferred
+  return showMainPanel(interaction, guildId, userId, settings, false, true, `\n\n${costMsg}${nextMsg}`);
 }
 
 async function handleSetActive(interaction, guildId, userId, settings) {
