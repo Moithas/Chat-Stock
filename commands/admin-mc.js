@@ -88,7 +88,7 @@ async function handleMcSyncModal(interaction) {
   if (!hasAdminPermission(interaction.member, interaction.guildId)) {
     return interaction.reply({ content: '❌ Admin only.', ephemeral: true });
   }
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // public reply so players can see their rewards
 
   const text = interaction.fields.getTextInputValue('mc_sync_text');
   const result = processSync(interaction.guildId, interaction.user.id, text);
@@ -99,12 +99,13 @@ async function handleMcSyncModal(interaction) {
 
   const embed = buildSyncSummaryEmbed(result, interaction.user);
 
-  // Ephemeral confirmation to the admin
+  // Public reply in the channel where the admin ran the command
   await interaction.editReply({ embeds: [embed] });
 
-  // Public post in the configured channel (if set and reward was actually given)
+  // Also cross-post the player-facing summary to the configured channel
+  // (only if it's a different channel and a reward was actually given)
   const settings = getMcSettings(interaction.guildId);
-  if (settings.channelId && result.totalReward > 0) {
+  if (settings.channelId && settings.channelId !== interaction.channelId && result.totalReward > 0) {
     try {
       const ch = await interaction.client.channels.fetch(settings.channelId);
       if (ch && ch.isTextBased()) {
@@ -112,7 +113,7 @@ async function handleMcSyncModal(interaction) {
         await ch.send({ embeds: [publicEmbed] });
       }
     } catch (e) {
-      // Channel might be gone or bot lacks perms — admin already got their ephemeral summary
+      // Channel might be gone or bot lacks perms — admin already got the in-channel summary
     }
   }
 }
