@@ -10,9 +10,6 @@ const {
   getShopStock, getShopRestockTime, removeShopSlot,
   adoptPet, getPet, getUserPets, getUserPetCount, deletePet, renamePet,
   getEffectiveStats, processDecay, calculateFoodCost, feedPet,
-  // Runaway recovery
-  getRunawayPets, getRunawayPet, getRunawayRecoveryCount, getRunawayRecoveryCost,
-  incrementRunawayRecoveryCount, recoverRunaway,
   precheckPlay, precheckTrain, playWithPet, trainPet, getTrainCost, getBondMultiplier,
   xpToNextLevel, getPhase, formatPetName, formatPetSummary, formatShopEntry,
   formatBonusType, getSpecialtyDisplay, getSinglePetBonus,
@@ -30,6 +27,8 @@ const {
   // Trading
   createTradeRequest, getTradeRequest, updateTradeRequestPet,
   updateTradeRequestStatus, deleteTradeRequest, cleanupExpiredTradeRequests, executeTrade,
+  // Runaway
+  stashRunaway,
 } = require('../pets');
 const { getBalance, removeFromTotal, addMoney } = require('../economy');
 const { getCurrency } = require('../admin');
@@ -108,8 +107,6 @@ module.exports = {
     }
 
     // Route buttons
-    if (customId.startsWith('pet_recover_')) return handleRecoverRunaway(interaction, guildId, userId, settings);
-
     if (customId.startsWith('pet_panel_')) {
       const action = customId.split('pet_panel_')[1];
       if (action === 'main' || action.startsWith('main_u_')) return showMainPanel(interaction, guildId, userId, settings, true);
@@ -274,9 +271,6 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
   const currency = getCurrency(guildId);
   const eggs = getUserEggs(guildId, userId);
   const gestating = getMyGestatingPets(guildId, userId);
-  const runaways = getRunawayPets(guildId, userId);
-  const recoveryCount = getRunawayRecoveryCount(guildId, userId);
-  const nextRecoveryCost = getRunawayRecoveryCost(recoveryCount);
 
   const embed = new EmbedBuilder()
     .setColor(0xE67E22)
@@ -323,17 +317,6 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
     }
   }
 
-  if (runaways.length > 0) {
-    desc += `\n**🏃 Ran Away:**\n`;
-    for (const r of runaways) {
-      const sp = SPECIES[r.species];
-      const emoji = sp ? sp.emoji : '🐾';
-      desc += `${emoji} **${r.name}** — ran away <t:${Math.floor(r.ranAwayAt / 1000)}:R>\n`;
-    }
-    const costLabel = nextRecoveryCost === 0 ? 'FREE' : `${nextRecoveryCost.toLocaleString()} ${currency}`;
-    desc += `\n💡 Bring back the next pet for **${costLabel}**. Cost doubles each recovery after the first.`;
-  }
-
   desc += extraMsg;
   embed.setDescription(desc);
 
@@ -366,27 +349,7 @@ async function showMainPanel(interaction, guildId, userId, settings, isUpdate = 
     new ButtonBuilder().setCustomId(`pet_dismiss_u_${userId}`).setLabel('Dismiss').setEmoji('❌').setStyle(ButtonStyle.Danger),
   );
 
-  const components = [row1, row2, row3, row4];
-
-  // Add runaway recovery buttons (one per runaway, max 5 per row, only show first row)
-  if (runaways.length > 0) {
-    const recoveryRow = new ActionRowBuilder();
-    const visible = runaways.slice(0, 5);
-    for (const r of visible) {
-      const cost = nextRecoveryCost; // Cost is per-recovery, not per-pet — shows current cost for next click
-      const label = cost === 0 ? `Bring back ${r.name} (Free)` : `Bring back ${r.name} (${cost.toLocaleString()})`;
-      recoveryRow.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`pet_recover_${r.id}_u_${userId}`)
-          .setLabel(label.length > 80 ? label.substring(0, 77) + '...' : label)
-          .setEmoji('🏃')
-          .setStyle(cost === 0 ? ButtonStyle.Success : ButtonStyle.Primary)
-      );
-    }
-    components.unshift(recoveryRow);
-  }
-
-  const options = { embeds: [embed], components };
+  const options = { embeds: [embed], components: [row1, row2, row3, row4] };
   if (isDeferred) return interaction.editReply(options);
   if (isUpdate) return interaction.update(options);
   return interaction.reply(options);
@@ -881,8 +844,9 @@ async function handleFeedMenu(interaction, guildId, userId, settings) {
 
   const effective = getEffectiveStats(pet, settings);
   if (effective.ranAway) {
+    stashRunaway(pet, Date.now());
     deletePet(petId);
-    return interaction.update({ content: `😢 **${pet.name}** ran away!`, embeds: [], components: [] });
+    return interaction.update({ content: `😢 **${pet.name}** ran away! Open \`/pets\` to bring them back.`, embeds: [], components: [] });
   }
 
   const currency = getCurrency(guildId);
@@ -1435,64 +1399,6 @@ async function runSpotDiffGame(interaction, pet, speciesData, userId, petId) {
   } catch {
     return false;
   }
-}
-
-async function handleRecoverRunaway(interaction, guildId, userId, settings) {
-  // customId format: pet_recover_<runawayId>_u_<userId>
-  const parts = interaction.customId.split('_');
-  // parts: ['pet','recover','<runawayId>','u','<userId>']
-  const runawayId = parseInt(parts[2], 10);
-  if (!runawayId) return interaction.reply({ content: '❌ Invalid recovery request.', flags: 64 });
-
-  const runaway = getRunawayPet(runawayId);
-  if (!runaway || runaway.guildId !== guildId || runaway.ownerId !== userId) {
-    return interaction.reply({ content: '❌ That pet is no longer recoverable.', flags: 64 });
-  }
-
-  // Slot capacity check
-  const usedSlots = getUserPetCount(guildId, userId)
-    + getUserEggCount(guildId, userId)
-    + getMyGestatingPets(guildId, userId).length;
-  const maxSlots = getMaxPetSlots(guildId, userId);
-  if (usedSlots >= maxSlots) {
-    return interaction.reply({ content: `❌ No slots available (${usedSlots}/${maxSlots}). Release a pet or upgrade your kennel first.`, flags: 64 });
-  }
-
-  // Cost check based on prior recovery count
-  const recoveryCount = getRunawayRecoveryCount(guildId, userId);
-  const cost = getRunawayRecoveryCost(recoveryCount);
-  const currency = getCurrency(guildId);
-
-  if (cost > 0) {
-    const balance = await getBalance(guildId, userId);
-    if (balance.total < cost) {
-      return interaction.reply({
-        content: `❌ You need **${cost.toLocaleString()} ${currency}** to bring back **${runaway.name}** (you have ${Math.round(balance.total).toLocaleString()}).`,
-        flags: 64,
-      });
-    }
-    await removeFromTotal(guildId, userId, cost);
-  }
-
-  const newPet = recoverRunaway(runawayId);
-  if (!newPet) {
-    // Refund if recovery failed unexpectedly
-    if (cost > 0) await addMoney(guildId, userId, cost);
-    return interaction.reply({ content: '❌ Failed to bring your pet back. Please try again.', flags: 64 });
-  }
-
-  incrementRunawayRecoveryCount(guildId, userId);
-
-  const sp = SPECIES[newPet.species];
-  const emoji = sp ? sp.emoji : '🐾';
-  const costMsg = cost === 0
-    ? `🎉 **${newPet.name}** ${emoji} came home! (Free first recovery)`
-    : `🎉 **${newPet.name}** ${emoji} came home! Cost: **${cost.toLocaleString()} ${currency}**`;
-  const nextCost = getRunawayRecoveryCost(getRunawayRecoveryCount(guildId, userId));
-  const nextMsg = `\nNext recovery will cost **${nextCost.toLocaleString()} ${currency}**.`;
-
-  // Refresh main panel
-  return showMainPanel(interaction, guildId, userId, settings, true, false, `\n\n${costMsg}${nextMsg}`);
 }
 
 async function handleSetActive(interaction, guildId, userId, settings) {

@@ -1077,7 +1077,9 @@ function feedPet(petId, settings, foodType = 'basic') {
 
   const effective = getEffectiveStats(pet, settings);
   if (effective.ranAway) {
+    stashRunaway(pet, Date.now());
     deletePet(petId);
+    saveDatabase();
     return { success: false, error: 'ran_away', pet };
   }
 
@@ -1134,6 +1136,7 @@ function feedAllPets(guildId, userId, settings) {
   for (const pet of pets) {
     const effective = getEffectiveStats(pet, settings);
     if (effective.ranAway) {
+      stashRunaway(pet, Date.now());
       deletePet(pet.id);
       results.push({ pet, status: 'ran_away' });
       continue;
@@ -1161,7 +1164,7 @@ function executeFeedAll(guildId, userId, settings) {
 
   for (const pet of pets) {
     const effective = getEffectiveStats(pet, settings);
-    if (effective.ranAway) { deletePet(pet.id); continue; }
+    if (effective.ranAway) { stashRunaway(pet, now); deletePet(pet.id); continue; }
     if (effective.hunger >= 100) continue;
 
     const cost = calculateFoodCost(pet, settings, 'basic');
@@ -1190,7 +1193,9 @@ function precheckPlay(petId, settings) {
 
   const effective = getEffectiveStats(pet, settings);
   if (effective.ranAway) {
+    stashRunaway(pet, Date.now());
     deletePet(petId);
+    saveDatabase();
     return { success: false, error: 'ran_away', pet };
   }
   const phase = getPhase(pet.level);
@@ -1212,7 +1217,9 @@ function precheckTrain(petId, settings) {
 
   const effective = getEffectiveStats(pet, settings);
   if (effective.ranAway) {
+    stashRunaway(pet, Date.now());
     deletePet(petId);
+    saveDatabase();
     return { success: false, error: 'ran_away', pet };
   }
   const phase = getPhase(pet.level);
@@ -2366,6 +2373,7 @@ module.exports = {
   getEffectiveStats,
   processDecay,
   // Runaway recovery
+  stashRunaway,
   getRunawayPets,
   getRunawayPet,
   getRunawayRecoveryCount,
