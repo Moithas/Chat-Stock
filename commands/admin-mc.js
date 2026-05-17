@@ -78,7 +78,7 @@ async function openSyncModal(interaction) {
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(true)
     .setMaxLength(4000)
-    .setPlaceholder('Paste the full console log. Only "Player connected/disconnected" lines are read; other lines are ignored.');
+    .setPlaceholder('Paste the full console log. Only Player connected/disconnected lines are read.');
 
   modal.addComponents(new ActionRowBuilder().addComponents(input));
   return interaction.showModal(modal);
