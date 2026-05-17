@@ -29,6 +29,7 @@ const { initialize: initVideoPoker, cleanupStaleGames: cleanupStaleVideoPoker } 
 const { initMaintenance, startCleanupScheduler, logError, checkCommandCooldown, updateCommandCooldown, trackCommandUsage } = require('./maintenance');
 const { initDungeon, cleanupStaleRuns: cleanupStaleDungeons } = require('./dungeon');
 const { initHunt } = require('./hunt');
+const { initMcRewards } = require('./mc-rewards');
 const log = require('./logger');
 const { initSYN, cleanupStaleGames: cleanupStaleSYN } = require('./screwyourneighbor');
 const { initLuckyPenny } = require('./luckypenny');
@@ -407,6 +408,9 @@ client.once('clientReady', async () => {
 
   // Initialize hunt system
   initHunt(getDb());
+
+  // Initialize Minecraft rewards system
+  initMcRewards(getDb());
 
   // Initialize Screw Your Neighbor
   initSYN(getDb());
@@ -999,6 +1003,27 @@ client.on('interactionCreate', async (interaction) => {
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
       logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'lottery ticket modal', error });
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle Minecraft sync / settings modals
+  if (interaction.isModalSubmit() && (interaction.customId === 'mc_sync_modal' || interaction.customId === 'mc_settings_modal')) {
+    try {
+      const adminMc = require('./commands/admin-mc');
+      if (interaction.customId === 'mc_sync_modal') {
+        await adminMc.handleMcSyncModal(interaction);
+      } else {
+        await adminMc.handleMcSettingsModal(interaction);
+      }
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'mc modal', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
