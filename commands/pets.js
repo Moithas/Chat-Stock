@@ -30,6 +30,8 @@ const {
   // Trading
   createTradeRequest, getTradeRequest, updateTradeRequestPet,
   updateTradeRequestStatus, deleteTradeRequest, cleanupExpiredTradeRequests, executeTrade,
+  // Runaway stash
+  stashRunaway,
 } = require('../pets');
 const { getBalance, removeFromTotal, addMoney } = require('../economy');
 const { getCurrency } = require('../admin');
@@ -881,8 +883,9 @@ async function handleFeedMenu(interaction, guildId, userId, settings) {
 
   const effective = getEffectiveStats(pet, settings);
   if (effective.ranAway) {
+    stashRunaway(pet, Date.now());
     deletePet(petId);
-    return interaction.update({ content: `😢 **${pet.name}** ran away!`, embeds: [], components: [] });
+    return interaction.update({ content: `😢 **${pet.name}** ran away! Open \`/pets\` to bring them back.`, embeds: [], components: [] });
   }
 
   const currency = getCurrency(guildId);
