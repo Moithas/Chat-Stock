@@ -179,14 +179,21 @@ function buildResultEmbed(game, user, attachment) {
   let color, title, description;
 
   if (payout > 0) {
-    color = 0x4CAF50;
-    title = `🎉 ${handRank}!`;
     const multiplier = game.result.payout;
+    const netProfit = boostedPayout - game.betAmount;
+    color = netProfit > 0 ? 0x4CAF50 : 0xFFC107;
+    title = netProfit > 0 ? `🎉 ${handRank}!` : `↩️ ${handRank} (Push)`;
+    const profitLine = netProfit > 0
+      ? `Net Profit: **+${netProfit.toLocaleString()}** ${getCurrency(game.guildId)}`
+      : netProfit === 0
+        ? `Result: **Push** (bet returned)`
+        : `Net: **${netProfit.toLocaleString()}** ${getCurrency(game.guildId)}`;
     description =
-      `**${handRank}** pays **${multiplier}:1**!\n\n` +
+      `**${handRank}** pays **${multiplier} for 1**\n\n` +
       `Bet: **${game.betAmount.toLocaleString()}** ${getCurrency(game.guildId)}\n` +
-      `Payout: **${multiplier}x** × ${game.betAmount.toLocaleString()} = **+${payout.toLocaleString()}** ${getCurrency(game.guildId)}!` +
-      (petGamblingBoost > 0 ? `\n🐾 Pet bonus: +${petGamblingBoost}% → **+${boostedPayout.toLocaleString()}** ${getCurrency(game.guildId)}` : '');
+      `Returned: **${boostedPayout.toLocaleString()}** ${getCurrency(game.guildId)}\n` +
+      profitLine +
+      (petGamblingBoost > 0 ? `\n🐾 Pet bonus: +${petGamblingBoost}%` : '');
   } else {
     color = 0xF44336;
     title = '😔 No Winning Hand';
@@ -484,10 +491,11 @@ async function handleButton(interaction) {
 
 async function processResult(interaction, game) {
   if (game.payout > 0) {
-    // Win — return bet + boosted winnings
+    // Pay tables use the "for 1" convention: payout already INCLUDES the stake.
+    // (e.g. Jacks or Better = 1 for 1 = push; Two Pair = 2 for 1 = +1x net)
+    // Bet was deducted at game start, so we just credit the gross payout back.
     const boostedPayout = applyGamblingBonus(game.guildId, game.userId, game.payout);
-    const totalReturn = boostedPayout + game.betAmount;
-    await addMoney(game.guildId, game.userId, totalReturn, 'Video Poker winnings');
+    await addMoney(game.guildId, game.userId, boostedPayout, 'Video Poker winnings');
   }
   // If payout <= 0, bet was already deducted at start
 }
@@ -499,11 +507,10 @@ async function handleTimeout(client, guildId, userId) {
   const result = forceEndGame(guildId, userId, 'timeout');
   if (!result) return;
 
-  // Process payouts
+  // Process payouts ("for 1" convention — payout already includes the stake)
   if (result.payout > 0) {
     const boostedPayout = applyGamblingBonus(result.guildId, userId, result.payout);
-    const totalReturn = boostedPayout + result.betAmount;
-    await addMoney(result.guildId, userId, totalReturn, 'Video Poker winnings (timeout)');
+    await addMoney(result.guildId, userId, boostedPayout, 'Video Poker winnings (timeout)');
   }
 
   // Update the original message
