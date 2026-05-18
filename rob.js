@@ -12,7 +12,6 @@ const DEFAULT_SETTINGS = {
   maxStealPercent: 80,      // Maximum % of target's cash that can be stolen
   cooldownMinutes: 240,     // Minutes between rob attempts (default 4 hours = 240 minutes)
   targetCooldownSeconds: 60, // Seconds a target is protected after being robbed (default 1 minute)
-  giftProtectionHours: 24,  // Hours giver cannot rob recipient after using /give
   fineMinPercent: 10,       // Minimum fine as % of robber's total balance
   fineMaxPercent: 25,       // Maximum fine as % of robber's total balance
   defensesEnabled: true,    // Whether defense mechanics are enabled
@@ -37,7 +36,6 @@ function initRob(database) {
       max_steal_percent INTEGER DEFAULT 80,
       cooldown_minutes INTEGER DEFAULT 240,
       target_cooldown_seconds INTEGER DEFAULT 60,
-      gift_protection_hours INTEGER DEFAULT 24,
       fine_min_percent INTEGER DEFAULT 10,
       fine_max_percent INTEGER DEFAULT 25,
       defenses_enabled INTEGER DEFAULT 1,
@@ -52,9 +50,6 @@ function initRob(database) {
   
   // Add target_cooldown_seconds column if it doesn't exist (migration)
   migrateAddColumn(db, 'rob_settings', 'target_cooldown_seconds INTEGER DEFAULT 60');
-
-  // Add gift_protection_hours column if it doesn't exist (migration)
-  migrateAddColumn(db, 'rob_settings', 'gift_protection_hours INTEGER DEFAULT 24');
   
   // Migrate from cooldown_hours to cooldown_minutes if needed
   try {
@@ -203,7 +198,6 @@ function getRobSettings(guildId) {
       maxStealPercent: row.max_steal_percent,
       cooldownMinutes: row.cooldown_minutes || 240,
       targetCooldownSeconds: row.target_cooldown_seconds !== undefined ? row.target_cooldown_seconds : 60,
-      giftProtectionHours: row.gift_protection_hours !== undefined ? row.gift_protection_hours : 24,
       uniqueTargetsRequired: row.unique_targets_required !== undefined ? row.unique_targets_required : 3,
       fineMinPercent: row.fine_min_percent || 10,
       fineMaxPercent: row.fine_max_percent || 25,
@@ -230,8 +224,8 @@ function updateRobSettings(guildId, updates) {
   const settings = { ...current, ...updates };
   
   db.run(`
-    INSERT OR REPLACE INTO rob_settings (guild_id, enabled, min_steal_percent, max_steal_percent, cooldown_minutes, target_cooldown_seconds, gift_protection_hours, unique_targets_required, fine_min_percent, fine_max_percent, defenses_enabled, defense_window_seconds, hidecash_success_rate, dodge_success_rate, fightback_success_rate)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO rob_settings (guild_id, enabled, min_steal_percent, max_steal_percent, cooldown_minutes, target_cooldown_seconds, unique_targets_required, fine_min_percent, fine_max_percent, defenses_enabled, defense_window_seconds, hidecash_success_rate, dodge_success_rate, fightback_success_rate)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     guildId,
     settings.enabled ? 1 : 0,
@@ -239,7 +233,6 @@ function updateRobSettings(guildId, updates) {
     settings.maxStealPercent,
     settings.cooldownMinutes,
     settings.targetCooldownSeconds,
-    settings.giftProtectionHours !== undefined ? settings.giftProtectionHours : 24,
     settings.uniqueTargetsRequired !== undefined ? settings.uniqueTargetsRequired : 3,
     settings.fineMinPercent,
     settings.fineMaxPercent,
@@ -401,13 +394,8 @@ function recordGiftProtection(guildId, giverId, recipientId) {
 // Check if robbing is prevented due to recent gift (24 hour protection)
 function checkGiftProtection(guildId, robberId, targetId) {
   if (!db) return { canRob: true };
-
-  const settings = getRobSettings(guildId);
-  const protectionHours = settings.giftProtectionHours !== undefined ? settings.giftProtectionHours : 24;
-  if (protectionHours <= 0) {
-    return { canRob: true };
-  }
   
+  const protectionHours = 24; // 24 hour protection after giving money
   const protectionMs = protectionHours * 60 * 60 * 1000;
   const cutoffTime = Date.now() - protectionMs;
   

@@ -419,5 +419,7 @@ module.exports = {
   getRecentSyncLogs,
   parseLogText,
   processSync,
+  getDailyCredit,
+  utcDateString,
   DEFAULTS
 };

@@ -1015,7 +1015,7 @@ client.on('interactionCreate', async (interaction) => {
   // Handle Minecraft sync / settings modals
   if (interaction.isModalSubmit() && (interaction.customId === 'mc_sync_modal' || interaction.customId === 'mc_settings_modal')) {
     try {
-      const adminMc = require('./commands/admin-mc');
+      const adminMc = require('./commands/admin-minecraft');
       if (interaction.customId === 'mc_sync_modal') {
         await adminMc.handleMcSyncModal(interaction);
       } else {
@@ -1024,6 +1024,53 @@ client.on('interactionCreate', async (interaction) => {
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
       logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'mc modal', error });
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle Minecraft player panel (buttons + link modal)
+  if ((interaction.isButton() && interaction.customId.startsWith('mc_panel_')) ||
+      (interaction.isModalSubmit() && interaction.customId === 'mc_panel_link_modal')) {
+    try {
+      const mc = require('./commands/minecraft');
+      if (interaction.isModalSubmit()) {
+        await mc.handleLinkModal(interaction);
+      } else {
+        await mc.handleButton(interaction);
+      }
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'mc panel', error });
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle Minecraft admin panel (buttons + select menus)
+  if ((interaction.isButton() && interaction.customId.startsWith('mc_admin_')) ||
+      (interaction.isChannelSelectMenu && interaction.isChannelSelectMenu() && interaction.customId === 'mc_admin_select_channel') ||
+      (interaction.isUserSelectMenu && interaction.isUserSelectMenu() && interaction.customId === 'mc_admin_select_user')) {
+    try {
+      const adminMc = require('./commands/admin-minecraft');
+      if (interaction.isButton()) {
+        await adminMc.handleButton(interaction);
+      } else if (interaction.customId === 'mc_admin_select_channel') {
+        await adminMc.handleChannelSelect(interaction);
+      } else if (interaction.customId === 'mc_admin_select_user') {
+        await adminMc.handleUserSelect(interaction);
+      }
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'mc admin panel', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
