@@ -97,7 +97,7 @@ async function showPetsAdminPanel(interaction, guildId) {
       { name: '📊 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
       { name: '🛒 Shop Restock', value: `Every ${Math.round(settings.shopRestockInterval / 3600)}h`, inline: true },
       { name: '✨ Shiny Chance', value: `${(settings.shinyChance * 100).toFixed(1)}%`, inline: true },
-      { name: '🍖 Base Food Cost', value: `${settings.baseFoodCost.toLocaleString()} ${currency}`, inline: true },
+      { name: '🍖 Base Food Cost', value: `${settings.baseFoodCost.toLocaleString()} ${currency}\nPremium: ×${settings.foodPremiumMult} • Treat: ×${settings.foodTreatMult}`, inline: true },
       { name: '✏️ Rename Cost', value: `${settings.renameCost.toLocaleString()} ${currency}`, inline: true },
       { name: '📈 Base Bonus %', value: `${settings.baseBonusPercent}%`, inline: true },
       { name: '🎮 Play Cooldown', value: `${Math.round(settings.playCooldown / 3600)}h`, inline: true },
@@ -204,7 +204,12 @@ async function handleEconomyModal(interaction, guildId) {
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('food_cost').setLabel('Base food cost').setStyle(TextInputStyle.Short).setValue(`${settings.baseFoodCost}`).setRequired(true)
+      new TextInputBuilder()
+        .setCustomId('food_cost')
+        .setLabel('Food: base, premium×, treat× (basic=1×)')
+        .setStyle(TextInputStyle.Short)
+        .setValue(`${settings.baseFoodCost}, ${settings.foodPremiumMult}, ${settings.foodTreatMult}`)
+        .setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('rename_cost').setLabel('Rename cost').setStyle(TextInputStyle.Short).setValue(`${settings.renameCost}`).setRequired(true)
@@ -226,19 +231,25 @@ async function handleEconomyModal(interaction, guildId) {
 async function handleEconomySubmit(interaction, guildId) {
   await interaction.deferUpdate();
 
-  const foodCost = parseInt(interaction.fields.getTextInputValue('food_cost'));
+  const foodParts = interaction.fields.getTextInputValue('food_cost').split(',').map(s => parseFloat(s.trim()));
+  const foodCost = foodParts[0];
+  const foodPremiumMult = foodParts[1];
+  const foodTreatMult = foodParts[2];
   const renameCost = parseInt(interaction.fields.getTextInputValue('rename_cost'));
 
   const xpParts = interaction.fields.getTextInputValue('play_xp').split(',').map(s => parseInt(s.trim()));
   const happParts = interaction.fields.getTextInputValue('happiness_gain').split(',').map(s => parseInt(s.trim()));
   const decayParts = interaction.fields.getTextInputValue('decay').split(',').map(s => parseInt(s.trim()));
 
-  if ([foodCost, renameCost, ...xpParts, ...happParts, ...decayParts].some(v => isNaN(v))) {
+  if ([foodCost, foodPremiumMult, foodTreatMult, renameCost, ...xpParts, ...happParts, ...decayParts].some(v => isNaN(v))) {
     return interaction.followUp({ content: '❌ Invalid numbers provided.', flags: 64 });
   }
 
   updateSettings(guildId, {
-    baseFoodCost: Math.max(0, foodCost),
+    baseFoodCost: Math.max(0, Math.round(foodCost)),
+    foodBasicMult: 1.0,
+    foodPremiumMult: Math.max(0, foodPremiumMult),
+    foodTreatMult: Math.max(0, foodTreatMult),
     renameCost: Math.max(0, renameCost),
     playXp: Math.max(1, xpParts[0]),
     trainXp: Math.max(1, xpParts[1] || xpParts[0]),

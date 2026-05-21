@@ -51,9 +51,12 @@ const PHASES = {
 };
 
 // ============ FOOD TYPES ============
+// Note: costMult values here are DEFAULTS only. Live values are sourced from
+// per-guild pet_settings (foodBasicMult / foodPremiumMult / foodTreatMult)
+// and applied inside calculateFoodCost().
 const FOOD_TYPES = {
   basic:   { name: 'Basic Food',   emoji: '🍖', costMult: 1.0,  hunger: 10, happiness: 0  },
-  premium: { name: 'Premium Food', emoji: '🥩', costMult: 4.0,  hunger: 20, happiness: 5  },
+  premium: { name: 'Premium Food', emoji: '🥩', costMult: 2.5,  hunger: 20, happiness: 5  },
   treat:   { name: 'Treat',        emoji: '🍰', costMult: 2.0,  hunger: 2,  happiness: 8  },
 };
 
@@ -285,6 +288,9 @@ const DEFAULT_SETTINGS = {
   enabled: false,
   shopRestockInterval: 43200,   // 12 hours in seconds
   baseFoodCost: 2000,
+  foodBasicMult: 1.0,
+  foodPremiumMult: 2.5,
+  foodTreatMult: 2.0,
   renameCost: 25000,
   playCooldown: 7200,           // 2 hours in seconds
   trainCooldown: 7200,          // 2 hours in seconds
@@ -534,6 +540,10 @@ function initPets(database) {
   migrateAddColumn(db, 'pet_settings', 'transfer_enabled INTEGER DEFAULT 1');
   migrateAddColumn(db, 'pet_settings', 'transfer_min_happiness INTEGER DEFAULT 80');
   migrateAddColumn(db, 'pet_settings', 'transfer_happiness_penalty INTEGER DEFAULT 50');
+  // Food cost multipliers (overrides FOOD_TYPES defaults)
+  migrateAddColumn(db, 'pet_settings', 'food_basic_mult REAL DEFAULT 1.0');
+  migrateAddColumn(db, 'pet_settings', 'food_premium_mult REAL DEFAULT 2.5');
+  migrateAddColumn(db, 'pet_settings', 'food_treat_mult REAL DEFAULT 2.0');
 
   saveDatabase();
   console.log('🐾 Pet system initialized');
@@ -555,6 +565,9 @@ function getSettings(guildId) {
       enabled: row.enabled === 1,
       shopRestockInterval: row.shop_restock_interval,
       baseFoodCost: row.base_food_cost,
+      foodBasicMult: row.food_basic_mult ?? 1.0,
+      foodPremiumMult: row.food_premium_mult ?? 2.5,
+      foodTreatMult: row.food_treat_mult ?? 2.0,
       renameCost: row.rename_cost,
       playCooldown: row.play_cooldown,
       trainCooldown: row.train_cooldown,
@@ -608,6 +621,9 @@ function updateSettings(guildId, updates) {
     enabled: 'enabled',
     shopRestockInterval: 'shop_restock_interval',
     baseFoodCost: 'base_food_cost',
+    foodBasicMult: 'food_basic_mult',
+    foodPremiumMult: 'food_premium_mult',
+    foodTreatMult: 'food_treat_mult',
     renameCost: 'rename_cost',
     playCooldown: 'play_cooldown',
     trainCooldown: 'train_cooldown',
@@ -1092,14 +1108,20 @@ function deleteRunaway(runawayId) {
 
 
 // ============ FEEDING ============
+function getFoodCostMult(settings, foodType) {
+  if (foodType === 'premium') return settings.foodPremiumMult ?? FOOD_TYPES.premium.costMult;
+  if (foodType === 'treat')   return settings.foodTreatMult   ?? FOOD_TYPES.treat.costMult;
+  return settings.foodBasicMult ?? FOOD_TYPES.basic.costMult;
+}
+
 function calculateFoodCost(pet, settings, foodType = 'basic') {
   if (!settings) settings = getSettings(pet.guild_id);
   const speciesData = SPECIES[pet.species];
   const rarityData = RARITIES[pet.rarity];
   const levelFactor = 1 + (pet.level - 1) * 0.03;
   const exoticFactor = speciesData.type === 'exotic' ? 1.5 : 1.0;
-  const food = FOOD_TYPES[foodType] || FOOD_TYPES.basic;
-  return Math.round(settings.baseFoodCost * food.costMult * levelFactor * rarityData.multiplier * exoticFactor);
+  const costMult = getFoodCostMult(settings, foodType);
+  return Math.round(settings.baseFoodCost * costMult * levelFactor * rarityData.multiplier * exoticFactor);
 }
 
 function feedPet(petId, settings, foodType = 'basic') {
