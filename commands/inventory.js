@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, UserSelectMenuBuilder, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ComponentType } = require('discord.js');
 const { 
   getUserInventory, 
   getActiveEffects, 
@@ -20,8 +20,13 @@ const {
   completeFulfillment,
   cancelFulfillment,
   getItemSettings,
+  updateItemSettings,
   getItemCooldown,
-  recordItemUse
+  recordItemUse,
+  recordGamblingRoom,
+  getActiveRoomForUser,
+  addRoomGuest,
+  getRoomGuests
 } = require('../items');
 const { getAdminRole, isAdmin, getCurrency } = require('../admin');
 
@@ -430,6 +435,268 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
     }
   }
   
+  // Handle VIP Gambling Room item — create a private channel for the buyer
+  if (shopItem && shopItem.effect_type === 'gambling_room') {
+    await i.deferReply({ ephemeral: true });
+    try {
+      const existing = getActiveRoomForUser(guildId, userId);
+      if (existing) {
+        return i.editReply({
+          content: `❌ You already own an active VIP Gambling Room: <#${existing.channelId}>\nIt expires <t:${Math.floor(existing.expiresAt / 1000)}:R>.`
+        });
+      }
+
+      const guild = i.guild;
+      const me = guild.members.me;
+      if (!me?.permissions.has(PermissionFlagsBits.ManageChannels)) {
+        return i.editReply({ content: '❌ I need the **Manage Channels** permission to create your VIP room. Please contact an admin.' });
+      }
+
+      // Find or create the Casino category
+      const settings = getItemSettings(guildId);
+      let categoryId = settings.casinoCategoryId;
+      let category = categoryId ? guild.channels.cache.get(categoryId) : null;
+      if (!category || category.type !== ChannelType.GuildCategory) {
+        category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && /casino/i.test(c.name));
+        if (!category) {
+          try {
+            category = await guild.channels.create({
+              name: '🎰 VIP Casino',
+              type: ChannelType.GuildCategory,
+              reason: 'Auto-created for VIP Gambling Rooms'
+            });
+          } catch (e) {
+            console.error('Failed to create Casino category:', e);
+            return i.editReply({ content: '❌ Failed to create the Casino category. Please contact an admin.' });
+          }
+        }
+        categoryId = category.id;
+        updateItemSettings(guildId, { casinoCategoryId: categoryId });
+      }
+
+      // Build channel name from username (sanitized)
+      const usernameSafe = (i.user.username || 'vip')
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 20) || 'vip';
+      const channelName = `🎰-${usernameSafe}-vip`;
+
+      // Permission overwrites: everyone view-only, owner full access, bot manage
+      const overwrites = [
+        {
+          id: guild.roles.everyone.id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+          deny: [
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.UseApplicationCommands,
+            PermissionFlagsBits.AddReactions,
+            PermissionFlagsBits.CreatePublicThreads,
+            PermissionFlagsBits.CreatePrivateThreads,
+            PermissionFlagsBits.SendMessagesInThreads,
+            PermissionFlagsBits.AttachFiles,
+            PermissionFlagsBits.EmbedLinks
+          ]
+        },
+        {
+          id: userId,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.UseApplicationCommands,
+            PermissionFlagsBits.AddReactions,
+            PermissionFlagsBits.AttachFiles,
+            PermissionFlagsBits.EmbedLinks
+          ]
+        },
+        {
+          id: me.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ManageChannels,
+            PermissionFlagsBits.ManageMessages,
+            PermissionFlagsBits.EmbedLinks,
+            PermissionFlagsBits.AttachFiles,
+            PermissionFlagsBits.ReadMessageHistory
+          ]
+        }
+      ];
+
+      let newChannel;
+      try {
+        newChannel = await guild.channels.create({
+          name: channelName,
+          type: ChannelType.GuildText,
+          parent: categoryId,
+          topic: `🎰 VIP Gambling Room owned by ${i.user.tag}`,
+          permissionOverwrites: overwrites,
+          reason: `VIP Gambling Room purchased by ${i.user.tag}`
+        });
+      } catch (e) {
+        console.error('Failed to create VIP gambling room:', e);
+        return i.editReply({ content: '❌ Failed to create your VIP room. Please contact an admin.' });
+      }
+
+      const durationHours = shopItem.duration_hours || 168;
+      recordGamblingRoom(newChannel.id, guildId, userId, durationHours);
+      removeFromInventory(guildId, userId, itemId, 1);
+
+      const expiresAt = Date.now() + durationHours * 60 * 60 * 1000;
+      const welcomeEmbed = new EmbedBuilder()
+        .setColor(0xf1c40f)
+        .setTitle(`🎰 ${i.user.username}'s VIP Gambling Room`)
+        .setDescription(
+          `Welcome, <@${userId}>! This is **your** private gambling room.\n\n` +
+          `🕒 **Expires:** <t:${Math.floor(expiresAt / 1000)}:F> (<t:${Math.floor(expiresAt / 1000)}:R>)\n\n` +
+          `Only **you** (and any guests you invite) can post or use commands here. Everyone else can watch.`
+        )
+        .addFields(
+          {
+            name: '🎲 Allowed Games',
+            value: '`/blackjack` `/roulette` `/scratcher` `/scratch` `/videopoker` `/three-card-poker` `/letitride` `/lottery`',
+            inline: false
+          },
+          {
+            name: '💰 Allowed Money Commands',
+            value: '`/deposit` `/withdraw` `/give` `/balance`',
+            inline: false
+          },
+          {
+            name: '🎟️ Invite Guests',
+            value: 'Buy a **VIP Room Guest Pass** from `/shop` and use it from `/inventory` to invite someone.\nUse `/vip-room` to view your room info and remove guests via buttons.',
+            inline: false
+          }
+        )
+        .setFooter({ text: 'Note: In-Between is a community pot game and is not available in VIP rooms.' });
+
+      try {
+        await newChannel.send({ content: `<@${userId}>`, embeds: [welcomeEmbed] });
+      } catch (e) {
+        console.error('Failed to post welcome message in VIP room:', e);
+      }
+
+      // Refresh inventory display
+      state.inventory = getUserInventory(guildId, userId);
+      state.page = Math.min(state.page, Math.max(0, Math.ceil(state.inventory.length / ITEMS_PER_PAGE) - 1));
+      inventoryState.set(stateKey, state);
+      const embed = createInventoryEmbed(state.inventory, state.page, targetName, true);
+      const components = createInventoryPanelComponents(state.inventory, state.effects, state.page, state.tab, true);
+      await response.edit({ embeds: [embed], components });
+
+      return i.editReply({
+        content: `✅ **VIP Gambling Room created!**\n\n👉 Head over to ${newChannel} to start playing.\n🕒 Expires <t:${Math.floor(expiresAt / 1000)}:R>.`
+      });
+    } catch (error) {
+      console.error('Error creating VIP gambling room:', error);
+      try {
+        return i.editReply({ content: '❌ Failed to create VIP room. Please contact an admin.' });
+      } catch (_) { return; }
+    }
+  }
+
+  // Handle VIP Room Guest Pass — invite a guest into the owner's active room
+  if (shopItem && shopItem.effect_type === 'gambling_room_invite') {
+    await i.deferReply({ ephemeral: true });
+    try {
+      const room = getActiveRoomForUser(guildId, userId);
+      if (!room) {
+        return i.editReply({
+          content: '❌ You don\'t own an active VIP Gambling Room. Buy a **VIP Gambling Room** from `/shop` first.'
+        });
+      }
+
+      const channel = i.guild.channels.cache.get(room.channelId) ?? await i.guild.channels.fetch(room.channelId).catch(() => null);
+      if (!channel) {
+        return i.editReply({ content: '❌ Your VIP room channel seems to be missing. Please contact an admin.' });
+      }
+
+      const selectMenu = new UserSelectMenuBuilder()
+        .setCustomId(`vip_invite_select_${room.channelId}`)
+        .setPlaceholder('Select a user to invite...')
+        .setMinValues(1)
+        .setMaxValues(1);
+
+      await i.editReply({
+        content: `🎟️ Pick a user to invite into ${channel}.\nThis pass will be consumed on selection.`,
+        components: [new ActionRowBuilder().addComponents(selectMenu)]
+      });
+
+      const replyMsg = await i.fetchReply();
+      let selection;
+      try {
+        selection = await replyMsg.awaitMessageComponent({
+          filter: (c) => c.user.id === userId && c.customId === `vip_invite_select_${room.channelId}`,
+          componentType: ComponentType.UserSelect,
+          time: 60000
+        });
+      } catch (_) {
+        return i.editReply({ content: '⏱️ Invite timed out. Your Guest Pass was **not** used.', components: [] });
+      }
+
+      const guestId = selection.values[0];
+      await selection.deferUpdate();
+
+      if (guestId === userId) {
+        return i.editReply({ content: '❌ You can\'t invite yourself. Guest Pass not used.', components: [] });
+      }
+      const guestMember = await i.guild.members.fetch(guestId).catch(() => null);
+      if (!guestMember || guestMember.user.bot) {
+        return i.editReply({ content: '❌ Invalid guest. Guest Pass not used.', components: [] });
+      }
+
+      // Check if already a guest (via permissionOverwrites or DB)
+      const existingOverwrite = channel.permissionOverwrites.cache.get(guestId);
+      if (existingOverwrite && existingOverwrite.allow.has(PermissionFlagsBits.SendMessages)) {
+        return i.editReply({ content: `❌ <@${guestId}> already has access to your room.`, components: [] });
+      }
+
+      try {
+        await channel.permissionOverwrites.edit(guestId, {
+          ViewChannel: true,
+          ReadMessageHistory: true,
+          SendMessages: true,
+          UseApplicationCommands: true,
+          AddReactions: true,
+          AttachFiles: true,
+          EmbedLinks: true
+        }, { reason: `VIP Room Guest Pass used by ${i.user.tag}` });
+      } catch (e) {
+        console.error('Failed to apply guest overwrite:', e);
+        return i.editReply({ content: '❌ Failed to grant guest access. Guest Pass not used.', components: [] });
+      }
+
+      addRoomGuest(room.channelId, guildId, guestId);
+      removeFromInventory(guildId, userId, itemId, 1);
+
+      try {
+        await channel.send({
+          content: `🎟️ <@${guestId}> has been invited into the room by <@${userId}>! Welcome to the VIP table.`
+        });
+      } catch (_) { /* ignore */ }
+
+      // Refresh inventory display
+      state.inventory = getUserInventory(guildId, userId);
+      state.page = Math.min(state.page, Math.max(0, Math.ceil(state.inventory.length / ITEMS_PER_PAGE) - 1));
+      inventoryState.set(stateKey, state);
+      const embed = createInventoryEmbed(state.inventory, state.page, targetName, true);
+      const components = createInventoryPanelComponents(state.inventory, state.effects, state.page, state.tab, true);
+      await response.edit({ embeds: [embed], components });
+
+      return i.editReply({
+        content: `✅ <@${guestId}> has been invited into ${channel}!`,
+        components: []
+      });
+    } catch (error) {
+      console.error('Error using VIP Room Guest Pass:', error);
+      try {
+        return i.editReply({ content: '❌ Failed to invite guest. Please contact an admin.', components: [] });
+      } catch (_) { return; }
+    }
+  }
+
   // Use regular effect item
   await i.deferReply({ ephemeral: true });
   

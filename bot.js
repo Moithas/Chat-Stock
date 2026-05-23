@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Partials, Collection, REST, Routes, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, Collection, REST, Routes, ActivityType, PermissionsBitField } = require('discord.js');
 const { initDatabase, createUser, updateMessageCount, calculateStockPrice, logPrice, getUser, getDb, getStreakInfo, shutdownDatabase } = require('./database');
 const { initTicker, sendStreakAnnouncement, sendStreakExpiredAnnouncement } = require('./ticker');
 const { initFees } = require('./fees');
@@ -20,7 +20,7 @@ const { initBank, startBankScheduler } = require('./bank');
 const { addMoney } = require('./economy');
 const { initWealthTax, getWealthTaxSettings, collectWealthTax, getLotteryInfo: getWealthTaxLotteryInfo } = require('./wealth-tax');
 const { initSkills } = require('./skills');
-const { initItems, getExpiredRoleGrants, removeRoleGrantRecord } = require('./items');
+const { initItems, getExpiredRoleGrants, removeRoleGrantRecord, isVipRoomChannel, getExpiredRooms, deleteRoomRecord, getRoomByChannelId } = require('./items');
 const { initCooldownTracker, startAllTrackers } = require('./cooldown-tracker');
 const { initialize: initInBetween, cleanupStaleGames: cleanupStaleInBetween } = require('./inbetween');
 const { initialize: initLetItRide, cleanupStaleGames: cleanupStaleLetItRide } = require('./letitride');
@@ -324,6 +324,43 @@ function startRoleExpirationScheduler(client) {
   console.log('🏷️ Role expiration scheduler started');
 }
 
+// VIP Gambling Room expiration scheduler - deletes channels whose rental expired
+async function processExpiredVipRooms(client) {
+  try {
+    const expired = getExpiredRooms(Date.now());
+    if (expired.length === 0) return;
+    console.log(`🎰 Found ${expired.length} expired VIP gambling room(s) to clean up`);
+    for (const room of expired) {
+      try {
+        const guild = await client.guilds.fetch(room.guildId).catch(() => null);
+        if (!guild) {
+          deleteRoomRecord(room.channelId);
+          continue;
+        }
+        const channel = guild.channels.cache.get(room.channelId) ?? await guild.channels.fetch(room.channelId).catch(() => null);
+        if (channel) {
+          try {
+            await channel.delete('VIP Gambling Room rental expired');
+            console.log(`🎰 Deleted expired VIP room #${channel.name} in ${guild.name}`);
+          } catch (e) {
+            console.error(`🎰 Failed to delete expired VIP room ${room.channelId}:`, e.message);
+          }
+        }
+      } catch (e) {
+        console.error('Error processing expired VIP room:', e);
+      }
+      deleteRoomRecord(room.channelId);
+    }
+  } catch (e) {
+    console.error('Error in VIP room expiration sweep:', e);
+  }
+}
+
+function startVipRoomExpirationScheduler(client) {
+  setInterval(() => processExpiredVipRooms(client), 60000);
+  console.log('🎰 VIP gambling room expiration scheduler started');
+}
+
 // When bot is ready
 client.once('clientReady', async () => {
   log.info(`Logged in as ${client.user.username}`);
@@ -464,6 +501,10 @@ client.once('clientReady', async () => {
   // Start role expiration scheduler (for temporary shop roles)
   startRoleExpirationScheduler(client);
 
+  // Start VIP Gambling Room expiration scheduler + one-shot catch-up sweep
+  await processExpiredVipRooms(client);
+  startVipRoomExpirationScheduler(client);
+
   // Start infamy decay scheduler (hourly)
   setInterval(() => decayAllInfamy(), 3600000);
 
@@ -596,6 +637,17 @@ client.on('guildCreate', async (guild) => {
     }
   } catch (e) {
     log.warn('Could not send welcome message', { guild: guild.id, error: e.message });
+  }
+});
+// Clean up VIP gambling room records if the channel is deleted manually
+client.on('channelDelete', (channel) => {
+  try {
+    if (channel?.id && isVipRoomChannel(channel.id)) {
+      deleteRoomRecord(channel.id);
+      console.log(`🎰 VIP gambling room channel #${channel.name} was deleted; record cleaned up`);
+    }
+  } catch (e) {
+    console.error('Error handling channelDelete for VIP room:', e);
   }
 });
 
@@ -894,6 +946,23 @@ client.on('interactionCreate', async (interaction) => {
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return; // Interaction expired/acknowledged
       logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'scratcher button', error });
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle VIP Gambling Room remove-guest buttons
+  if (interaction.isButton() && interaction.customId.startsWith('vip_room_remove_')) {
+    try {
+      const { handleButton } = require('./commands/vip-room');
+      await handleButton(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'vip-room button', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
@@ -1865,6 +1934,29 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (!interaction.isChatInputCommand()) return;
+
+  // VIP Gambling Room: restrict commands to an allowlist inside rented rooms
+  if (interaction.channelId && isVipRoomChannel(interaction.channelId)) {
+    const VIP_ROOM_ALLOWED = new Set([
+      'blackjack', 'roulette', 'scratcher', 'scratch', 'videopoker',
+      'three-card-poker', 'letitride', 'lottery',
+      'deposit', 'withdraw', 'give', 'balance', 'inventory', 'shop',
+      'vip-room'
+    ]);
+    // Permit admins to run any command in the room (for moderation/maintenance)
+    const member = interaction.member;
+    const isAdminUser = member && typeof member.permissions?.has === 'function'
+      ? member.permissions.has(PermissionsBitField.Flags.Administrator)
+      : false;
+    if (!isAdminUser && !VIP_ROOM_ALLOWED.has(interaction.commandName)) {
+      try {
+        return await interaction.reply({
+          content: `❌ \`/${interaction.commandName}\` is not available in VIP Gambling Rooms. Only gambling games and money commands are permitted here.`,
+          flags: 64
+        });
+      } catch (e) { return; }
+    }
+  }
 
   // Track slash command usage as a message (always counts, no anti-spam)
   const userId = interaction.user.id;

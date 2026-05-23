@@ -55,6 +55,10 @@ const EFFECT_TYPES = {
   // Pet discount (consumed on next pet/egg purchase)
   PET_DISCOUNT: 'pet_discount',           // % discount on next pet or egg purchase (single-use coupon)
   
+  // VIP gambling room (creates a private channel for the buyer)
+  GAMBLING_ROOM: 'gambling_room',                 // Rents a private gambling channel for duration_hours
+  GAMBLING_ROOM_INVITE: 'gambling_room_invite',   // Invite one guest to your active gambling room
+  
   // Cosmetic (no effect, just collectible)
   COSMETIC: 'cosmetic',                   // No effect, just a collectible/trophy
 };
@@ -82,6 +86,8 @@ const EFFECT_TYPE_NAMES = {
   [EFFECT_TYPES.ROBBERY_VULNERABILITY]: 'Robbery Vulnerability',
   [EFFECT_TYPES.ROLE_GRANT]: 'Role Grant',
   [EFFECT_TYPES.DUNGEON_KEY]: 'Dungeon Key',
+  [EFFECT_TYPES.GAMBLING_ROOM]: 'VIP Gambling Room',
+  [EFFECT_TYPES.GAMBLING_ROOM_INVITE]: 'VIP Room Guest Pass',
   [EFFECT_TYPES.COSMETIC]: 'Cosmetic',
 };
 
@@ -203,6 +209,30 @@ const DEFAULT_ITEMS = [
     max_stack: 1,
     enabled: true,
     emoji: '📈'
+  },
+  {
+    name: 'VIP Gambling Room',
+    description: 'Rent a private gambling channel for 1 week. Only you can post or use commands; everyone else can watch. Allowed games: blackjack, roulette, scratcher, videopoker, three-card-poker, letitride, lottery, plus deposit/withdraw/give/balance.',
+    price: 500000,
+    category: 'special',
+    effect_type: 'gambling_room',
+    effect_value: 0,
+    duration_hours: 168, // 7 days
+    max_stack: 1,
+    enabled: true,
+    emoji: '🎰'
+  },
+  {
+    name: 'VIP Room Guest Pass',
+    description: 'Invite one guest into your VIP Gambling Room. The guest gets the same access as you for the remainder of the room\'s rental. Requires you to own an active VIP Gambling Room.',
+    price: 75000,
+    category: 'special',
+    effect_type: 'gambling_room_invite',
+    effect_value: 0,
+    duration_hours: 0, // duration follows the room
+    max_stack: 10,
+    enabled: true,
+    emoji: '🎟️'
   }
 ];
 
@@ -302,6 +332,7 @@ function initItems(database) {
   // Add ticket columns if they don't exist (migration for existing databases)
   migrateAddColumn(db, 'item_settings', 'ticket_category_id TEXT');
   migrateAddColumn(db, 'item_settings', 'ticket_log_channel_id TEXT');
+  migrateAddColumn(db, 'item_settings', 'casino_category_id TEXT');
   
   // Create fulfillment requests table (for service/cosmetic items that need admin action)
   db.run(`
@@ -380,6 +411,35 @@ function initItems(database) {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_item_cooldowns_guild_user ON item_use_cooldowns(guild_id, user_id)`);
   
+  // Create VIP gambling rooms table (private channels rented via the shop)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS gambling_rooms (
+      channel_id TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_gambling_rooms_owner ON gambling_rooms(guild_id, user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_gambling_rooms_expires ON gambling_rooms(expires_at)`);
+
+  // Create gambling room guests table (one row per invited guest per room)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS gambling_room_guests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      invited_at INTEGER NOT NULL,
+      UNIQUE(channel_id, user_id)
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_gambling_room_guests_channel ON gambling_room_guests(channel_id)`);
+
+  // Populate in-memory cache of active VIP room channel IDs
+  loadVipRoomChannelCache();
+
   console.log('🛒 Item shop system initialized');
 }
 
@@ -389,7 +449,7 @@ function getItemSettings(guildId) {
     return guildItemSettings.get(guildId);
   }
   
-  if (!db) return { shopEnabled: true, shopChannelId: null, announcementChannelId: null, ticketCategoryId: null, ticketLogChannelId: null };
+  if (!db) return { shopEnabled: true, shopChannelId: null, announcementChannelId: null, ticketCategoryId: null, ticketLogChannelId: null, casinoCategoryId: null };
   
   const result = db.exec('SELECT * FROM item_settings WHERE guild_id = ?', [guildId]);
   
@@ -403,13 +463,14 @@ function getItemSettings(guildId) {
       shopChannelId: row.shop_channel_id,
       announcementChannelId: row.announcement_channel_id,
       ticketCategoryId: row.ticket_category_id || null,
-      ticketLogChannelId: row.ticket_log_channel_id || null
+      ticketLogChannelId: row.ticket_log_channel_id || null,
+      casinoCategoryId: row.casino_category_id || null
     };
     guildItemSettings.set(guildId, settings);
     return settings;
   }
   
-  const defaults = { shopEnabled: true, shopChannelId: null, announcementChannelId: null, ticketCategoryId: null, ticketLogChannelId: null };
+  const defaults = { shopEnabled: true, shopChannelId: null, announcementChannelId: null, ticketCategoryId: null, ticketLogChannelId: null, casinoCategoryId: null };
   guildItemSettings.set(guildId, defaults);
   return defaults;
 }
@@ -422,15 +483,16 @@ function updateItemSettings(guildId, updates) {
   const settings = { ...current, ...updates };
   
   db.run(`
-    INSERT OR REPLACE INTO item_settings (guild_id, shop_enabled, shop_channel_id, announcement_channel_id, ticket_category_id, ticket_log_channel_id)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO item_settings (guild_id, shop_enabled, shop_channel_id, announcement_channel_id, ticket_category_id, ticket_log_channel_id, casino_category_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `, [
     guildId,
     settings.shopEnabled ? 1 : 0,
     settings.shopChannelId,
     settings.announcementChannelId,
     settings.ticketCategoryId,
-    settings.ticketLogChannelId
+    settings.ticketLogChannelId,
+    settings.casinoCategoryId
   ]);
   
   guildItemSettings.set(guildId, settings);
@@ -1245,6 +1307,9 @@ function getEffectTypeName(effectType) {
     [EFFECT_TYPES.DUNGEON_KEY]: '🗝️ Dungeon Key',
     // Role grant
     [EFFECT_TYPES.ROLE_GRANT]: '🏷️ Role Grant',
+    // VIP gambling room
+    [EFFECT_TYPES.GAMBLING_ROOM]: '🎰 VIP Gambling Room',
+    [EFFECT_TYPES.GAMBLING_ROOM_INVITE]: '🎟️ VIP Room Guest Pass',
     // Service/Cosmetic types
     [EFFECT_TYPES.SERVICE_CUSTOM_EMOJI]: '🎨 Custom Emoji (Service)',
     [EFFECT_TYPES.SERVICE_NICKNAME]: '📝 Nickname Change (Service)',
@@ -1526,6 +1591,118 @@ function getPendingFulfillmentCount(guildId) {
   return result.length > 0 ? result[0].values[0][0] : 0;
 }
 
+// ===== VIP GAMBLING ROOMS =====
+
+// In-memory set of channel IDs that are currently VIP rooms (fast sync lookup
+// from bot.js command dispatch — populated on boot via loadVipRoomChannelCache()
+// and kept up-to-date by record/delete helpers below).
+const vipRoomChannelIds = new Set();
+
+function loadVipRoomChannelCache() {
+  if (!db) return;
+  vipRoomChannelIds.clear();
+  const result = db.exec('SELECT channel_id FROM gambling_rooms');
+  if (result.length > 0) {
+    for (const row of result[0].values) {
+      vipRoomChannelIds.add(row[0]);
+    }
+  }
+}
+
+function isVipRoomChannel(channelId) {
+  return vipRoomChannelIds.has(channelId);
+}
+
+function recordGamblingRoom(channelId, guildId, userId, durationHours) {
+  if (!db) return null;
+  const now = Date.now();
+  const expiresAt = now + (durationHours * 60 * 60 * 1000);
+  db.run(
+    `INSERT INTO gambling_rooms (channel_id, guild_id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+    [channelId, guildId, userId, now, expiresAt]
+  );
+  vipRoomChannelIds.add(channelId);
+  return { channelId, guildId, userId, createdAt: now, expiresAt };
+}
+
+function getActiveRoomForUser(guildId, userId) {
+  if (!db) return null;
+  const result = db.exec(
+    `SELECT channel_id, guild_id, user_id, created_at, expires_at FROM gambling_rooms WHERE guild_id = ? AND user_id = ? LIMIT 1`,
+    [guildId, userId]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const v = result[0].values[0];
+  return { channelId: v[0], guildId: v[1], userId: v[2], createdAt: v[3], expiresAt: v[4] };
+}
+
+function getRoomByChannelId(channelId) {
+  if (!db) return null;
+  const result = db.exec(
+    `SELECT channel_id, guild_id, user_id, created_at, expires_at FROM gambling_rooms WHERE channel_id = ? LIMIT 1`,
+    [channelId]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const v = result[0].values[0];
+  return { channelId: v[0], guildId: v[1], userId: v[2], createdAt: v[3], expiresAt: v[4] };
+}
+
+function getExpiredRooms(now = Date.now()) {
+  if (!db) return [];
+  const result = db.exec(
+    `SELECT channel_id, guild_id, user_id, created_at, expires_at FROM gambling_rooms WHERE expires_at <= ?`,
+    [now]
+  );
+  if (result.length === 0) return [];
+  return result[0].values.map(v => ({
+    channelId: v[0], guildId: v[1], userId: v[2], createdAt: v[3], expiresAt: v[4]
+  }));
+}
+
+function deleteRoomRecord(channelId) {
+  if (!db) return;
+  db.run(`DELETE FROM gambling_room_guests WHERE channel_id = ?`, [channelId]);
+  db.run(`DELETE FROM gambling_rooms WHERE channel_id = ?`, [channelId]);
+  vipRoomChannelIds.delete(channelId);
+}
+
+function addRoomGuest(channelId, guildId, userId) {
+  if (!db) return false;
+  try {
+    db.run(
+      `INSERT OR IGNORE INTO gambling_room_guests (channel_id, guild_id, user_id, invited_at) VALUES (?, ?, ?, ?)`,
+      [channelId, guildId, userId, Date.now()]
+    );
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function removeRoomGuest(channelId, userId) {
+  if (!db) return;
+  db.run(`DELETE FROM gambling_room_guests WHERE channel_id = ? AND user_id = ?`, [channelId, userId]);
+}
+
+function getRoomGuests(channelId) {
+  if (!db) return [];
+  const result = db.exec(
+    `SELECT user_id, invited_at FROM gambling_room_guests WHERE channel_id = ? ORDER BY invited_at ASC`,
+    [channelId]
+  );
+  if (result.length === 0) return [];
+  return result[0].values.map(v => ({ userId: v[0], invitedAt: v[1] }));
+}
+
+function isRoomGuest(channelId, userId) {
+  if (!db) return false;
+  const result = db.exec(
+    `SELECT 1 FROM gambling_room_guests WHERE channel_id = ? AND user_id = ? LIMIT 1`,
+    [channelId, userId]
+  );
+  return result.length > 0 && result[0].values.length > 0;
+}
+
 module.exports = {
   initItems,
   EFFECT_TYPES,
@@ -1602,6 +1779,19 @@ module.exports = {
   hasRoleGrant,
   addManualRoleGrant,
   getAllTemporaryRoleGrants,
+  
+  // VIP Gambling Rooms
+  isVipRoomChannel,
+  loadVipRoomChannelCache,
+  recordGamblingRoom,
+  getActiveRoomForUser,
+  getRoomByChannelId,
+  getExpiredRooms,
+  deleteRoomRecord,
+  addRoomGuest,
+  removeRoomGuest,
+  getRoomGuests,
+  isRoomGuest,
   
   // Helpers
   formatDuration,

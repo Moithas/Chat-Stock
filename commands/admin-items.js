@@ -296,6 +296,9 @@ async function handleInteraction(interaction, guildId) {
       case 'items_ticket_log':
         await handleTicketLogSelect(interaction, guildId);
         return true;
+      case 'items_casino_category':
+        await handleCasinoCategorySelect(interaction, guildId);
+        return true;
       case 'items_create_category':
         await handleCreateCategorySelect(interaction, guildId);
         return true;
@@ -319,6 +322,10 @@ async function handleInteraction(interaction, guildId) {
     }
     if (customId === 'items_ticket_log') {
       await handleTicketLogSelect(interaction, guildId);
+      return true;
+    }
+    if (customId === 'items_casino_category') {
+      await handleCasinoCategorySelect(interaction, guildId);
       return true;
     }
   }
@@ -2500,16 +2507,20 @@ async function showTicketSettingsPanel(interaction, guildId) {
   const ticketLogName = settings.ticketLogChannelId 
     ? `<#${settings.ticketLogChannelId}>` 
     : 'Not Set';
+  const casinoCategoryName = settings.casinoCategoryId
+    ? guild.channels.cache.get(settings.casinoCategoryId)?.name || 'Not Found (deleted?)'
+    : 'Not Set (will auto-create)';
   
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
-    .setTitle('🎫 Ticket Settings')
-    .setDescription('Configure where service item tickets are created and logged.')
+    .setTitle('🎫 Ticket & VIP Settings')
+    .setDescription('Configure where service item tickets are created/logged, and where VIP Gambling Rooms are placed.')
     .addFields(
       { name: '📁 Ticket Category', value: ticketCategoryName, inline: true },
-      { name: '📋 Log Channel', value: ticketLogName, inline: true }
+      { name: '📋 Log Channel', value: ticketLogName, inline: true },
+      { name: '🎰 Casino Category', value: casinoCategoryName, inline: true }
     )
-    .setFooter({ text: 'Use the menus below to configure ticket settings' });
+    .setFooter({ text: 'Use the menus below to configure ticket and VIP settings' });
   
   // Get categories for select menu
   const categories = guild.channels.cache
@@ -2526,6 +2537,20 @@ async function showTicketSettingsPanel(interaction, guildId) {
         .setCustomId('items_ticket_category')
         .setPlaceholder('Select ticket category...')
         .addOptions(categories)
+    );
+
+  // Casino category select (re-uses category list)
+  const casinoCategories = guild.channels.cache
+    .filter(c => c.type === ChannelType.GuildCategory)
+    .map(c => ({ label: c.name.substring(0, 100), value: c.id }))
+    .slice(0, 24);
+  casinoCategories.unshift({ label: '❌ Auto-create on demand', value: 'none' });
+  const casinoSelect = new ActionRowBuilder()
+    .addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('items_casino_category')
+        .setPlaceholder('Select VIP casino category...')
+        .addOptions(casinoCategories)
     );
   
   // Get text channels for log select
@@ -2553,7 +2578,19 @@ async function showTicketSettingsPanel(interaction, guildId) {
         .setEmoji('◀️')
     );
   
-  await interaction.editReply({ embeds: [embed], components: [categorySelect, logSelect, backRow] });
+  await interaction.editReply({ embeds: [embed], components: [categorySelect, logSelect, casinoSelect, backRow] });
+}
+
+async function handleCasinoCategorySelect(interaction, guildId) {
+  await interaction.deferUpdate();
+  const value = interaction.values[0];
+  const categoryId = value === 'none' ? null : value;
+  updateItemSettings(guildId, { casinoCategoryId: categoryId });
+  const categoryName = categoryId
+    ? interaction.guild.channels.cache.get(categoryId)?.name || 'Unknown'
+    : 'Auto-create';
+  logAdminAction(guildId, interaction.user.id, interaction.user.username, 'Updated Casino Category', `Set VIP casino category to: ${categoryName}`);
+  await showTicketSettingsPanel(interaction, guildId);
 }
 
 async function handleTicketCategorySelect(interaction, guildId) {
