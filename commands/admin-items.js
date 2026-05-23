@@ -2041,6 +2041,18 @@ async function handleEditItemModal(interaction, guildId, itemId) {
     if (effectParts.length >= 3) durationHours = parseInt(effectParts[2]) || 24;
     if (effectParts.length >= 4) useCooldownHours = parseInt(effectParts[3]) || 0;
   }
+
+  // Validate effect_type against known set so typos can't corrupt items
+  if (effectType !== null) {
+    const validEffectTypes = new Set(Object.values(EFFECT_TYPES));
+    if (!validEffectTypes.has(effectType)) {
+      const sample = Array.from(validEffectTypes).slice(0, 8).join(', ');
+      return interaction.reply({
+        content: `❌ Unknown effect type \`${effectType}\`. Valid examples: \`${sample}\`, …\n\nLeave the Effect field blank for a cosmetic item, or use the **Create** flow's dropdown to pick a valid type.`,
+        ephemeral: true
+      });
+    }
+  }
   
   // Parse extra
   let category = 'utility';
