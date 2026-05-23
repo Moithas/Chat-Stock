@@ -743,8 +743,6 @@ async function showItemCreationPanel(interaction, guildId) {
     { label: '🔒 Hack Defense', value: 'hack_defense', description: 'Reduces attacker hack success rate' },
     // Boosts
     { label: '💼 Work Boost', value: 'work_boost', description: 'Increases work earnings' },
-    { label: '🔫 Crime Boost', value: 'crime_boost', description: 'Increases crime earnings' },
-    { label: '💋 Slut Boost', value: 'slut_boost', description: 'Increases slut earnings' },
     { label: '🎯 Rob Success Boost', value: 'rob_success_boost', description: 'Increases rob success rate' },
     { label: '💻 Hack Success Boost', value: 'hack_success_boost', description: 'Increases hack success rate' },
     { label: '📈 XP Boost', value: 'xp_boost', description: 'Increases XP gains' },
@@ -764,7 +762,10 @@ async function showItemCreationPanel(interaction, guildId) {
     { label: '📝 Nickname Change (Service)', value: 'service_nickname', description: 'Admin changes nickname' },
     { label: '🏷️ Custom Role (Service)', value: 'service_custom_role', description: 'Admin creates custom role' },
     { label: '🌈 Custom Color (Service)', value: 'service_custom_color', description: 'Admin gives custom role color' },
-    { label: '✨ Other Service', value: 'service_other', description: 'Generic service item' }
+    { label: '✨ Other Service', value: 'service_other', description: 'Generic service item' },
+    // VIP Gambling Room
+    { label: '🎰 VIP Gambling Room', value: 'gambling_room', description: 'Rents a private gambling channel (duration = room rental)' },
+    { label: '🎟️ VIP Room Guest Pass', value: 'gambling_room_invite', description: 'Invites one guest into the buyer\'s active VIP room' }
   ];
   
   const effectRow = new ActionRowBuilder()
@@ -917,8 +918,6 @@ async function updateCreationPanel(interaction, state) {
     'rob_defense': '🛡️ Rob Defense',
     'hack_defense': '🔒 Hack Defense',
     'work_boost': '💼 Work Boost',
-    'crime_boost': '🔫 Crime Boost',
-    'slut_boost': '💋 Slut Boost',
     'rob_success_boost': '🎯 Rob Success Boost',
     'hack_success_boost': '💻 Hack Success Boost',
     'xp_boost': '📈 XP Boost',
@@ -937,7 +936,9 @@ async function updateCreationPanel(interaction, state) {
     'service_nickname': '📝 Nickname Change (Service)',
     'service_custom_role': '🏷️ Custom Role (Service)',
     'service_custom_color': '🌈 Custom Color (Service)',
-    'service_other': '✨ Other Service'
+    'service_other': '✨ Other Service',
+    'gambling_room': '🎰 VIP Gambling Room',
+    'gambling_room_invite': '🎟️ VIP Room Guest Pass'
   };
   
   const categoryDisplay = `${categoryEmojis[state.category] || '📦'} ${state.category}`;
@@ -977,9 +978,7 @@ async function updateCreationPanel(interaction, state) {
     { label: '🔒 Hack Protection', value: 'hack_protection', description: 'Protects from being hacked', default: currentEffect === 'hack_protection' },
     { label: '�️ Rob Defense', value: 'rob_defense', description: 'Reduces attacker rob success rate', default: currentEffect === 'rob_defense' },
     { label: '🔒 Hack Defense', value: 'hack_defense', description: 'Reduces attacker hack success rate', default: currentEffect === 'hack_defense' },
-    { label: '�💼 Work Boost', value: 'work_boost', description: 'Increases work earnings', default: currentEffect === 'work_boost' },
-    { label: '🔫 Crime Boost', value: 'crime_boost', description: 'Increases crime earnings', default: currentEffect === 'crime_boost' },
-    { label: '💋 Slut Boost', value: 'slut_boost', description: 'Increases slut earnings', default: currentEffect === 'slut_boost' },
+    { label: '💼 Work Boost', value: 'work_boost', description: 'Increases work earnings', default: currentEffect === 'work_boost' },
     { label: '🎯 Rob Success Boost', value: 'rob_success_boost', description: 'Increases rob success rate', default: currentEffect === 'rob_success_boost' },
     { label: '💻 Hack Success Boost', value: 'hack_success_boost', description: 'Increases hack success rate', default: currentEffect === 'hack_success_boost' },
     { label: '📈 XP Boost', value: 'xp_boost', description: 'Increases XP gains', default: currentEffect === 'xp_boost' },
@@ -995,7 +994,9 @@ async function updateCreationPanel(interaction, state) {
     { label: '📝 Nickname Change (Service)', value: 'service_nickname', description: 'Admin changes nickname', default: currentEffect === 'service_nickname' },
     { label: '🏷️ Custom Role (Service)', value: 'service_custom_role', description: 'Admin creates custom role', default: currentEffect === 'service_custom_role' },
     { label: '🌈 Custom Color (Service)', value: 'service_custom_color', description: 'Admin gives custom role color', default: currentEffect === 'service_custom_color' },
-    { label: '✨ Other Service', value: 'service_other', description: 'Generic service item', default: currentEffect === 'service_other' }
+    { label: '✨ Other Service', value: 'service_other', description: 'Generic service item', default: currentEffect === 'service_other' },
+    { label: '🎰 VIP Gambling Room', value: 'gambling_room', description: 'Rents a private gambling channel', default: currentEffect === 'gambling_room' },
+    { label: '🎟️ VIP Room Guest Pass', value: 'gambling_room_invite', description: 'Invites one guest into the buyer\'s active VIP room', default: currentEffect === 'gambling_room_invite' }
   ];
   
   const effectRow = new ActionRowBuilder()

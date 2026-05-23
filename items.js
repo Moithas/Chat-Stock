@@ -684,14 +684,17 @@ function deleteShopItem(guildId, itemId) {
   }
 }
 
-// Initialize default items for a guild if none exist
+// Initialize default items for a guild if none exist; also backfill any
+// default items that are missing by name (so newly added defaults appear in
+// guilds whose shop is already populated).
 function initializeDefaultItems(guildId) {
   if (!db) return;
-  
+
   const existingItems = getShopItems(guildId, null, false);
-  if (existingItems.length > 0) return; // Already has items
-  
+  const existingNames = new Set(existingItems.map(i => (i.name || '').toLowerCase()));
+
   for (const item of DEFAULT_ITEMS) {
+    if (existingNames.has((item.name || '').toLowerCase())) continue;
     addShopItem(guildId, item);
   }
 }
