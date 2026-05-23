@@ -627,7 +627,6 @@ client.on('guildCreate', async (guild) => {
           '• `/stock` — View and trade stocks\n\n' +
           '**Admin Setup:**\n' +
           '• `/admin` — Configure economy, gambling, items & more\n' +
-          '• `/admin-items` — Add default shop items\n' +
           '• `/admin-maintenance` — Monitor bot health & usage\n\n' +
           '*All features work out of the box with sensible defaults. Admins can tweak everything via the admin panels.*'
         )

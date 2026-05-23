@@ -1,5 +1,5 @@
 // Admin Gambling Panel - Fully Modular
-const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, ChannelSelectMenuBuilder } = require('discord.js');
+const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, ChannelSelectMenuBuilder, ChannelType } = require('discord.js');
 const { logAdminAction, getCurrency } = require('../admin');
 
 
@@ -14,10 +14,11 @@ const BUTTON_IDS = [
   'letitride_toggle', 'letitride_edit_settings',
   'threecardpoker_toggle', 'threecardpoker_edit_settings',
   'videopoker_toggle', 'videopoker_edit_settings', 'gambling_videopoker_settings',
+  'gambling_vip_casino_category',
   'back_gambling'
 ];
 const MODAL_IDS = ['modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_lottery_range', 'modal_lottery_jackpot', 'modal_vault_spawn', 'modal_vault_reward', 'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings', 'modal_videopoker_settings'];
-const SELECT_IDS = ['scratch_select_card', 'lottery_channel_select', 'vault_channel_select'];
+const SELECT_IDS = ['scratch_select_card', 'lottery_channel_select', 'vault_channel_select', 'vip_casino_category_select'];
 
 // Scratch card modal IDs are dynamic: modal_scratch_cheese, modal_scratch_cash, etc.
 function isScratchModal(customId) {
@@ -247,6 +248,22 @@ async function handleInteraction(interaction, guildId) {
         await interaction.deferUpdate();
         await showGamblingPanel(interaction, guildId);
       }
+      // VIP Casino Category select
+      else if (customId === 'gambling_vip_casino_category') {
+        const channelSelect = new ActionRowBuilder().addComponents(
+          new ChannelSelectMenuBuilder()
+            .setCustomId('vip_casino_category_select')
+            .setPlaceholder('Select VIP casino category...')
+            .setChannelTypes(ChannelType.GuildCategory)
+            .setMinValues(1)
+            .setMaxValues(1)
+        );
+        await interaction.reply({
+          content: '🎰 Select the category where VIP Gambling Room channels will be created:',
+          components: [channelSelect],
+          flags: 64
+        });
+      }
       return true;
     } catch (err) {
       console.error('[Admin-Gambling] Button error:', err);
@@ -257,7 +274,7 @@ async function handleInteraction(interaction, guildId) {
   
   // Handle channel select menu
   if (interaction.isChannelSelectMenu()) {
-    if (customId !== 'lottery_channel_select' && customId !== 'vault_channel_select') return false;
+    if (customId !== 'lottery_channel_select' && customId !== 'vault_channel_select' && customId !== 'vip_casino_category_select') return false;
     
     try {
       const channelId = interaction.values[0];
@@ -276,6 +293,15 @@ async function handleInteraction(interaction, guildId) {
         logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set vault event channel to <#${channelId}>`);
         await interaction.update({
           content: `✅ Vault events will spawn in <#${channelId}>`,
+          components: []
+        });
+      } else if (customId === 'vip_casino_category_select') {
+        const { updateItemSettings } = require('../items');
+        updateItemSettings(guildId, { casinoCategoryId: channelId });
+        const categoryName = interaction.guild?.channels?.cache?.get(channelId)?.name || channelId;
+        logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set VIP casino category to ${categoryName} (${channelId})`);
+        await interaction.update({
+          content: `✅ VIP gambling rooms will be created under category **${categoryName}**`,
           components: []
         });
       }
@@ -570,13 +596,26 @@ async function handleInteraction(interaction, guildId) {
 // ==================== GAMBLING PANEL ====================
 async function showGamblingPanel(interaction, guildId) {
   const { getGamblingSettings } = require('../gambling');
+  const { getItemSettings } = require('../items');
   let settings;
   try {
     settings = getGamblingSettings(guildId);
   } catch {
     settings = { blackjack_decks: 1, scratch_enabled: 1 };
   }
-  
+  let itemSettings;
+  try {
+    itemSettings = getItemSettings(guildId);
+  } catch {
+    itemSettings = { casinoCategoryId: null };
+  }
+
+  let casinoCategoryName = 'Not Set (auto-create)';
+  if (itemSettings.casinoCategoryId) {
+    const cat = interaction.guild?.channels?.cache?.get(itemSettings.casinoCategoryId);
+    casinoCategoryName = cat ? cat.name : `Unknown (${itemSettings.casinoCategoryId})`;
+  }
+
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle('🎰 Gambling Settings')
@@ -584,7 +623,7 @@ async function showGamblingPanel(interaction, guildId) {
     .addFields(
       { name: '🃏 Blackjack Decks', value: String(settings.blackjack_decks || 1), inline: true },
       { name: '🎫 Scratch Cards', value: settings.scratch_enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-      { name: '\u200b', value: '\u200b', inline: true }
+      { name: '🎰 VIP Casino Category', value: casinoCategoryName, inline: true }
     );
 
   if (settings.lottery_auto_draw) {
@@ -650,10 +689,16 @@ async function showGamblingPanel(interaction, guildId) {
     .setLabel('🎰 Video Poker')
     .setStyle(ButtonStyle.Primary);
 
+  const vipCategoryBtn = new ButtonBuilder()
+    .setCustomId('gambling_vip_casino_category')
+    .setLabel('🎰 VIP Category')
+    .setStyle(ButtonStyle.Secondary);
+
   const row1 = new ActionRowBuilder().addComponents(blackjackBtn, lotteryBtn, inbetweenBtn, letItRideBtn, threeCardPokerBtn);
   const row2 = new ActionRowBuilder().addComponents(videoPokerBtn, scratchToggleBtn, scratchConfigBtn, scratchStatsBtn, backBtn);
+  const row3 = new ActionRowBuilder().addComponents(vipCategoryBtn);
 
-  await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+  await interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
 }
 
 // ==================== LOTTERY PANEL ====================
