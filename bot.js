@@ -1744,6 +1744,7 @@ client.on('interactionCreate', async (interaction) => {
       'letitride_toggle', 'letitride_edit_settings',
       'threecardpoker_toggle', 'threecardpoker_edit_settings',
       'videopoker_toggle', 'videopoker_edit_settings', 'gambling_videopoker_settings',
+      'gambling_vip_casino_category', 'vip_casino_category_select',
       'modal_blackjack_settings', 'modal_lottery_schedule', 'modal_lottery_prizes', 'modal_lottery_ticket_price', 'modal_lottery_range', 'modal_lottery_jackpot', 'modal_vault_spawn', 'modal_vault_reward',
       'modal_inbetween_settings', 'modal_inbetween_reset_pot', 'modal_letitride_settings', 'modal_threecardpoker_settings', 'modal_videopoker_settings',
       'scratch_select_card', 'lottery_channel_select', 'vault_channel_select',
