@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, UserSelectMenuBuilder, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ComponentType } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, UserSelectMenuBuilder, ChannelType, PermissionFlagsBits, OverwriteType, ModalBuilder, TextInputBuilder, TextInputStyle, ComponentType } = require('discord.js');
 const { 
   getUserInventory, 
   getActiveEffects, 
@@ -484,9 +484,12 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
       const channelName = `🎰-${usernameSafe}-vip`;
 
       // Permission overwrites: everyone view-only, owner full access, bot manage
+      // Explicit `type` avoids discord.js auto-resolving a user id as a role and silently
+      // dropping some permission bits (notably UseApplicationCommands for guests).
       const overwrites = [
         {
           id: guild.roles.everyone.id,
+          type: OverwriteType.Role,
           allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
           deny: [
             PermissionFlagsBits.SendMessages,
@@ -501,6 +504,7 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
         },
         {
           id: userId,
+          type: OverwriteType.Member,
           allow: [
             PermissionFlagsBits.ViewChannel,
             PermissionFlagsBits.ReadMessageHistory,
@@ -513,6 +517,7 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
         },
         {
           id: me.id,
+          type: OverwriteType.Member,
           allow: [
             PermissionFlagsBits.ViewChannel,
             PermissionFlagsBits.SendMessages,
@@ -654,6 +659,9 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
       }
 
       try {
+        // Force the overwrite target to be resolved as a Member, not a Role.
+        // Without this, discord.js may pick the wrong type and a subset of bits
+        // (e.g. UseApplicationCommands) silently fails to apply on the guest.
         await channel.permissionOverwrites.edit(guestId, {
           ViewChannel: true,
           ReadMessageHistory: true,
@@ -662,7 +670,7 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
           AddReactions: true,
           AttachFiles: true,
           EmbedLinks: true
-        }, { reason: `VIP Room Guest Pass used by ${i.user.tag}` });
+        }, { type: OverwriteType.Member, reason: `VIP Room Guest Pass used by ${i.user.tag}` });
       } catch (e) {
         console.error('Failed to apply guest overwrite:', e);
         return i.editReply({ content: '❌ Failed to grant guest access. Guest Pass not used.', components: [] });
