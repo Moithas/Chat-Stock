@@ -20,7 +20,7 @@ const { initBank, startBankScheduler } = require('./bank');
 const { addMoney } = require('./economy');
 const { initWealthTax, getWealthTaxSettings, collectWealthTax, getLotteryInfo: getWealthTaxLotteryInfo } = require('./wealth-tax');
 const { initSkills } = require('./skills');
-const { initItems, getExpiredRoleGrants, removeRoleGrantRecord, isVipRoomChannel, getExpiredRooms, deleteRoomRecord, getRoomByChannelId } = require('./items');
+const { initItems, getExpiredRoleGrants, removeRoleGrantRecord, isVipRoomChannel, getExpiredRooms, deleteRoomRecord, getRoomByChannelId, isRoomGuest } = require('./items');
 const { initCooldownTracker, startAllTrackers } = require('./cooldown-tracker');
 const { initialize: initInBetween, cleanupStaleGames: cleanupStaleInBetween } = require('./inbetween');
 const { initialize: initLetItRide, cleanupStaleGames: cleanupStaleLetItRide } = require('./letitride');
@@ -1935,7 +1935,8 @@ client.on('interactionCreate', async (interaction) => {
 
   if (!interaction.isChatInputCommand()) return;
 
-  // VIP Gambling Room: restrict commands to an allowlist inside rented rooms
+  // VIP Gambling Room: restrict commands to an allowlist inside rented rooms,
+  // and gate non-allowlisted commands and non-member command use to room owner + guests.
   if (interaction.channelId && isVipRoomChannel(interaction.channelId)) {
     const VIP_ROOM_ALLOWED = new Set([
       'blackjack', 'roulette', 'scratcher', 'scratch', 'videopoker',
@@ -1948,6 +1949,25 @@ client.on('interactionCreate', async (interaction) => {
     const isAdminUser = member && typeof member.permissions?.has === 'function'
       ? member.permissions.has(PermissionsBitField.Flags.Administrator)
       : false;
+
+    // Check VIP membership (owner or invited guest). Spectators can view but not play.
+    let isVipMember = false;
+    try {
+      const room = getRoomByChannelId(interaction.channelId);
+      if (room) {
+        isVipMember = room.userId === interaction.user.id || isRoomGuest(interaction.channelId, interaction.user.id);
+      }
+    } catch (_) { /* fall through to deny */ }
+
+    if (!isAdminUser && !isVipMember) {
+      try {
+        return await interaction.reply({
+          content: '❌ This is a private VIP Gambling Room. Only the room owner and invited guests may use commands here.',
+          flags: 64
+        });
+      } catch (e) { return; }
+    }
+
     if (!isAdminUser && !VIP_ROOM_ALLOWED.has(interaction.commandName)) {
       try {
         return await interaction.reply({
