@@ -435,7 +435,7 @@ function calculateStreakInfo(userId) {
   
   // Get all message timestamps since cutoff
   const messagesResult = db.exec(
-    "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = 'MESSAGE' ORDER BY timestamp DESC",
+    "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK') ORDER BY timestamp DESC",
     [userId, cutoffTime]
   );
   
@@ -653,7 +653,7 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
   if (tierSettings.enabled) {
     // Get messages grouped by day within the window
     const messagesResult = db.exec(
-      "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = 'MESSAGE' ORDER BY timestamp ASC",
+      "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK') ORDER BY timestamp ASC",
       [userId, windowAgo]
     );
     
@@ -680,7 +680,7 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
   } else {
     // Legacy flat rate system (disabled diminishing returns)
     const recentMessagesResult = db.exec(
-      "SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type = 'MESSAGE'",
+      "SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK')",
       [userId, windowAgo]
     );
     

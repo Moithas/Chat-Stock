@@ -12,6 +12,7 @@
 // Inner ISO timestamps are treated as UTC.
 
 const log = require('./logger');
+const { migrateAddColumn } = require('./database');
 
 let db = null;
 
@@ -20,7 +21,8 @@ const DEFAULTS = {
   rewardPerBlock: 1,      // +1 base_value per block
   minutesPerBlock: 10,    // 10 minutes = 1 block
   dailyCap: 30,           // max +30 base_value per UTC day per user
-  maxSessionHours: 12     // ignore sessions longer than this (server crash / stuck open)
+  maxSessionHours: 12,    // ignore sessions longer than this (server crash / stuck open)
+  mcBlockWeight: 4        // each block credits N synthetic MC_BLOCK rows toward activity multiplier window
 };
 
 // Strict regex — matches only the connect/disconnect lines we care about.
@@ -40,6 +42,7 @@ function initMcRewards(database) {
       daily_cap INTEGER DEFAULT 30
     );
   `);
+  migrateAddColumn(db, 'mc_settings', 'mc_block_weight INTEGER DEFAULT 4');
 
   db.run(`
     CREATE TABLE IF NOT EXISTS mc_links (
@@ -100,7 +103,8 @@ function getMcSettings(guildId) {
       lastSyncTs: 0,
       rewardPerBlock: DEFAULTS.rewardPerBlock,
       minutesPerBlock: DEFAULTS.minutesPerBlock,
-      dailyCap: DEFAULTS.dailyCap
+      dailyCap: DEFAULTS.dailyCap,
+      mcBlockWeight: DEFAULTS.mcBlockWeight
     };
   }
   const cols = result[0].columns;
@@ -111,7 +115,8 @@ function getMcSettings(guildId) {
     lastSyncTs: row.last_sync_ts || 0,
     rewardPerBlock: row.reward_per_block ?? DEFAULTS.rewardPerBlock,
     minutesPerBlock: row.minutes_per_block ?? DEFAULTS.minutesPerBlock,
-    dailyCap: row.daily_cap ?? DEFAULTS.dailyCap
+    dailyCap: row.daily_cap ?? DEFAULTS.dailyCap,
+    mcBlockWeight: row.mc_block_weight ?? DEFAULTS.mcBlockWeight
   };
 }
 
@@ -119,15 +124,16 @@ function upsertSettings(guildId, patch) {
   const cur = getMcSettings(guildId);
   const next = { ...cur, ...patch };
   db.run(`
-    INSERT INTO mc_settings (guild_id, channel_id, last_sync_ts, reward_per_block, minutes_per_block, daily_cap)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO mc_settings (guild_id, channel_id, last_sync_ts, reward_per_block, minutes_per_block, daily_cap, mc_block_weight)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id) DO UPDATE SET
       channel_id = excluded.channel_id,
       last_sync_ts = excluded.last_sync_ts,
       reward_per_block = excluded.reward_per_block,
       minutes_per_block = excluded.minutes_per_block,
-      daily_cap = excluded.daily_cap
-  `, [guildId, next.channelId, next.lastSyncTs, next.rewardPerBlock, next.minutesPerBlock, next.dailyCap]);
+      daily_cap = excluded.daily_cap,
+      mc_block_weight = excluded.mc_block_weight
+  `, [guildId, next.channelId, next.lastSyncTs, next.rewardPerBlock, next.minutesPerBlock, next.dailyCap, next.mcBlockWeight]);
 }
 
 function setMcChannel(guildId, channelId) {
@@ -319,6 +325,25 @@ function processSync(guildId, adminId, text) {
     const dateUtc = utcDateString(joinedAt);
     const alreadyCredited = getDailyCredit(guildId, link.discord_id, dateUtc);
     const remainingCap = Math.max(0, settings.dailyCap - alreadyCredited);
+
+    const minutes = durationMs / 60000;
+    const blocksEarned = Math.floor(minutes / settings.minutesPerBlock);
+
+    // Defend activity multiplier window with synthetic MC_BLOCK transactions.
+    // This runs regardless of the base_value daily cap — time played is time played,
+    // and we don't want heavy chatters to lose multiplier ground while gaming.
+    const synthCount = blocksEarned * (settings.mcBlockWeight ?? DEFAULTS.mcBlockWeight);
+    if (synthCount > 0 && durationMs > 0) {
+      const stride = synthCount > 1 ? durationMs / (synthCount - 1) : 0;
+      for (let i = 0; i < synthCount; i++) {
+        const syntheticTs = synthCount === 1 ? joinedAt : Math.round(joinedAt + i * stride);
+        db.run(
+          "INSERT INTO transactions (buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, 0, 0, 'MC_BLOCK', ?)",
+          [link.discord_id, link.discord_id, syntheticTs]
+        );
+      }
+    }
+
     if (remainingCap <= 0) {
       // Day is full — still record the session for the admin summary
       let u = perUser.get(link.discord_id);
@@ -326,13 +351,11 @@ function processSync(guildId, adminId, text) {
         u = { mcDisplay, sessions: [], creditedBlocks: 0, baseValueAwarded: 0, cappedMinutes: 0 };
         perUser.set(link.discord_id, u);
       }
-      u.sessions.push({ joinedAt, leftAt: ev.ts, minutes: durationMs / 60000, credited: 0 });
-      u.cappedMinutes += durationMs / 60000;
+      u.sessions.push({ joinedAt, leftAt: ev.ts, minutes, credited: 0 });
+      u.cappedMinutes += minutes;
       continue;
     }
 
-    const minutes = durationMs / 60000;
-    const blocksEarned = Math.floor(minutes / settings.minutesPerBlock);
     const blocksAfterCap = Math.min(blocksEarned * settings.rewardPerBlock, remainingCap);
     // blocksAfterCap is in base_value units (since rewardPerBlock is per block).
 
