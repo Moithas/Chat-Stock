@@ -29,9 +29,15 @@ const ID_PREFIX = 'cmdch:';
 
 // ==================== MAIN PANEL ====================
 
-async function showCommandChannelsPanel(interaction, guildId) {
+const PAGE_SIZE = 10;
+
+async function showCommandChannelsPanel(interaction, guildId, page = 0) {
   const restrictions = listGuildRestrictions(guildId);
   const entries = Object.entries(restrictions).sort(([a], [b]) => a.localeCompare(b));
+  const total = entries.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const safePage = Math.min(Math.max(0, page), totalPages - 1);
+  const slice = entries.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   const embed = new EmbedBuilder()
     .setColor(0x4f8bff)
@@ -44,23 +50,25 @@ async function showCommandChannelsPanel(interaction, guildId) {
       '• Administrators and VIP gambling rooms always bypass these rules.',
     ].join('\n'));
 
-  if (entries.length === 0) {
+  if (total === 0) {
     embed.addFields({ name: 'Currently restricted commands', value: '_None — every command is unrestricted._' });
   } else {
-    const lines = entries.map(([cmd, chs]) => {
+    const lines = slice.map(([cmd, chs]) => {
       const list = chs.slice(0, 5).map(c => `<#${c}>`).join(', ');
       const more = chs.length > 5 ? ` *(+${chs.length - 5})*` : '';
       return `**/${cmd}** → ${list}${more}`;
     });
     const desc = lines.join('\n');
     embed.addFields({
-      name: `Restricted commands (${entries.length})`,
+      name: `Restricted commands (${total}) — page ${safePage + 1}/${totalPages}`,
       value: desc.length > 1024 ? desc.slice(0, 1018) + '\n…' : desc,
     });
   }
   embed.setFooter({ text: 'Use "Manage a command" to add, remove, or clear channels.' });
 
-  const buttons = new ActionRowBuilder().addComponents(
+  const rows = [];
+
+  rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(ID_PREFIX + 'open')
       .setLabel('Manage a command')
@@ -70,9 +78,31 @@ async function showCommandChannelsPanel(interaction, guildId) {
       .setCustomId('back_dashboard')
       .setLabel('Back to dashboard')
       .setStyle(ButtonStyle.Secondary)
-  );
+  ));
 
-  await interaction.editReply({ embeds: [embed], components: [buttons] });
+  if (totalPages > 1) {
+    rows.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(ID_PREFIX + 'page|' + (safePage - 1))
+        .setLabel('Previous')
+        .setEmoji('◀️')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage === 0),
+      new ButtonBuilder()
+        .setCustomId(ID_PREFIX + 'page|noop')
+        .setLabel(`Page ${safePage + 1}/${totalPages}`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId(ID_PREFIX + 'page|' + (safePage + 1))
+        .setLabel('Next')
+        .setEmoji('▶️')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage >= totalPages - 1)
+    ));
+  }
+
+  await interaction.editReply({ embeds: [embed], components: rows });
 }
 
 // ==================== COMMAND DETAIL VIEW ====================
@@ -198,6 +228,18 @@ async function handleInteraction(interaction, guildId) {
     if (action === 'back' && interaction.isButton()) {
       await interaction.deferUpdate();
       await showCommandChannelsPanel(interaction, guildId);
+      return true;
+    }
+
+    // Pagination
+    if (action === 'page' && interaction.isButton()) {
+      if (commandName === 'noop') {
+        await interaction.deferUpdate();
+        return true;
+      }
+      await interaction.deferUpdate();
+      const target = parseInt(commandName, 10) || 0;
+      await showCommandChannelsPanel(interaction, guildId, target);
       return true;
     }
 
