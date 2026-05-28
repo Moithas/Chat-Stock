@@ -1523,7 +1523,9 @@ async function handleGiveItemQtyModal(interaction, guildId) {
     .setFooter({ text: 'Use /inventory to view your items!' })
     .setTimestamp();
   
-  await interaction.channel.send({ embeds: [publicEmbed] });
+  await interaction.channel.send({ embeds: [publicEmbed] }).catch(err => {
+    console.warn('[admin-items] Could not send public gift announcement:', err?.rawError?.message || err?.message);
+  });
   
   // Refresh the panel
   await showItemsPanel(interaction, guildId);

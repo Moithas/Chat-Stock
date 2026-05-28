@@ -1,6 +1,6 @@
 {
   "name": "black-ledger",
-  "version": "3.12.0",
+  "version": "3.12.1",
   "description": "Black Ledger - Discord economy and gambling bot",
   "main": "bot.js",
   "scripts": {
