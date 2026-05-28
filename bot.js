@@ -1991,16 +1991,24 @@ client.on('interactionCreate', async (interaction) => {
       const isAdminUser = member && typeof member.permissions?.has === 'function'
         ? member.permissions.has(PermissionsBitField.Flags.Administrator)
         : false;
-      if (!isAdminUser && !isCommandAllowedInChannel(interaction.guildId, interaction.commandName, interaction.channelId)) {
-        const allowed = getAllowedChannels(interaction.guildId, interaction.commandName);
-        const mentions = allowed.slice(0, 8).map(c => `<#${c}>`).join(', ');
-        const more = allowed.length > 8 ? ` (+${allowed.length - 8} more)` : '';
-        try {
-          return await interaction.reply({
-            content: `❌ \`/${interaction.commandName}\` cannot be used in this channel. Allowed: ${mentions}${more}`,
-            flags: 64
-          });
-        } catch (e) { return; }
+      if (!isAdminUser) {
+        // For threads, treat the parent channel's allow as equivalent so threads
+        // inside an allowed channel inherit the permission.
+        const parentId = interaction.channel?.isThread?.() ? interaction.channel.parentId : null;
+        const allowedHere =
+          isCommandAllowedInChannel(interaction.guildId, interaction.commandName, interaction.channelId) ||
+          (parentId && isCommandAllowedInChannel(interaction.guildId, interaction.commandName, parentId));
+        if (!allowedHere) {
+          const allowed = getAllowedChannels(interaction.guildId, interaction.commandName);
+          const mentions = allowed.slice(0, 8).map(c => `<#${c}>`).join(', ');
+          const more = allowed.length > 8 ? ` (+${allowed.length - 8} more)` : '';
+          try {
+            return await interaction.reply({
+              content: `❌ \`/${interaction.commandName}\` cannot be used in this channel. Allowed: ${mentions}${more}`,
+              flags: 64
+            });
+          } catch (e) { return; }
+        }
       }
     }
   }
