@@ -3,7 +3,10 @@ const {
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
 } = require('discord.js');
 const {
   getActiveRoomForUser,
@@ -29,10 +32,20 @@ function buildRoomPanel(interaction, room, guests) {
     .addFields(
       { name: `👥 Guests (${guests.length})`, value: guestList, inline: false }
     )
-    .setFooter({ text: 'Click a guest button below to remove them. Buy more Guest Passes from /shop.' });
+    .setFooter({ text: 'Use the buttons below to rename the room or remove guests.' });
 
-  // Build remove buttons (max 5 per row, max 25 total — Discord limit)
   const rows = [];
+
+  // Rename button (always available)
+  rows.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`vip_room_rename_${room.channelId}`)
+      .setLabel('Rename Room')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('✏️')
+  ));
+
+  // Build remove-guest buttons (max 5 per row, max 25 total — Discord limit)
   if (guests.length > 0) {
     const visible = guests.slice(0, 25);
     let row = new ActionRowBuilder();
@@ -52,6 +65,100 @@ function buildRoomPanel(interaction, room, guests) {
     rows.push(row);
   }
   return { embed, rows };
+}
+
+function sanitizeChannelName(raw) {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9\-_]/g, '')
+    .slice(0, 100);
+}
+
+async function handleRenameButton(interaction) {
+  const match = interaction.customId.match(/^vip_room_rename_(\d+)$/);
+  if (!match) return;
+  const [, channelId] = match;
+
+  const room = getRoomByChannelId(channelId);
+  if (!room) {
+    return interaction.reply({ content: '❌ That VIP room no longer exists.', ephemeral: true });
+  }
+  if (room.userId !== interaction.user.id) {
+    return interaction.reply({ content: '❌ Only the room owner can rename this room.', ephemeral: true });
+  }
+
+  const channel = interaction.guild.channels.cache.get(channelId)
+    ?? await interaction.guild.channels.fetch(channelId).catch(() => null);
+  const currentName = channel?.name || '';
+
+  const modal = new ModalBuilder()
+    .setCustomId(`vip_room_rename_modal_${channelId}`)
+    .setTitle('Rename VIP Room')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('new_name')
+          .setLabel('New channel name')
+          .setPlaceholder('e.g. high-rollers-lounge')
+          .setValue(currentName)
+          .setStyle(TextInputStyle.Short)
+          .setMinLength(1)
+          .setMaxLength(100)
+          .setRequired(true)
+      )
+    );
+
+  await interaction.showModal(modal);
+}
+
+async function handleRenameModal(interaction) {
+  const match = interaction.customId.match(/^vip_room_rename_modal_(\d+)$/);
+  if (!match) return;
+  const [, channelId] = match;
+
+  const room = getRoomByChannelId(channelId);
+  if (!room) {
+    return interaction.reply({ content: '❌ That VIP room no longer exists.', ephemeral: true });
+  }
+  if (room.userId !== interaction.user.id) {
+    return interaction.reply({ content: '❌ Only the room owner can rename this room.', ephemeral: true });
+  }
+
+  const raw = interaction.fields.getTextInputValue('new_name');
+  const newName = sanitizeChannelName(raw);
+  if (!newName) {
+    return interaction.reply({
+      content: '❌ Invalid name. Use letters, numbers, dashes, or underscores (1–100 chars).',
+      ephemeral: true
+    });
+  }
+
+  const channel = interaction.guild.channels.cache.get(channelId)
+    ?? await interaction.guild.channels.fetch(channelId).catch(() => null);
+  if (!channel) {
+    return interaction.reply({ content: '❌ Could not find the room channel.', ephemeral: true });
+  }
+  if (channel.name === newName) {
+    return interaction.reply({ content: `ℹ️ The room is already named **#${newName}**.`, ephemeral: true });
+  }
+
+  try {
+    await channel.setName(newName, `Renamed by VIP room owner ${interaction.user.tag}`);
+  } catch (e) {
+    console.error('Failed to rename VIP room channel:', e);
+    const reason = e?.rawError?.message || e?.message || 'Unknown error';
+    return interaction.reply({
+      content: `❌ Failed to rename the room: ${reason}\n\n*Discord limits channel renames to 2 per 10 minutes.*`,
+      ephemeral: true
+    });
+  }
+
+  return interaction.reply({
+    content: `✅ Renamed your VIP room to <#${channelId}> (**#${newName}**).`,
+    ephemeral: true
+  });
 }
 
 module.exports = {
@@ -78,6 +185,9 @@ module.exports = {
   },
 
   async handleButton(interaction) {
+    if (interaction.customId.startsWith('vip_room_rename_')) {
+      return handleRenameButton(interaction);
+    }
     // customId format: vip_room_remove_{channelId}_{userId}
     const match = interaction.customId.match(/^vip_room_remove_(\d+)_(\d+)$/);
     if (!match) return;
@@ -125,6 +235,12 @@ module.exports = {
       try {
         await interaction.reply({ content: `✅ Removed <@${guestId}> from your VIP room.`, ephemeral: true });
       } catch (_) { /* ignore */ }
+    }
+  },
+
+  async handleModal(interaction) {
+    if (interaction.customId.startsWith('vip_room_rename_modal_')) {
+      return handleRenameModal(interaction);
     }
   }
 };

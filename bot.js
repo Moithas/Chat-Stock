@@ -959,14 +959,31 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
-  // Handle VIP Gambling Room remove-guest buttons
-  if (interaction.isButton() && interaction.customId.startsWith('vip_room_remove_')) {
+  // Handle VIP Gambling Room buttons (remove-guest, rename)
+  if (interaction.isButton() && (interaction.customId.startsWith('vip_room_remove_') || interaction.customId.startsWith('vip_room_rename_'))) {
     try {
       const { handleButton } = require('./commands/vip-room');
       await handleButton(interaction);
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
       logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'vip-room button', error });
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred.', flags: 64 });
+        }
+      } catch (e) { /* Interaction expired */ }
+    }
+    return;
+  }
+
+  // Handle VIP Gambling Room rename modal submission
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('vip_room_rename_modal_')) {
+    try {
+      const { handleModal } = require('./commands/vip-room');
+      await handleModal(interaction);
+    } catch (error) {
+      if (error.code === 10062 || error.code === 40060) return;
+      logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'vip-room modal', error });
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'An error occurred.', flags: 64 });
