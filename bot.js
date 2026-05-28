@@ -21,6 +21,7 @@ const { addMoney } = require('./economy');
 const { initWealthTax, getWealthTaxSettings, collectWealthTax, getLotteryInfo: getWealthTaxLotteryInfo } = require('./wealth-tax');
 const { initSkills } = require('./skills');
 const { initItems, getExpiredRoleGrants, removeRoleGrantRecord, isVipRoomChannel, getExpiredRooms, deleteRoomRecord, getRoomByChannelId, isRoomGuest } = require('./items');
+const { initCommandChannels, isCommandAllowedInChannel, isCommandRestrictedInGuild, getAllowedChannels } = require('./commandChannels');
 const { initCooldownTracker, startAllTrackers } = require('./cooldown-tracker');
 const { initialize: initInBetween, cleanupStaleGames: cleanupStaleInBetween } = require('./inbetween');
 const { initialize: initLetItRide, cleanupStaleGames: cleanupStaleLetItRide } = require('./letitride');
@@ -427,6 +428,10 @@ client.once('clientReady', async () => {
 
   // Initialize items/shop system
   initItems(getDb());
+
+  // Initialize per-guild command-channel allowlist (bot-side replacement for
+  // Discord's Integrations command restrictions)
+  initCommandChannels(getDb());
 
   // Initialize In Between card game
   initInBetween(getDb());
@@ -1937,7 +1942,8 @@ client.on('interactionCreate', async (interaction) => {
 
   // VIP Gambling Room: restrict commands to an allowlist inside rented rooms,
   // and gate non-allowlisted commands and non-member command use to room owner + guests.
-  if (interaction.channelId && isVipRoomChannel(interaction.channelId)) {
+  const inVipRoom = !!(interaction.channelId && isVipRoomChannel(interaction.channelId));
+  if (inVipRoom) {
     const VIP_ROOM_ALLOWED = new Set([
       'blackjack', 'roulette', 'scratcher', 'scratch', 'videopoker',
       'three-card-poker', 'letitride', 'lottery',
@@ -1975,6 +1981,27 @@ client.on('interactionCreate', async (interaction) => {
           flags: 64
         });
       } catch (e) { return; }
+    }
+  } else if (interaction.guildId) {
+    // Global per-guild command-channel allowlist (replaces Discord Integration
+    // restrictions so the bot can dynamically permit channels it owns, like
+    // VIP rooms above). Skipped inside VIP rooms — those have their own rules.
+    if (isCommandRestrictedInGuild(interaction.guildId, interaction.commandName)) {
+      const member = interaction.member;
+      const isAdminUser = member && typeof member.permissions?.has === 'function'
+        ? member.permissions.has(PermissionsBitField.Flags.Administrator)
+        : false;
+      if (!isAdminUser && !isCommandAllowedInChannel(interaction.guildId, interaction.commandName, interaction.channelId)) {
+        const allowed = getAllowedChannels(interaction.guildId, interaction.commandName);
+        const mentions = allowed.slice(0, 8).map(c => `<#${c}>`).join(', ');
+        const more = allowed.length > 8 ? ` (+${allowed.length - 8} more)` : '';
+        try {
+          return await interaction.reply({
+            content: `❌ \`/${interaction.commandName}\` cannot be used in this channel. Allowed: ${mentions}${more}`,
+            flags: 64
+          });
+        } catch (e) { return; }
+      }
     }
   }
 
