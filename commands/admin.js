@@ -21,6 +21,7 @@ const adminInfamy = require('./admin-infamy');
 const adminSettings = require('./admin-settings');
 const adminPrestige = require('./admin-prestige');
 const adminPets = require('./admin-pets');
+const adminCommandChannels = require('./admin-command-channels');
 
 // ==================== MAIN DASHBOARD ====================
 async function showDashboard(interaction) {
@@ -87,6 +88,9 @@ async function showDashboard(interaction) {
 
         // — Pets —
         { label: 'Pets',             value: 'pets',       emoji: '🐾', description: 'Pet system, shop & kennel settings' },
+
+        // — Access control —
+        { label: 'Command Channels', value: 'command_channels', emoji: '🎯', description: 'Restrict commands to specific channels' },
 
         // — Settings —
         { label: 'Settings',         value: 'settings',   emoji: '🔧', description: 'Admin role, currency, logs & reset' }
@@ -155,6 +159,7 @@ module.exports.handleAdminInteraction = async function(interaction) {
         case 'infamy': await adminInfamy.showInfamyPanel(interaction, guildId); break;
         case 'prestige': await adminPrestige.showPrestigePanel(interaction, guildId); break;
         case 'pets': await adminPets.showPetsAdminPanel(interaction, guildId); break;
+        case 'command_channels': await adminCommandChannels.showCommandChannelsPanel(interaction, guildId); break;
         case 'settings': await adminSettings.showSettingsPanel(interaction, guildId); break;
         case 'reset_game': await adminSettings.showSettingsPanel(interaction, guildId); break;
       }
@@ -179,6 +184,7 @@ module.exports.handleAdminInteraction = async function(interaction) {
     if (await adminInfamy.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Infamy'); return; }
     if (await adminPrestige.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Prestige'); return; }
     if (await adminPets.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Pets'); return; }
+    if (await adminCommandChannels.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by CommandChannels'); return; }
     if (await adminSettings.handleInteraction(interaction, guildId)) { console.log('[Admin] Handled by Settings'); return; }
     console.log('[Admin] No handler matched for:', interaction.customId);
 

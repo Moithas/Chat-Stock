@@ -1,10 +1,22 @@
-// Admin: per-guild command-channel allowlist management.
-// Replaces Discord Integrations command-channel restrictions with bot-side enforcement,
-// so the bot can permit channels it creates (VIP rooms, etc.) without needing OAuth2.
+// Admin panel: per-guild command-channel allowlist management.
+// Wired into /admin → 🎯 Command Channels.
+//
+// Replaces Discord Integrations command-channel restrictions with bot-side
+// enforcement so the bot can dynamically permit channels it owns (VIP rooms).
 
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const {
-  isCommandRestrictedInGuild,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  ChannelSelectMenuBuilder,
+  ChannelType,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+} = require('discord.js');
+const {
   getAllowedChannels,
   listGuildRestrictions,
   addAllowedChannel,
@@ -12,124 +24,233 @@ const {
   clearCommandRestrictions,
 } = require('../commandChannels');
 
-module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('admin-command-channels')
-    .setDescription('Manage per-command channel restrictions (bot-side)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .setDMPermission(false)
-    .addSubcommand(sub =>
-      sub.setName('list')
-        .setDescription('List all command restrictions in this guild, or one command')
-        .addStringOption(o =>
-          o.setName('command').setDescription('Filter to a single command').setRequired(false)
-        )
-    )
-    .addSubcommand(sub =>
-      sub.setName('add')
-        .setDescription('Add a channel to a command\'s allowlist (creates the allowlist if missing)')
-        .addStringOption(o =>
-          o.setName('command').setDescription('Slash command name (without leading /)').setRequired(true)
-        )
-        .addChannelOption(o =>
-          o.setName('channel').setDescription('Channel to allow').setRequired(true)
-            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildVoice, ChannelType.GuildAnnouncement)
-        )
-    )
-    .addSubcommand(sub =>
-      sub.setName('remove')
-        .setDescription('Remove a channel from a command\'s allowlist')
-        .addStringOption(o =>
-          o.setName('command').setDescription('Slash command name').setRequired(true)
-        )
-        .addChannelOption(o =>
-          o.setName('channel').setDescription('Channel to remove').setRequired(true)
-        )
-    )
-    .addSubcommand(sub =>
-      sub.setName('clear')
-        .setDescription('Clear all restrictions for a command (makes it usable in any channel)')
-        .addStringOption(o =>
-          o.setName('command').setDescription('Slash command name').setRequired(true)
-        )
-    ),
+// Custom-id namespace. Format: `cmdch:<action>` or `cmdch:<action>|<commandName>`.
+const ID_PREFIX = 'cmdch:';
 
-  async execute(interaction) {
-    if (!interaction.guildId) {
-      return interaction.reply({ content: '❌ Use this in a server.', flags: 64 });
-    }
-    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-      return interaction.reply({ content: '❌ Administrator only.', flags: 64 });
-    }
+// ==================== MAIN PANEL ====================
 
-    const sub = interaction.options.getSubcommand();
-    const guildId = interaction.guildId;
+async function showCommandChannelsPanel(interaction, guildId) {
+  const restrictions = listGuildRestrictions(guildId);
+  const entries = Object.entries(restrictions).sort(([a], [b]) => a.localeCompare(b));
 
-    if (sub === 'list') {
-      const filter = interaction.options.getString('command');
-      if (filter) {
-        const channels = getAllowedChannels(guildId, filter);
-        if (channels.length === 0) {
-          return interaction.reply({ content: `\`/${filter}\` is **unrestricted** (allowed in every channel).`, flags: 64 });
-        }
-        const mentions = channels.map(c => `<#${c}>`).join('\n');
-        const embed = new EmbedBuilder()
-          .setTitle(`Allowed channels for /${filter}`)
-          .setDescription(mentions)
-          .setColor(0x4f8bff);
-        return interaction.reply({ embeds: [embed], flags: 64 });
-      }
-      const all = listGuildRestrictions(guildId);
-      const entries = Object.entries(all).sort(([a],[b]) => a.localeCompare(b));
-      if (entries.length === 0) {
-        return interaction.reply({ content: 'No command-channel restrictions configured in this guild.', flags: 64 });
-      }
-      const lines = entries.map(([cmd, chs]) => {
-        const list = chs.slice(0, 6).map(c => `<#${c}>`).join(', ');
-        const more = chs.length > 6 ? ` (+${chs.length - 6})` : '';
-        return `**/${cmd}** → ${list}${more}`;
-      });
-      // Embed description max 4096 chars; split if needed
-      const desc = lines.join('\n');
-      const embed = new EmbedBuilder()
-        .setTitle(`Command-channel restrictions (${entries.length})`)
-        .setDescription(desc.length > 4000 ? desc.slice(0, 4000) + '\n…(truncated)' : desc)
-        .setColor(0x4f8bff);
-      return interaction.reply({ embeds: [embed], flags: 64 });
-    }
+  const embed = new EmbedBuilder()
+    .setColor(0x4f8bff)
+    .setTitle('🎯 Command Channel Restrictions')
+    .setDescription([
+      'Bot-side per-command channel allowlist. Replaces Discord *Server Settings → Integrations* restrictions so VIP rooms and other bot-managed channels can be permitted automatically.',
+      '',
+      '• A command with **no** allowed channels is usable **everywhere**.',
+      '• Adding even one channel makes it **restricted** to that list (plus its threads).',
+      '• Administrators and VIP gambling rooms always bypass these rules.',
+    ].join('\n'));
 
-    if (sub === 'add') {
-      const cmd = interaction.options.getString('command').trim().replace(/^\//, '');
-      const channel = interaction.options.getChannel('channel');
-      addAllowedChannel(guildId, cmd, channel.id);
-      const count = getAllowedChannels(guildId, cmd).length;
-      return interaction.reply({
-        content: `✅ \`/${cmd}\` is now allowed in <#${channel.id}>. Total allowed channels: **${count}**.`,
-        flags: 64
-      });
-    }
-
-    if (sub === 'remove') {
-      const cmd = interaction.options.getString('command').trim().replace(/^\//, '');
-      const channel = interaction.options.getChannel('channel');
-      const wasRestricted = isCommandRestrictedInGuild(guildId, cmd);
-      removeAllowedChannel(guildId, cmd, channel.id);
-      const remaining = getAllowedChannels(guildId, cmd).length;
-      let note = '';
-      if (wasRestricted && remaining === 0) note = '\n⚠️ Last channel removed — command is now **unrestricted**.';
-      return interaction.reply({
-        content: `✅ Removed <#${channel.id}> from \`/${cmd}\`. Remaining: **${remaining}**.${note}`,
-        flags: 64
-      });
-    }
-
-    if (sub === 'clear') {
-      const cmd = interaction.options.getString('command').trim().replace(/^\//, '');
-      clearCommandRestrictions(guildId, cmd);
-      return interaction.reply({
-        content: `✅ Cleared all restrictions for \`/${cmd}\`. It is now usable in any channel.`,
-        flags: 64
-      });
-    }
+  if (entries.length === 0) {
+    embed.addFields({ name: 'Currently restricted commands', value: '_None — every command is unrestricted._' });
+  } else {
+    const lines = entries.map(([cmd, chs]) => {
+      const list = chs.slice(0, 5).map(c => `<#${c}>`).join(', ');
+      const more = chs.length > 5 ? ` *(+${chs.length - 5})*` : '';
+      return `**/${cmd}** → ${list}${more}`;
+    });
+    const desc = lines.join('\n');
+    embed.addFields({
+      name: `Restricted commands (${entries.length})`,
+      value: desc.length > 1024 ? desc.slice(0, 1018) + '\n…' : desc,
+    });
   }
+  embed.setFooter({ text: 'Use "Manage a command" to add, remove, or clear channels.' });
+
+  const buttons = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(ID_PREFIX + 'open')
+      .setLabel('Manage a command')
+      .setEmoji('🎯')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('back_dashboard')
+      .setLabel('Back to dashboard')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  await interaction.editReply({ embeds: [embed], components: [buttons] });
+}
+
+// ==================== COMMAND DETAIL VIEW ====================
+
+async function showCommandDetail(interaction, guildId, commandName) {
+  const channels = getAllowedChannels(guildId, commandName);
+  const embed = new EmbedBuilder()
+    .setColor(channels.length === 0 ? 0x57f287 : 0xfee75c)
+    .setTitle(`🎯 /${commandName}`)
+    .setDescription(channels.length === 0
+      ? '_This command is **unrestricted** — usable in every channel._'
+      : 'Currently allowed in the channels below. Threads inside allowed channels work automatically.');
+
+  if (channels.length > 0) {
+    const list = channels.map(c => `<#${c}>`).join('\n');
+    embed.addFields({
+      name: `Allowed channels (${channels.length})`,
+      value: list.length > 1024 ? list.slice(0, 1018) + '\n…' : list,
+    });
+  }
+
+  const rows = [];
+
+  // Add-channel selector
+  rows.push(new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId(ID_PREFIX + 'add|' + commandName)
+      .setPlaceholder('➕ Add channel(s) to allowlist')
+      .setMinValues(1)
+      .setMaxValues(25)
+      .addChannelTypes(
+        ChannelType.GuildText,
+        ChannelType.GuildAnnouncement,
+        ChannelType.GuildVoice,
+        ChannelType.GuildForum
+      )
+  ));
+
+  // Remove-channel selector (only if any exist)
+  if (channels.length > 0) {
+    const removeOptions = channels.slice(0, 25).map(id => {
+      const ch = interaction.guild?.channels?.cache?.get(id);
+      const label = ch ? `#${ch.name}`.slice(0, 100) : id;
+      const description = ch?.parent?.name ? ch.parent.name.slice(0, 100) : undefined;
+      return description ? { label, value: id, description } : { label, value: id };
+    });
+    rows.push(new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(ID_PREFIX + 'remove|' + commandName)
+        .setPlaceholder('➖ Remove channel(s) from allowlist')
+        .setMinValues(1)
+        .setMaxValues(Math.min(removeOptions.length, 25))
+        .addOptions(removeOptions)
+    ));
+  }
+
+  // Action buttons
+  rows.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(ID_PREFIX + 'clear|' + commandName)
+      .setLabel('Clear all')
+      .setEmoji('🗑️')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(channels.length === 0),
+    new ButtonBuilder()
+      .setCustomId(ID_PREFIX + 'back')
+      .setLabel('Back')
+      .setStyle(ButtonStyle.Secondary)
+  ));
+
+  await interaction.editReply({ embeds: [embed], components: rows });
+}
+
+// ==================== MODAL: PICK A COMMAND ====================
+
+function buildPickCommandModal() {
+  return new ModalBuilder()
+    .setCustomId(ID_PREFIX + 'modal')
+    .setTitle('Manage command restrictions')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('command_name')
+          .setLabel('Slash command name (without /)')
+          .setPlaceholder('e.g. blackjack, three-card-poker, income')
+          .setStyle(TextInputStyle.Short)
+          .setMinLength(1)
+          .setMaxLength(50)
+          .setRequired(true)
+      )
+    );
+}
+
+// ==================== INTERACTION HANDLER ====================
+
+async function handleInteraction(interaction, guildId) {
+  const customId = interaction.customId;
+  if (!customId || !customId.startsWith(ID_PREFIX)) return false;
+
+  const rest = customId.slice(ID_PREFIX.length);
+  const [action, commandName] = rest.split('|');
+
+  try {
+    // Open the "type a command name" modal
+    if (action === 'open' && interaction.isButton()) {
+      await interaction.showModal(buildPickCommandModal());
+      return true;
+    }
+
+    // Modal submitted: open detail view for the entered command
+    if (action === 'modal' && interaction.isModalSubmit()) {
+      await interaction.deferUpdate();
+      const name = (interaction.fields.getTextInputValue('command_name') || '').trim().replace(/^\//, '').toLowerCase();
+      if (!name) {
+        await interaction.followUp({ content: '❌ Empty command name.', flags: 64 });
+        return true;
+      }
+      await showCommandDetail(interaction, guildId, name);
+      return true;
+    }
+
+    // Back to main list
+    if (action === 'back' && interaction.isButton()) {
+      await interaction.deferUpdate();
+      await showCommandChannelsPanel(interaction, guildId);
+      return true;
+    }
+
+    // Add channels (channel select)
+    if (action === 'add' && interaction.isChannelSelectMenu() && commandName) {
+      await interaction.deferUpdate();
+      let added = 0;
+      for (const id of interaction.values) {
+        addAllowedChannel(guildId, commandName, id);
+        added++;
+      }
+      await showCommandDetail(interaction, guildId, commandName);
+      await interaction.followUp({ content: `✅ Added ${added} channel(s) to \`/${commandName}\`.`, flags: 64 });
+      return true;
+    }
+
+    // Remove channels (string select)
+    if (action === 'remove' && interaction.isStringSelectMenu() && commandName) {
+      await interaction.deferUpdate();
+      let removed = 0;
+      for (const id of interaction.values) {
+        removeAllowedChannel(guildId, commandName, id);
+        removed++;
+      }
+      await showCommandDetail(interaction, guildId, commandName);
+      await interaction.followUp({ content: `✅ Removed ${removed} channel(s) from \`/${commandName}\`.`, flags: 64 });
+      return true;
+    }
+
+    // Clear all restrictions for command
+    if (action === 'clear' && interaction.isButton() && commandName) {
+      await interaction.deferUpdate();
+      clearCommandRestrictions(guildId, commandName);
+      await showCommandDetail(interaction, guildId, commandName);
+      await interaction.followUp({ content: `✅ Cleared all restrictions for \`/${commandName}\`. It is now usable everywhere.`, flags: 64 });
+      return true;
+    }
+  } catch (err) {
+    console.error('[admin-command-channels] interaction error:', err);
+    try {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: `❌ Error: ${err.message}`, flags: 64 });
+      } else {
+        await interaction.followUp({ content: `❌ Error: ${err.message}`, flags: 64 });
+      }
+    } catch {}
+    return true;
+  }
+
+  return false;
+}
+
+module.exports = {
+  showCommandChannelsPanel,
+  handleInteraction,
 };
