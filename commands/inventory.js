@@ -486,16 +486,20 @@ async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKe
       // Permission overwrites: everyone view-only, owner full access, bot manage
       // Explicit `type` avoids discord.js auto-resolving a user id as a role and silently
       // dropping some permission bits (notably UseApplicationCommands for guests).
-      // NOTE: We intentionally do NOT deny `UseApplicationCommands` on @everyone.
-      // Discord does not reliably allow per-member overrides to override the @everyone
-      // deny for that flag (channel-level command permissions are managed via the
-      // integration manager). Instead, bot.js enforces the VIP-only rule by checking
-      // that the invoking user is the room owner or a recorded guest.
+      // NOTE on UseApplicationCommands: Discord's slash-command picker for non-admin
+      // members does not reliably honor a per-member channel allow unless the @everyone
+      // overwrite also allows the bit (a neutral state effectively hides commands).
+      // We therefore allow UAC at @everyone and gate access in bot.js by checking the
+      // invoking user is the room owner, an invited guest, or a server admin.
       const overwrites = [
         {
           id: guild.roles.everyone.id,
           type: OverwriteType.Role,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.UseApplicationCommands
+          ],
           deny: [
             PermissionFlagsBits.SendMessages,
             PermissionFlagsBits.AddReactions,
