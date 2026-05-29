@@ -20,7 +20,7 @@ const SPECIES = {
   wolf:    { name: 'Wolf',    emoji: '🐺', type: 'exotic',  baseCost: 0,       variants: 5, specialties: { rob_defense: 1.0, rob_offense: 1.0 } },
   dragon:  { name: 'Dragon',  emoji: '🐉', type: 'exotic',  baseCost: 0,       variants: 5, specialties: { vault: 1.0, gambling: 1.0 } },
   alien:   { name: 'Alien',   emoji: '👽', type: 'exotic',  baseCost: 0,       variants: 1, specialties: { work: 5.0, property: 1.0 } },
-  unicorn: { name: 'Unicorn', emoji: '🦄', type: 'exotic',  baseCost: 0,       variants: 5, specialties: { work: 2.0, rob_defense: 0.4, rob_offense: 0.4, vault: 0.4, property: 0.4, gambling: 0.4 } },
+  unicorn: { name: 'Unicorn', emoji: '🦄', type: 'exotic',  baseCost: 0,       variants: 5, specialties: { work: 10.0, rob_defense: 0.4, rob_offense: 0.4, vault: 0.4, property: 0.4, gambling: 0.4 } },
 };
 
 const SHOP_SPECIES = ['cat', 'dog', 'bird', 'spider', 'bear', 'panda'];
