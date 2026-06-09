@@ -266,9 +266,10 @@ function executePrestige(guildId, userId, totalWealth) {
   // 2. Delete stock holdings (only stocks THIS user owns, NOT others' shares of their stock)
   db.run('DELETE FROM stocks WHERE owner_id = ?', [userId]);
 
-  // 3. Delete properties & cards
+  // 3. Delete properties & wealth cards
   db.run('DELETE FROM owned_properties WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM property_upgrades WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+  db.run('DELETE FROM user_cards WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
 
   // 4. Delete loans, bonds & reset credit score
   db.run('DELETE FROM loan_payments WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
