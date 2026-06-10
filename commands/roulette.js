@@ -45,6 +45,95 @@ const VALID_BET_VALUES = new Set([
   ...NUMBER_BET_VALUES
 ]);
 
+// Map of various aliases → canonical bet value, for forgiving input parsing.
+// Keyed by lowercased alias. Built once on module load.
+const BET_ALIASES = (() => {
+  const m = new Map();
+  // Direct values
+  for (const v of OUTSIDE_BETS.map(b => b.value)) m.set(v, v);
+  // Display-name aliases (lowercased, no emoji)
+  m.set('red',         'red');
+  m.set('black',       'black');
+  m.set('green',       'green');
+  m.set('0/00',        'green');
+  m.set('zero',        '0');
+  m.set('double zero', '00');
+  m.set('double-zero', '00');
+  m.set('even',        'even');
+  m.set('odd',         'odd');
+  m.set('low',         'low');
+  m.set('high',        'high');
+  m.set('1-18',        'low');
+  m.set('19-36',       'high');
+  m.set('1st dozen',   '1st12');
+  m.set('2nd dozen',   '2nd12');
+  m.set('3rd dozen',   '3rd12');
+  m.set('1-12',        '1st12');
+  m.set('13-24',       '2nd12');
+  m.set('25-36',       '3rd12');
+  m.set('column 1',    'col1');
+  m.set('column 2',    'col2');
+  m.set('column 3',    'col3');
+  m.set('col1',        'col1');
+  m.set('col2',        'col2');
+  m.set('col3',        'col3');
+  return m;
+})();
+
+// Resolve any user-typed/autocomplete-rendered string into a canonical bet value.
+// Returns null if nothing matches.
+function resolveBetChoice(raw) {
+  if (raw == null) return null;
+  // Strip emoji/punctuation/extra whitespace; keep digits, letters, slashes, dashes
+  const cleaned = raw
+    .toString()
+    .toLowerCase()
+    .replace(/[^a-z0-9/\-\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return null;
+
+  // 1) Already a valid value (handles "black", "1st12", "00", "17", "07")
+  if (cleaned === '00') return '00';
+  if (/^\d+$/.test(cleaned)) {
+    const n = parseInt(cleaned, 10);
+    if (n >= 0 && n <= 36) return String(n);
+  }
+  if (VALID_BET_VALUES.has(cleaned)) return cleaned;
+
+  // 2) Full alias map (e.g. "1st dozen", "1-12")
+  if (BET_ALIASES.has(cleaned)) return BET_ALIASES.get(cleaned);
+
+  // 3) "#17", "# 5"
+  const hashMatch = cleaned.match(/#\s*(\d{1,2}|00)\b/);
+  if (hashMatch) {
+    const v = hashMatch[1];
+    if (v === '00') return '00';
+    const n = parseInt(v, 10);
+    if (n >= 0 && n <= 36) return String(n);
+  }
+
+  // 4) Display-name substring contains an alias keyword
+  //    e.g. "black 1 1" (from "⚫ Black (1:1)") → 'black'
+  //    e.g. "1st dozen 1 12 2 1" → '1st12'
+  for (const [alias, value] of BET_ALIASES.entries()) {
+    if (alias.length < 3) continue; // skip super-short keys that match too much
+    const pattern = new RegExp(`(^|\\b)${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|$)`);
+    if (pattern.test(cleaned)) return value;
+  }
+
+  // 5) Bare number embedded somewhere (e.g. "🟢 #00 — 0/00 (35:1)" → '00')
+  if (/(^|\s)00(\s|$)/.test(cleaned)) return '00';
+  const numMatch = cleaned.match(/(^|\s)(\d{1,2})(\s|$)/);
+  if (numMatch) {
+    const n = parseInt(numMatch[2], 10);
+    if (n >= 0 && n <= 36) return String(n);
+  }
+
+  return null;
+}
+
 // ============ HELPER FUNCTIONS ============
 
 function formatChoice(choice) {
@@ -406,18 +495,13 @@ module.exports = {
     const channelId = interaction.channelId;
     const bet = interaction.options.getInteger('bet');
     const rawChoice = (interaction.options.getString('choice') || '').toString().trim();
-    // Normalize: keep '00' literal, lowercase outside bets, accept '7'/'07' → '7'
-    let choice = rawChoice.toLowerCase();
-    if (choice === '00') {
-      // keep as-is
-    } else if (/^\d+$/.test(choice)) {
-      const n = parseInt(choice, 10);
-      choice = String(n); // strips leading zeros (e.g. '07' → '7')
-    }
+    // Robustly resolve any of: a canonical value, a display name (with emoji),
+    // an alias, "#17", "07", "1st dozen", etc.
+    const choice = resolveBetChoice(rawChoice);
 
-    if (!VALID_BET_VALUES.has(choice)) {
+    if (!choice || !VALID_BET_VALUES.has(choice)) {
       return interaction.reply({
-        content: '❌ Invalid bet. Pick an outside bet (red, black, even…) or a number from `0`, `00`, or `1`–`36`.',
+        content: `❌ Couldn't interpret \`${rawChoice}\` as a roulette bet. Pick an outside bet (red, black, even, low, 1st12…) or a number from \`0\`, \`00\`, or \`1\`–\`36\`.`,
         flags: 64
       });
     }
