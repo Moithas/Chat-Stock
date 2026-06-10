@@ -142,23 +142,5 @@ module.exports = {
       .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
-
-    // Try to DM the recipient
-    try {
-      const dmEmbed = new EmbedBuilder()
-        .setColor(0x2ecc71)
-        .setTitle('🎁 You Received an Item!')
-        .setDescription(`**${fromUser.username}** gave you **${quantity}x ${inventoryItem.emoji} ${inventoryItem.name}**!`)
-        .addFields(
-          { name: '📦 Item', value: inventoryItem.name, inline: true },
-          { name: '📝 Description', value: inventoryItem.description || 'No description', inline: false }
-        )
-        .setFooter({ text: `From: ${interaction.guild.name}` })
-        .setTimestamp();
-
-      await toUser.send({ embeds: [dmEmbed] });
-    } catch (e) {
-      // User has DMs disabled, that's fine
-    }
   }
 };
