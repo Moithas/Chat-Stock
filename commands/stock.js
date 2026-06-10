@@ -1734,8 +1734,8 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     if (infSettings && infSettings.enabled) {
       const insiderResult = checkInsiderTrading(guildId, userId, targetUserId, currentPrice, shares);
       if (insiderResult && insiderResult.detected) {
-        await addInfamy(guildId, userId, insiderResult.infamyGain, 'insider');
-        await announceInsiderTrading(guildId, userId, targetUserId, insiderResult.infamyGain, insiderResult.profitPercent, insiderResult.eventName);
+        await addInfamy(guildId, userId, insiderResult.infamyGained, 'insider');
+        await announceInsiderTrading(guildId, userId, targetUserId, insiderResult.infamyGained, insiderResult.profitPercent, insiderResult.eventName);
       }
     }
   } catch (e) {

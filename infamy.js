@@ -203,6 +203,12 @@ function addInfamy(guildId, userId, amount, source = 'unknown') {
   const settings = getInfamySettings(guildId);
   if (!settings.enabled) return 0;
 
+  // Guard against undefined / NaN / non-finite inputs — these would silently
+  // corrupt the row (NaN bindings become NULL in SQLite arithmetic).
+  if (!Number.isFinite(amount)) {
+    console.warn(`[infamy] addInfamy ignoring non-finite amount=${amount} from source=${source} for ${guildId}/${userId}`);
+    return 0;
+  }
   amount = Math.round(amount);
   if (amount <= 0) return 0;
 
@@ -225,6 +231,10 @@ function addInfamy(guildId, userId, amount, source = 'unknown') {
 function reduceInfamy(guildId, userId, amount, source = 'unknown') {
   if (!db) return 0;
 
+  if (!Number.isFinite(amount)) {
+    console.warn(`[infamy] reduceInfamy ignoring non-finite amount=${amount} from source=${source} for ${guildId}/${userId}`);
+    return 0;
+  }
   amount = Math.round(amount);
   if (amount <= 0) return 0;
 
