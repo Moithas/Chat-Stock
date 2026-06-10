@@ -727,12 +727,16 @@ function updateBlackjackStats(userId, result, amount) {
   }
 }
 
-// ============ ROULETTE ============
+// ============ ROULETTE (AMERICAN WHEEL: 0, 00, 1–36) ============
+// Internally the double-zero pocket is represented as the integer 37 so that
+// arithmetic on numeric bet checks stays correct. The display layer formats 37
+// back to "00".
+const ROULETTE_DOUBLE_ZERO = 37;
 
 const ROULETTE_NUMBERS = {
   red: [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36],
   black: [2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35],
-  green: [0]
+  green: [0, ROULETTE_DOUBLE_ZERO]
 };
 
 const ROULETTE_BETS = {
@@ -740,9 +744,9 @@ const ROULETTE_BETS = {
   red: { payout: 2, check: (n) => ROULETTE_NUMBERS.red.includes(n) },
   black: { payout: 2, check: (n) => ROULETTE_NUMBERS.black.includes(n) },
   
-  // Even/Odd (1:1)
-  even: { payout: 2, check: (n) => n !== 0 && n % 2 === 0 },
-  odd: { payout: 2, check: (n) => n % 2 === 1 },
+  // Even/Odd (1:1) — 0 and 00 always lose
+  even: { payout: 2, check: (n) => n !== 0 && n !== ROULETTE_DOUBLE_ZERO && n % 2 === 0 },
+  odd: { payout: 2, check: (n) => n !== ROULETTE_DOUBLE_ZERO && n % 2 === 1 },
   
   // High/Low (1:1)
   low: { payout: 2, check: (n) => n >= 1 && n <= 18 },
@@ -753,26 +757,34 @@ const ROULETTE_BETS = {
   '2nd12': { payout: 3, check: (n) => n >= 13 && n <= 24 },
   '3rd12': { payout: 3, check: (n) => n >= 25 && n <= 36 },
   
-  // Columns (2:1)
-  'col1': { payout: 3, check: (n) => n !== 0 && n % 3 === 1 },
-  'col2': { payout: 3, check: (n) => n !== 0 && n % 3 === 2 },
-  'col3': { payout: 3, check: (n) => n !== 0 && n % 3 === 0 },
+  // Columns (2:1) — 0 and 00 always lose
+  'col1': { payout: 3, check: (n) => n >= 1 && n <= 36 && n % 3 === 1 },
+  'col2': { payout: 3, check: (n) => n >= 1 && n <= 36 && n % 3 === 2 },
+  'col3': { payout: 3, check: (n) => n >= 1 && n <= 36 && n % 3 === 0 },
   
-  // Green (35:1)
-  green: { payout: 36, check: (n) => n === 0 }
+  // Green: 0 or 00 (17:1 on American — covers 2/38 pockets)
+  green: { payout: 18, check: (n) => n === 0 || n === ROULETTE_DOUBLE_ZERO },
+
+  // Double-zero straight bet (35:1)
+  '00': { payout: 36, check: (n) => n === ROULETTE_DOUBLE_ZERO },
 };
 
-// Add straight-up number bets (35:1)
+// Add straight-up number bets 0–36 (35:1)
 for (let i = 0; i <= 36; i++) {
   ROULETTE_BETS[String(i)] = { payout: 36, check: (n) => n === i };
 }
 
 function spinRoulette() {
-  return Math.floor(Math.random() * 37); // 0-36
+  // 0–36 + 37 (=00) → 38 pockets, American wheel
+  return Math.floor(Math.random() * 38);
+}
+
+function formatRouletteNumber(n) {
+  return n === ROULETTE_DOUBLE_ZERO ? '00' : String(n);
 }
 
 function getNumberColor(num) {
-  if (num === 0) return '🟢';
+  if (num === 0 || num === ROULETTE_DOUBLE_ZERO) return '🟢';
   if (ROULETTE_NUMBERS.red.includes(num)) return '🔴';
   return '⚫';
 }
@@ -838,20 +850,32 @@ function getRouletteStats() {
     numberCounts[spin.number] = (numberCounts[spin.number] || 0) + 1;
   }
   
-  // Find hot numbers (most frequent)
-  const sortedByFreq = Object.entries(numberCounts).sort((a, b) => b[1] - a[1]);
-  const hotNumbers = sortedByFreq.slice(0, 5).map(([num, count]) => ({
-    number: parseInt(num),
-    count,
-    color: getNumberColor(parseInt(num))
+  // Hot numbers: top 5 by appearance count (skip numbers that never appeared)
+  const sortedByFreq = Object.entries(numberCounts)
+    .map(([num, count]) => ({ number: Number(num), count }))
+    .filter(e => e.count > 0)
+    .sort((a, b) => b.count - a.count || a.number - b.number);
+  const hotNumbers = sortedByFreq.slice(0, 5).map(e => ({
+    number: e.number,
+    label: formatRouletteNumber(e.number),
+    count: e.count,
+    color: getNumberColor(e.number),
   }));
   
-  // Find cold numbers (numbers that haven't appeared)
-  const allNumbers = Array.from({ length: 37 }, (_, i) => i);
+  // Cold numbers: bottom 5 of all 38 pockets by appearance count
+  const allNumbers = [];
+  for (let i = 0; i <= 36; i++) allNumbers.push(i);
+  allNumbers.push(ROULETTE_DOUBLE_ZERO);
   const coldNumbers = allNumbers
-    .filter(n => !numberCounts[n])
+    .map(n => ({ number: n, count: numberCounts[n] || 0 }))
+    .sort((a, b) => a.count - b.count || a.number - b.number)
     .slice(0, 5)
-    .map(n => ({ number: n, color: getNumberColor(n) }));
+    .map(e => ({
+      number: e.number,
+      label: formatRouletteNumber(e.number),
+      count: e.count,
+      color: getNumberColor(e.number),
+    }));
   
   const total = recentRouletteSpins.length;
   
@@ -1582,6 +1606,7 @@ module.exports = {
   // Roulette
   spinRoulette,
   getNumberColor,
+  formatRouletteNumber,
   checkRouletteBet,
   getRoulettePayout,
   getRouletteOdds,
@@ -1590,6 +1615,7 @@ module.exports = {
   getRouletteStats,
   ROULETTE_BETS,
   ROULETTE_NUMBERS,
+  ROULETTE_DOUBLE_ZERO,
   // Stats
   getGamblingStats,
   // Settings

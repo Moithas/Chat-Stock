@@ -3,12 +3,14 @@ const { getBalance, removeMoney, addMoney, removeFromTotal } = require('../econo
 const { 
   spinRoulette, 
   getNumberColor, 
+  formatRouletteNumber,
   checkRouletteBet, 
   getRoulettePayout,
   getRouletteOdds,
   updateRouletteStats,
   recordRouletteSpin,
-  getRouletteStats
+  getRouletteStats,
+  ROULETTE_DOUBLE_ZERO
 } = require('../gambling');
 const { getCurrency } = require('../admin');
 const { applyGamblingBonus, getPetBonusDecimal } = require('../pets');
@@ -19,22 +21,29 @@ const BETTING_WINDOW = 30000; // 30 seconds to place bets
 // Active roulette tables per channel
 const activeTables = new Map();
 
-// Valid bet choices for autocomplete
-const BET_CHOICES = [
-  { name: '🔴 Red (1:1)', value: 'red' },
-  { name: '⚫ Black (1:1)', value: 'black' },
-  { name: '🟢 Green/0 (35:1)', value: 'green' },
-  { name: 'Even (1:1)', value: 'even' },
-  { name: 'Odd (1:1)', value: 'odd' },
-  { name: 'Low 1-18 (1:1)', value: 'low' },
-  { name: 'High 19-36 (1:1)', value: 'high' },
-  { name: '1st Dozen 1-12 (2:1)', value: '1st12' },
+// Outside bets (named choices). Number bets are accepted separately via autocomplete.
+const OUTSIDE_BETS = [
+  { name: '🔴 Red (1:1)',          value: 'red' },
+  { name: '⚫ Black (1:1)',         value: 'black' },
+  { name: '🟢 Green / 0 or 00 (17:1)', value: 'green' },
+  { name: 'Even (1:1)',            value: 'even' },
+  { name: 'Odd (1:1)',             value: 'odd' },
+  { name: 'Low 1-18 (1:1)',        value: 'low' },
+  { name: 'High 19-36 (1:1)',      value: 'high' },
+  { name: '1st Dozen 1-12 (2:1)',  value: '1st12' },
   { name: '2nd Dozen 13-24 (2:1)', value: '2nd12' },
   { name: '3rd Dozen 25-36 (2:1)', value: '3rd12' },
-  { name: 'Column 1 (2:1)', value: 'col1' },
-  { name: 'Column 2 (2:1)', value: 'col2' },
-  { name: 'Column 3 (2:1)', value: 'col3' }
+  { name: 'Column 1 (2:1)',        value: 'col1' },
+  { name: 'Column 2 (2:1)',        value: 'col2' },
+  { name: 'Column 3 (2:1)',        value: 'col3' }
 ];
+
+// Full set of straight-number bet values: '0', '00', '1'..'36'
+const NUMBER_BET_VALUES = ['0', '00', ...Array.from({ length: 36 }, (_, i) => String(i + 1))];
+const VALID_BET_VALUES = new Set([
+  ...OUTSIDE_BETS.map(b => b.value),
+  ...NUMBER_BET_VALUES
+]);
 
 // ============ HELPER FUNCTIONS ============
 
@@ -42,7 +51,7 @@ function formatChoice(choice) {
   const formats = {
     'red': '🔴 Red',
     'black': '⚫ Black',
-    'green': '🟢 Green',
+    'green': '🟢 Green (0/00)',
     'even': 'Even',
     'odd': 'Odd',
     'low': 'Low (1-18)',
@@ -54,7 +63,54 @@ function formatChoice(choice) {
     'col2': 'Column 2',
     'col3': 'Column 3'
   };
-  return formats[choice] || `#${choice}`;
+  if (formats[choice]) return formats[choice];
+  // Number bet — render with green/red/black color emoji
+  if (choice === '00') return `🟢 #00`;
+  const n = Number(choice);
+  if (Number.isFinite(n) && n >= 0 && n <= 36) return `${getNumberColor(n)} #${n}`;
+  return `#${choice}`;
+}
+
+// Convert a stored spin's `number` (may be 0-36 or 37=='00') to its display label.
+function spinLabel(spin) {
+  return formatRouletteNumber(spin.number);
+}
+
+// Build the full stats footer fields shared between the live table and result embeds.
+// Includes Recent Spins / Color % / Hot 5 / Cold 5.
+function buildStatsFields(includeRecent = true) {
+  const stats = getRouletteStats();
+  const fields = [];
+
+  if (includeRecent && stats.last10.length > 0) {
+    const recent = stats.last10.map(s => `${s.color}${spinLabel(s)}`).join(' ');
+    fields.push({ name: '📊 Recent Spins', value: recent, inline: false });
+  }
+
+  if (stats.total > 0) {
+    const p = stats.percentages;
+    fields.push({
+      name: `🎨 Color Distribution (last ${stats.total} spin${stats.total !== 1 ? 's' : ''})`,
+      value: `🔴 Red **${p.red}%** • ⚫ Black **${p.black}%** • 🟢 Green **${p.green}%**`,
+      inline: false
+    });
+
+    if (stats.hotNumbers.length > 0) {
+      const hot = stats.hotNumbers
+        .map(h => `${h.color}${h.label} ×${h.count}`)
+        .join(' • ');
+      fields.push({ name: '🔥 Hottest (top 5)', value: hot, inline: true });
+    }
+
+    if (stats.coldNumbers.length > 0) {
+      const cold = stats.coldNumbers
+        .map(c => `${c.color}${c.label} ×${c.count}`)
+        .join(' • ');
+      fields.push({ name: '🧊 Coldest (bottom 5)', value: cold, inline: true });
+    }
+  }
+
+  return fields;
 }
 
 function buildTableEmbed(table) {
@@ -91,15 +147,9 @@ function buildTableEmbed(table) {
     });
   }
 
-  // Add stats
-  const stats = getRouletteStats();
-  if (stats.total > 0 && stats.last10.length > 0) {
-    const recentSpins = stats.last10.slice(0, 5).map(s => `${s.color}${s.number}`).join(' ');
-    embed.addFields({
-      name: '📊 Recent Spins',
-      value: recentSpins,
-      inline: false
-    });
+  // Add stats footer (recent spins + color % + hot/cold)
+  for (const f of buildStatsFields(true)) {
+    embed.addFields(f);
   }
 
   return embed;
@@ -225,9 +275,11 @@ async function spinWheel(table) {
   }
 
   // Build results embed
+  const numLabel = formatRouletteNumber(number);
+  const isZero = number === 0 || number === ROULETTE_DOUBLE_ZERO;
   const resultEmbed = new EmbedBuilder()
-    .setColor(number === 0 ? 0x2ecc71 : (color === '🔴' ? 0xe74c3c : 0x2c2f33))
-    .setTitle(`${color} The ball landed on **${number}**!`)
+    .setColor(isZero ? 0x2ecc71 : (color === '🔴' ? 0xe74c3c : 0x2c2f33))
+    .setTitle(`${color} The ball landed on **${numLabel}**!`)
     .setTimestamp();
 
   // Group results by player
@@ -282,15 +334,9 @@ async function spinWheel(table) {
     });
   }
 
-  // Add recent spins
-  const stats = getRouletteStats();
-  if (stats.last10.length > 0) {
-    const recentSpins = stats.last10.slice(0, 10).map(s => `${s.color}${s.number}`).join(' ');
-    resultEmbed.addFields({
-      name: '📊 Recent Spins',
-      value: recentSpins,
-      inline: false
-    });
+  // Add stats footer (recent spins + color % + hot/cold)
+  for (const f of buildStatsFields(true)) {
+    resultEmbed.addFields(f);
   }
 
   try {
@@ -310,7 +356,7 @@ async function spinWheel(table) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('roulette')
-    .setDescription('Play roulette - multiple players can bet on the same spin!')
+    .setDescription('Play American roulette (0, 00, 1–36) — multiple players can bet on the same spin!')
     .addIntegerOption(option =>
       option.setName('bet')
         .setDescription('Amount to bet')
@@ -318,16 +364,63 @@ module.exports = {
         .setMinValue(100))
     .addStringOption(option =>
       option.setName('choice')
-        .setDescription('What to bet on')
+        .setDescription('Outside bet name (red, black, even…) or a number 0, 00, 1–36')
         .setRequired(true)
-        .addChoices(...BET_CHOICES)),
+        .setAutocomplete(true)),
+
+  async autocomplete(interaction) {
+    try {
+      const focused = (interaction.options.getFocused() || '').toString().trim().toLowerCase();
+      const results = [];
+
+      // 1) Outside bets matched by name or value
+      for (const b of OUTSIDE_BETS) {
+        if (!focused || b.value.includes(focused) || b.name.toLowerCase().includes(focused)) {
+          results.push(b);
+        }
+      }
+
+      // 2) Number bets — match by digit prefix/contains
+      for (const v of NUMBER_BET_VALUES) {
+        if (!focused || v === focused || v.startsWith(focused) || v.includes(focused)) {
+          let label;
+          if (v === '00') label = '🟢 #00 — 0/00 (35:1)';
+          else {
+            const n = Number(v);
+            label = `${getNumberColor(n)} #${n} (35:1)`;
+          }
+          results.push({ name: label, value: v });
+        }
+      }
+
+      // Discord limit: 25 max
+      await interaction.respond(results.slice(0, 25));
+    } catch (e) {
+      try { await interaction.respond([]); } catch (_) { /* ignore */ }
+    }
+  },
 
   async execute(interaction) {
     const userId = interaction.user.id;
     const guildId = interaction.guildId;
     const channelId = interaction.channelId;
     const bet = interaction.options.getInteger('bet');
-    const choice = interaction.options.getString('choice').toLowerCase();
+    const rawChoice = (interaction.options.getString('choice') || '').toString().trim();
+    // Normalize: keep '00' literal, lowercase outside bets, accept '7'/'07' → '7'
+    let choice = rawChoice.toLowerCase();
+    if (choice === '00') {
+      // keep as-is
+    } else if (/^\d+$/.test(choice)) {
+      const n = parseInt(choice, 10);
+      choice = String(n); // strips leading zeros (e.g. '07' → '7')
+    }
+
+    if (!VALID_BET_VALUES.has(choice)) {
+      return interaction.reply({
+        content: '❌ Invalid bet. Pick an outside bet (red, black, even…) or a number from `0`, `00`, or `1`–`36`.',
+        flags: 64
+      });
+    }
 
     // Validate bet type
     const payout = getRoulettePayout(choice);
