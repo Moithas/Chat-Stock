@@ -890,14 +890,16 @@ async function showBuyView(interaction, guildId, userId) {
 }
 
 async function showBuyAmountButtons(interaction, guildId, userId, targetUserId, isDeferred = false) {
-  // If coming from cancel button, defer the update (search already defers)
-  if (isDeferred && !interaction.deferred) {
+  // Always defer up-front — fetching uncached target users + price calc can
+  // easily exceed Discord's 3-second ACK window, which would surface as
+  // "This interaction failed" to the player.
+  if (!interaction.deferred && !interaction.replied) {
     await interaction.deferUpdate();
   }
-  
-  // Helper to respond correctly based on deferred state
-  const respond = (data) => isDeferred ? interaction.editReply(data) : interaction.update(data);
-  
+
+  // After deferring, only editReply is valid.
+  const respond = (data) => interaction.editReply(data);
+
   // Can't buy your own stock
   if (targetUserId === userId) {
     const embed = new EmbedBuilder()
@@ -1580,15 +1582,15 @@ async function showSellView(interaction, guildId, userId) {
 }
 
 async function showSellAmountButtons(interaction, guildId, userId, targetUserId, isCancel = false) {
-  // If coming from cancel, defer the update
-  if (isCancel) {
+  // Always defer up-front — user fetch + price calc can exceed Discord's 3s ACK window.
+  if (!interaction.deferred && !interaction.replied) {
     await interaction.deferUpdate();
   }
   
   const stock = getStock(userId, targetUserId);
   
   if (!stock) {
-    return interaction.update({ content: '❌ You don\'t own this stock anymore!', embeds: [], components: [] });
+    return interaction.editReply({ content: '❌ You don\'t own this stock anymore!', embeds: [], components: [] });
   }
   
   let username = targetUserId;
@@ -1649,7 +1651,7 @@ async function showSellAmountButtons(interaction, guildId, userId, targetUserId,
   if (isCancel) {
     await interaction.editReply({ embeds: [embed], components });
   } else {
-    await interaction.update({ embeds: [embed], components });
+    await interaction.editReply({ embeds: [embed], components });
   }
 }
 
