@@ -327,11 +327,13 @@ async function showLoanApplication(interaction, guildId, userId) {
   const properties = getUserProperties(guildId, userId);
   const propertiesOwned = properties.length;
   
-  // Calculate portfolio value
+  // Calculate portfolio value (must pass guildId so market events, momentum,
+  // and price-impact delay are applied — otherwise we use base prices only
+  // and underestimate the portfolio).
   const portfolio = getPortfolio(userId);
   let portfolioValue = 0;
   for (const holding of portfolio) {
-    const price = calculateStockPrice(holding.stock_user_id);
+    const price = calculateStockPrice(holding.stock_user_id, guildId);
     portfolioValue += price * holding.shares;
   }
   
