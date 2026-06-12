@@ -301,6 +301,11 @@ function executePrestige(guildId, userId, totalWealth) {
   // 7. Reset skills XP
   db.run('UPDATE user_skills SET hack_xp = 0, rob_xp = 0 WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
 
+  // 8. Reset infamy (clean slate — drops tier, peak, decay/reduced history, probation, and active bounties)
+  db.run('DELETE FROM infamy_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+  db.run('DELETE FROM insider_trading_snapshots WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+  db.run('DELETE FROM bounty_board WHERE guild_id = ? AND target_user_id = ? AND active = 1', [guildId, userId]);
+
   // ===== APPLY PRESTIGE =====
 
   // Set starting bonus as cash
