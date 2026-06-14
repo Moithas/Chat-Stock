@@ -2279,7 +2279,13 @@ async function showBreedingPanel(interaction, guildId, userId, settings, initial
   
   const readyBirths = allGestating.filter(p => {
     const now = Date.now();
-    return p.gestation_end <= now;
+    const ready = p.gestation_end <= now;
+    if (!ready) return false;
+
+    // Birth claims belong to the assigned recipient.
+    // Legacy fallback: if gestating_for_user is missing, allow the pet owner.
+    if (p.gestating_for_user) return String(p.gestating_for_user) === String(userId);
+    return String(p.owner_id) === String(userId);
   });
 
   if (readyBirths.length > 0) {
@@ -2529,12 +2535,13 @@ async function handleGiveBirth(interaction, guildId, userId, settings) {
     return interaction.editReply({ content: '❌ Pet not found.', embeds: [], components: [] });
   }
 
-  // Verify gestation target (could be cross-player breeding OR own pet)
-  // Allow: the gestating_for_user OR the pet owner (for self-breeding)
-  const isForUser = String(female.gestating_for_user) === String(userId);
-  const isOwner = String(female.owner_id) === String(userId);
-  
-  if (!isForUser && !isOwner) {
+  // Verify gestation target: the assigned recipient is the only claimant.
+  // Legacy fallback: if gestating_for_user is missing, allow the pet owner.
+  const canClaim = female.gestating_for_user
+    ? String(female.gestating_for_user) === String(userId)
+    : String(female.owner_id) === String(userId);
+
+  if (!canClaim) {
     return interaction.editReply({ content: '❌ This baby is not for you.', embeds: [], components: [] });
   }
 
