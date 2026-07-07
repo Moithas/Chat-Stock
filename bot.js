@@ -91,8 +91,8 @@ function startLotteryScheduler(client) {
       try {
         const settings = getGamblingSettings(guild.id);
         
-        // Skip if auto-draw not enabled or schedule not set
-        if (!settings.lottery_auto_draw) continue;
+        // Skip if settings missing, auto-draw not enabled, or schedule not set
+        if (!settings || !settings.lottery_auto_draw) continue;
         if (settings.lottery_draw_day === null || settings.lottery_draw_hour === null) continue;
         
         // Check if it's time to draw

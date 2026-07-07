@@ -164,10 +164,9 @@ function initGambling(database) {
 // ============ GAMBLING SETTINGS ============
 
 function getGamblingSettings(guildId) {
-  // Check cache first
-  if (guildGamblingSettings.has(guildId)) {
-    return guildGamblingSettings.get(guildId);
-  }
+  // Check cache first (single read to avoid edge-case expiry between has/get)
+  const cached = guildGamblingSettings.get(guildId);
+  if (cached) return cached;
   
   if (db) {
     const result = db.exec('SELECT * FROM gambling_settings WHERE guild_id = ?', [guildId]);
@@ -195,8 +194,8 @@ function getGamblingSettings(guildId) {
     }
   }
   
-  // Return defaults
-  return { 
+  // Return and cache defaults
+  const defaults = {
     blackjack_decks: 2,
     lottery_draw_day: null,
     lottery_draw_hour: null,
@@ -209,6 +208,8 @@ function getGamblingSettings(guildId) {
     lottery_number_max: 29,
     scratch_enabled: true
   };
+  guildGamblingSettings.set(guildId, defaults);
+  return defaults;
 }
 
 function updateGamblingSettings(guildId, updates) {
