@@ -737,21 +737,24 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
   }
   
   if (totalShares > 0) {
-    const demandMultiplier = 1 + Math.min(totalShares * 0.003, 0.30);
-    price *= demandMultiplier;
-  }
-
-  // Apply temporary demand momentum from fresh net buys/sells.
-  if (guildId) {
-    try {
-      const { getPendingDemandMomentum } = require('./market');
-      const demandMomentum = getPendingDemandMomentum(guildId, userId);
-      if (demandMomentum !== 0) {
-        price *= (1 + demandMomentum);
-      }
-    } catch (e) {
-      // Market module not loaded yet, skip momentum bonus
+    // Supply & demand: more shares outstanding => permanently higher price.
+    // At/below 100 shares this matches the original linear curve (0 -> +30%).
+    // Above 100 shares the price keeps climbing with DIMINISHING marginal impact
+    // (square root), so a single large purchase can't dominate. Combined with the
+    // price-impact delay (getEffectiveShareCount phases new shares in over the
+    // impact window), a buy's effect trickles in gradually and then STAYS -
+    // driven purely by shares outstanding, with no decay timer.
+    // Continuous at 100 shares: sqrt(0) = 0, so both branches meet at +30%.
+    const DEMAND_GROWTH_COEFF = 0.0004; // marginal demand above 100 shares; higher = steeper
+    const DEMAND_BONUS_CAP = 1.50;      // hard safety ceiling (+150%) to prevent runaway
+    let demandBonus;
+    if (totalShares <= 100) {
+      demandBonus = totalShares * 0.003;
+    } else {
+      demandBonus = 0.30 + DEMAND_GROWTH_COEFF * Math.sqrt(totalShares - 100);
     }
+    demandBonus = Math.min(demandBonus, DEMAND_BONUS_CAP);
+    price *= (1 + demandBonus);
   }
 
   // Apply price modifier from splits
