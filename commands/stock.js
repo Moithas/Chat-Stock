@@ -75,7 +75,9 @@ function buildPriceBreakdown(guildId, userId, targetUserId, shares, isSelling = 
   const currency = getCurrency(guildId);
   
   // Get base price without any modifiers (excludeEvents=true, lpModifier=0)
-  const excludeBuyer = isSelling ? userId : null;
+  // Pre-sale pricing should reflect the current live market including seller holdings.
+  // The actual share reduction impacts price after the sale is executed.
+  const excludeBuyer = null;
   const basePrice = calculateStockPrice(targetUserId, guildId, excludeBuyer, true, 0);
   
   // Get LP modifier
@@ -1600,7 +1602,7 @@ async function showSellAmountButtons(interaction, guildId, userId, targetUserId,
   } catch (e) {}
   
   const lpSellMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
-  const currentPrice = calculateStockPrice(targetUserId, guildId, userId, false, lpSellMod);
+  const currentPrice = calculateStockPrice(targetUserId, guildId, null, false, lpSellMod);
   const totalValue = Math.round(currentPrice * stock.shares);
   
   const lpNote = lpSellMod !== 0 ? ` (${lpSellMod > 0 ? '+' : ''}${lpSellMod}% LP)` : '';
@@ -1707,7 +1709,7 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
   
   // Apply Lucky Penny stock price modifier additively with events
   const lpSellStockMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
-  const currentPrice = calculateStockPrice(targetUserId, guildId, userId, false, lpSellStockMod);
+  const currentPrice = calculateStockPrice(targetUserId, guildId, null, false, lpSellStockMod);
   const grossValue = Math.round(currentPrice * shares);
   const feeBreakdown = calculateSellFeeBreakdown(guildId, grossValue, userId);
   const fee = feeBreakdown.total;
