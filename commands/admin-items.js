@@ -32,21 +32,26 @@ const ITEMS_PER_PAGE = 5;
 // Helper function to safely parse emoji for select menu options
 // Custom emojis like <:name:id> need to be converted to { id, name } format
 // Unicode emojis can be used as-is
-function parseEmojiForSelect(emojiStr) {
+function parseEmojiForSelect(emojiStr, client = null) {
   if (!emojiStr) return '📦';
   
   // Check if it's a custom emoji like <:name:123456789> or <a:name:123456789>
   const customEmojiMatch = emojiStr.match(/^<(a?):(\w+):(\d+)>$/);
   if (customEmojiMatch) {
+    const id = customEmojiMatch[3];
+    // Discord rejects custom emojis the bot can't access (COMPONENT_INVALID_EMOJI),
+    // which breaks the whole select menu — fall back unless access is confirmed.
+    if (client && !client.emojis.cache.has(id)) return '📦';
     return {
       animated: customEmojiMatch[1] === 'a',
       name: customEmojiMatch[2],
-      id: customEmojiMatch[3]
+      id
     };
   }
   
-  // Check if it's just an emoji ID (numbers only)
+  // Check if it's just an emoji ID (numbers only) — only safe if the bot can access it
   if (/^\d+$/.test(emojiStr)) {
+    if (!client || !client.emojis.cache.has(emojiStr)) return '📦';
     return { id: emojiStr };
   }
   
@@ -514,7 +519,7 @@ async function showManageItemsPanel(interaction, guildId, page = 0, categoryFilt
               label: item.name,
               value: item.id.toString(),
               description: `${item.price.toLocaleString()} - ${item.category}`,
-              emoji: parseEmojiForSelect(item.emoji)
+              emoji: parseEmojiForSelect(item.emoji, interaction.client)
             }))
           )
       );
@@ -1304,7 +1309,7 @@ async function showGiveItemPanel(interaction, guildId) {
       description: `${item.price.toLocaleString()} ${getCurrency(guildId)} - ${item.category}`
     };
     // Add emoji separately (properly parsed for select menus)
-    const parsedEmoji = parseEmojiForSelect(item.emoji);
+    const parsedEmoji = parseEmojiForSelect(item.emoji, interaction.client);
     if (parsedEmoji) option.emoji = parsedEmoji;
     return option;
   });
@@ -1411,7 +1416,7 @@ async function updateGiveItemPanel(interaction, state) {
       default: item.id === state.itemId
     };
     // Add emoji separately (properly parsed for select menus)
-    const parsedEmoji = parseEmojiForSelect(item.emoji);
+    const parsedEmoji = parseEmojiForSelect(item.emoji, interaction.client);
     if (parsedEmoji) option.emoji = parsedEmoji;
     return option;
   });
@@ -1714,7 +1719,7 @@ async function updateTakeItemPanel(interaction, state, inventory) {
       default: item.item_id === state.itemId
     };
     // Add emoji separately (properly parsed for select menus)
-    const parsedEmoji = parseEmojiForSelect(item.emoji);
+    const parsedEmoji = parseEmojiForSelect(item.emoji, interaction.client);
     if (parsedEmoji) option.emoji = parsedEmoji;
     return option;
   });
@@ -2253,7 +2258,7 @@ async function showOwnersItemSelectPanel(interaction, guildId) {
             label: item.name,
             value: item.id.toString(),
             description: `${item.price.toLocaleString()} - ${item.category}`,
-            emoji: parseEmojiForSelect(item.emoji)
+            emoji: parseEmojiForSelect(item.emoji, interaction.client)
           }))
         )
     );

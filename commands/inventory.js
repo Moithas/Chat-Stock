@@ -33,6 +33,9 @@ const { getAdminRole, isAdmin, getCurrency } = require('../admin');
 
 const ITEMS_PER_PAGE = 8;
 
+// Client reference for validating custom emoji access (set on each entry point)
+let _client = null;
+
 // Helper function to safely parse emoji for select menu options
 // Custom emojis like <:name:id> need to be converted to { id, name } format
 function parseEmojiForSelect(emojiStr) {
@@ -41,15 +44,20 @@ function parseEmojiForSelect(emojiStr) {
   // Check if it's a custom emoji like <:name:123456789> or <a:name:123456789>
   const customEmojiMatch = emojiStr.match(/^<(a?):(\w+):(\d+)>$/);
   if (customEmojiMatch) {
+    const id = customEmojiMatch[3];
+    // Discord rejects custom emojis the bot can't access (COMPONENT_INVALID_EMOJI),
+    // which breaks the whole select menu — fall back unless access is confirmed.
+    if (_client && !_client.emojis.cache.has(id)) return '📦';
     return {
       animated: customEmojiMatch[1] === 'a',
       name: customEmojiMatch[2],
-      id: customEmojiMatch[3]
+      id
     };
   }
   
-  // Check if it's just an emoji ID (numbers only)
+  // Check if it's just an emoji ID (numbers only) — only safe if the bot can access it
   if (/^\d+$/.test(emojiStr)) {
+    if (!_client || !_client.emojis.cache.has(emojiStr)) return '📦';
     return { id: emojiStr };
   }
   
@@ -93,6 +101,7 @@ module.exports = {
 const inventoryState = new Map();
 
 async function showInventoryPanel(interaction, guildId, targetId, targetName, isOwnInventory, page = 0, tab = 'items') {
+  _client = interaction.client;
   const inventory = getUserInventory(guildId, targetId);
   const effects = isOwnInventory ? getActiveEffects(guildId, targetId) : [];
   
@@ -167,6 +176,7 @@ async function showInventoryPanel(interaction, guildId, targetId, targetName, is
 }
 
 async function handleInventoryInteraction(i, state, stateKey, response) {
+  _client = i.client;
   const { guildId, targetId, targetName, isOwnInventory } = state;
   
   // Dismiss
@@ -233,6 +243,7 @@ async function handleInventoryInteraction(i, state, stateKey, response) {
 }
 
 async function handleUseItemFromPanel(i, guildId, userId, itemId, state, stateKey, response, targetName) {
+  _client = i.client;
   // Find the item in inventory
   const item = state.inventory.find(inv => inv.item_id === itemId);
   if (!item) {

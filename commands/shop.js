@@ -16,6 +16,9 @@ const { getCurrency } = require('../admin');
 
 const ITEMS_PER_PAGE = 5;
 
+// Client reference for validating custom emoji access (set on each entry point)
+let _client = null;
+
 // Helper function to safely parse emoji for select menu options
 // Custom emojis like <:name:id> need to be converted to { id, name } format
 function parseEmojiForSelect(emojiStr) {
@@ -24,15 +27,20 @@ function parseEmojiForSelect(emojiStr) {
   // Check if it's a custom emoji like <:name:123456789> or <a:name:123456789>
   const customEmojiMatch = emojiStr.match(/^<(a?):(\w+):(\d+)>$/);
   if (customEmojiMatch) {
+    const id = customEmojiMatch[3];
+    // Discord rejects custom emojis the bot can't access (COMPONENT_INVALID_EMOJI),
+    // which breaks the whole select menu — fall back unless access is confirmed.
+    if (_client && !_client.emojis.cache.has(id)) return '📦';
     return {
       animated: customEmojiMatch[1] === 'a',
       name: customEmojiMatch[2],
-      id: customEmojiMatch[3]
+      id
     };
   }
   
-  // Check if it's just an emoji ID (numbers only)
+  // Check if it's just an emoji ID (numbers only) — only safe if the bot can access it
   if (/^\d+$/.test(emojiStr)) {
+    if (!_client || !_client.emojis.cache.has(emojiStr)) return '📦';
     return { id: emojiStr };
   }
   
@@ -70,6 +78,7 @@ module.exports = {
 
   async execute(interaction) {
     await interaction.deferReply();
+    _client = interaction.client;
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     const categoryFilter = interaction.options.getString('category');
