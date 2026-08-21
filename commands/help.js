@@ -653,11 +653,16 @@ const helpPages = {
       {
         name: '🏆 Prestige Tiers',
         value:
-          `🥉 **Bronze** — 100M total wealth\n` +
-          `🥈 **Silver** — 500M total wealth\n` +
-          `🥇 **Gold** — 1.5B total wealth\n` +
-          `💠 **Platinum** — 5B total wealth\n` +
-          `💎 **Diamond** — 150B total wealth`,
+          `<:BronzeStar:1486777990292570205> **Bronze** — 100M total wealth\n` +
+          `<:SilverStar:1486778060312281350> **Silver** — 500M total wealth\n` +
+          `<:GoldStar:1486778119162691825> **Gold** — 1.5B total wealth\n` +
+          `<:PlatinumStar:1486778158094221403> **Platinum** — 5B total wealth\n` +
+          `<:AmethystStar:1540413437333471344> **Amethyst** — 10B total wealth\n` +
+          `<:AquamarineStar:1540413438453620766> **Aquamarine** — 20B total wealth\n` +
+          `<:SapphireStar:1540413441305477160> **Sapphire** — 50B total wealth\n` +
+          `<:EmeraldStar:1540413439531417670> **Emerald** — 100B total wealth\n` +
+          `<:RubyStar:1540413440412094575> **Ruby** — 150B total wealth\n` +
+          `<:DiamondStar:1486778188024774866> **Diamond** — 200B total wealth`,
         inline: false
       },
       {
