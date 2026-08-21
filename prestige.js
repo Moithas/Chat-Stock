@@ -7,11 +7,16 @@ let db = null;
 
 // ============ TIER DEFINITIONS ============
 const PRESTIGE_TIERS = [
-  { level: 1, name: 'Bronze',   emoji: '<:BronzeStar:1486777990292570205>',   color: 0xCD7F32, cost: 100_000_000,       startingBonus: 25_000 },
-  { level: 2, name: 'Silver',   emoji: '<:SilverStar:1486778060312281350>',   color: 0xC0C0C0, cost: 500_000_000,       startingBonus: 50_000 },
-  { level: 3, name: 'Gold',     emoji: '<:GoldStar:1486778119162691825>',     color: 0xFFD700, cost: 1_500_000_000,     startingBonus: 100_000 },
-  { level: 4, name: 'Platinum', emoji: '<:PlatinumStar:1486778158094221403>', color: 0xE5E4E2, cost: 5_000_000_000,     startingBonus: 250_000 },
-  { level: 5, name: 'Diamond',  emoji: '<:DiamondStar:1486778188024774866>',  color: 0xB9F2FF, cost: 150_000_000_000,   startingBonus: 500_000 }
+  { level: 1,  name: 'Bronze',     emoji: '<:BronzeStar:1486777990292570205>',     color: 0xCD7F32, cost: 100_000_000,       startingBonus: 25_000 },
+  { level: 2,  name: 'Silver',     emoji: '<:SilverStar:1486778060312281350>',     color: 0xC0C0C0, cost: 500_000_000,       startingBonus: 50_000 },
+  { level: 3,  name: 'Gold',       emoji: '<:GoldStar:1486778119162691825>',       color: 0xFFD700, cost: 1_500_000_000,     startingBonus: 100_000 },
+  { level: 4,  name: 'Platinum',   emoji: '<:PlatinumStar:1486778158094221403>',   color: 0xE5E4E2, cost: 5_000_000_000,     startingBonus: 250_000 },
+  { level: 5,  name: 'Amethyst',   emoji: '<:AmethystStar:1540413437333471344>',   color: 0x9966CC, cost: 10_000_000_000,    startingBonus: 300_000 },
+  { level: 6,  name: 'Aquamarine', emoji: '<:AquamarineStar:1540413438453620766>', color: 0x7FFFD4, cost: 20_000_000_000,    startingBonus: 350_000 },
+  { level: 7,  name: 'Sapphire',   emoji: '<:SapphireStar:1540413441305477160>',   color: 0x0F52BA, cost: 50_000_000_000,    startingBonus: 400_000 },
+  { level: 8,  name: 'Emerald',    emoji: '<:EmeraldStar:1540413439531417670>',    color: 0x50C878, cost: 100_000_000_000,   startingBonus: 425_000 },
+  { level: 9,  name: 'Ruby',       emoji: '<:RubyStar:1540413440412094575>',       color: 0xE0115F, cost: 150_000_000_000,   startingBonus: 460_000 },
+  { level: 10, name: 'Diamond',    emoji: '<:DiamondStar:1486778188024774866>',    color: 0xB9F2FF, cost: 200_000_000_000,   startingBonus: 500_000 }
 ];
 
 const INCOME_MULTIPLIER_PER_TIER = 0.05;  // +5% per tier
