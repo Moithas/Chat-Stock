@@ -23,19 +23,44 @@ module.exports = {
     const guildId = interaction.guildId;
     const db = getDb();
 
-    // Get all users from database
-    const usersResult = db.exec('SELECT user_id, username FROM users');
-    
-    if (usersResult.length === 0 || usersResult[0].values.length === 0) {
+    // Gather candidate user_ids from every table that can hold a user's data or a
+    // leaderboard entry — not just `users` — so orphaned rows (users who left and no
+    // longer have a `users` row, e.g. fight/prestige leaderboard entries) are caught.
+    const usernameById = new Map();
+    const candidateIds = new Set();
+    const collectIds = (sql, params = []) => {
+      try {
+        const res = db.exec(sql, params);
+        if (res.length && res[0].values.length) {
+          for (const row of res[0].values) if (row[0] != null) candidateIds.add(String(row[0]));
+        }
+      } catch (e) { /* table may not exist */ }
+    };
+    try {
+      const usersResult = db.exec('SELECT user_id, username FROM users');
+      if (usersResult.length && usersResult[0].values.length) {
+        for (const [uid, uname] of usersResult[0].values) {
+          candidateIds.add(String(uid));
+          usernameById.set(String(uid), uname);
+        }
+      }
+    } catch (e) { /* users table missing */ }
+    collectIds('SELECT DISTINCT user_id FROM balances WHERE guild_id = ?', [guildId]);
+    collectIds('SELECT DISTINCT user_id FROM fighter_stats WHERE guild_id = ?', [guildId]);
+    collectIds('SELECT DISTINCT user_id FROM prestige WHERE guild_id = ?', [guildId]);
+    collectIds('SELECT DISTINCT user_id FROM dungeon_tracker WHERE guild_id = ?', [guildId]);
+    collectIds('SELECT DISTINCT owner_id FROM stocks');
+
+    if (candidateIds.size === 0) {
       return interaction.editReply({ content: '✅ No users found in database.' });
     }
 
-    const dbUsers = usersResult[0].values;
     const missingUsers = [];
     let keptCount = 0;
 
-    // Check each user - build list of missing users
-    for (const [userId, username] of dbUsers) {
+    // Check each candidate - build list of those no longer in the guild
+    for (const userId of candidateIds) {
+      const username = usernameById.get(userId) || userId;
       try {
         await interaction.guild.members.fetch(userId);
         keptCount++;
@@ -286,6 +311,45 @@ module.exports.handlePurgeButton = async function(interaction) {
       ['pets', 'DELETE FROM pets WHERE owner_id = ?', [userId]],
       // Clear gestation flag on any other player's pet that was gestating for this user
       ['pets (gestation cleanup)', "UPDATE pets SET gestating = 0, gestation_end = 0, gestating_for_user = NULL, gestating_male_id = NULL WHERE gestating_for_user = ?", [userId]],
+      // Fight leaderboard + history (were missing — departed users lingered on the fight leaderboard)
+      ['fighter_stats', 'DELETE FROM fighter_stats WHERE user_id = ?', [userId]],
+      ['fight_history', 'DELETE FROM fight_history WHERE fighter1_id = ? OR fighter2_id = ?', [userId, userId]],
+      ['fight_opponent_history', 'DELETE FROM fight_opponent_history WHERE user_id = ?', [userId]],
+      ['fight_spectator_bets', 'DELETE FROM fight_spectator_bets WHERE user_id = ?', [userId]],
+      // Prestige leaderboard (were missing — departed users lingered on the prestige leaderboard)
+      ['prestige', 'DELETE FROM prestige WHERE user_id = ?', [userId]],
+      ['prestige_history', 'DELETE FROM prestige_history WHERE user_id = ?', [userId]],
+      // Other per-user tables that were not being cleared
+      ['hunt_tracker', 'DELETE FROM hunt_tracker WHERE user_id = ?', [userId]],
+      ['hunt_history', 'DELETE FROM hunt_history WHERE user_id = ?', [userId]],
+      ['hack_tracker', 'DELETE FROM hack_tracker WHERE user_id = ?', [userId]],
+      ['hack_history', 'DELETE FROM hack_history WHERE hacker_id = ? OR target_id = ?', [userId, userId]],
+      ['hack_target_tracker', 'DELETE FROM hack_target_tracker WHERE target_id = ?', [userId]],
+      ['rob_target_tracker', 'DELETE FROM rob_target_tracker WHERE target_id = ?', [userId]],
+      ['rob_user_immunity', 'DELETE FROM rob_user_immunity WHERE user_id = ?', [userId]],
+      ['rob_immunity_history', 'DELETE FROM rob_immunity_history WHERE user_id = ?', [userId]],
+      ['rob_gift_protection', 'DELETE FROM rob_gift_protection WHERE giver_id = ? OR recipient_id = ?', [userId, userId]],
+      ['luckypenny_tracker', 'DELETE FROM luckypenny_tracker WHERE user_id = ?', [userId]],
+      ['inbetween_stats', 'DELETE FROM inbetween_stats WHERE user_id = ?', [userId]],
+      ['inbetween_history', 'DELETE FROM inbetween_history WHERE user_id = ?', [userId]],
+      ['letitride_stats', 'DELETE FROM letitride_stats WHERE user_id = ?', [userId]],
+      ['letitride_history', 'DELETE FROM letitride_history WHERE user_id = ?', [userId]],
+      ['threecardpoker_stats', 'DELETE FROM threecardpoker_stats WHERE user_id = ?', [userId]],
+      ['threecardpoker_history', 'DELETE FROM threecardpoker_history WHERE user_id = ?', [userId]],
+      ['syn_stats', 'DELETE FROM syn_stats WHERE user_id = ?', [userId]],
+      ['loan_credit_scores', 'DELETE FROM loan_credit_scores WHERE user_id = ?', [userId]],
+      ['property_upgrades', 'DELETE FROM property_upgrades WHERE user_id = ?', [userId]],
+      ['split_history', 'DELETE FROM split_history WHERE stock_user_id = ?', [userId]],
+      ['bump_history', 'DELETE FROM bump_history WHERE user_id = ?', [userId]],
+      ['wealth_tax_history', 'DELETE FROM wealth_tax_history WHERE user_id = ?', [userId]],
+      ['user_inventory', 'DELETE FROM user_inventory WHERE user_id = ?', [userId]],
+      ['active_effects', 'DELETE FROM active_effects WHERE user_id = ?', [userId]],
+      ['item_purchase_history', 'DELETE FROM item_purchase_history WHERE user_id = ?', [userId]],
+      ['item_fulfillment_requests', 'DELETE FROM item_fulfillment_requests WHERE user_id = ?', [userId]],
+      ['effect_use_cooldowns', 'DELETE FROM effect_use_cooldowns WHERE user_id = ?', [userId]],
+      ['item_use_cooldowns', 'DELETE FROM item_use_cooldowns WHERE user_id = ?', [userId]],
+      ['temporary_role_grants', 'DELETE FROM temporary_role_grants WHERE user_id = ?', [userId]],
+      ['error_log', 'DELETE FROM error_log WHERE user_id = ?', [userId]],
     ];
 
     for (const [label, sql, params] of deletes) {
