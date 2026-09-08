@@ -33,6 +33,10 @@ const PRICE_CHANGE_THRESHOLD = 10; // 10% change triggers alert
 // Dashboard update interval reference (so we can change it)
 let dashboardIntervalId = null;
 
+// Guards against overlapping async dashboard runs (setInterval fires on a fixed
+// schedule regardless of completion; overlap compounds CPU and starves the WS).
+let isUpdatingDashboard = false;
+
 // Initialize dashboard settings table
 function initDashboardSettings() {
   const db = getDb();
@@ -556,6 +560,10 @@ async function updateDashboard() {
   const channelId = dashboardChannelId || tickerChannelId;
   if (!channelId) return;
 
+  // Skip if a previous run is still in flight so runs can never overlap.
+  if (isUpdatingDashboard) return;
+  isUpdatingDashboard = true;
+
   try {
     const channel = await discordClient.channels.fetch(channelId);
     if (!channel) return;
@@ -616,6 +624,8 @@ async function updateDashboard() {
       return;
     }
     console.error('Error updating dashboard:', error);
+  } finally {
+    isUpdatingDashboard = false;
   }
 }
 
