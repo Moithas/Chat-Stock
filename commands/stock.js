@@ -57,17 +57,28 @@ function calculateActualCost(guildId, userId, price, shares) {
 
 // Calculate max affordable shares by verifying the estimate actually fits the budget
 function calculateMaxAffordableShares(guildId, userId, balance, price, feePercent, fixedFee) {
-  // Initial estimate using simple formula
-  let maxShares = Math.floor((balance - fixedFee) / (price * (1 + feePercent)));
-  
-  if (maxShares < 1) return 0;
-  
-  // Verify and adjust - the actual cost with rounding may exceed balance
-  while (maxShares > 0 && calculateActualCost(guildId, userId, price, maxShares) > balance) {
-    maxShares--;
+  // Can't afford even one share.
+  if (calculateActualCost(guildId, userId, price, 1) > balance) return 0;
+
+  // calculateActualCost is monotonically increasing in shares, so binary-search
+  // the largest count that fits the budget. A prior one-share-at-a-time decrement
+  // could loop millions of times on large balances and freeze the event loop.
+  let hi = Math.max(1, Math.floor((balance - fixedFee) / (price * (1 + feePercent))));
+  while (calculateActualCost(guildId, userId, price, hi) <= balance) {
+    hi *= 2;
   }
-  
-  return maxShares;
+
+  let lo = 1; // known affordable from the check above
+  while (lo < hi - 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (calculateActualCost(guildId, userId, price, mid) <= balance) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+
+  return lo;
 }
 
 // Build price breakdown string for buy/sell confirmations
