@@ -2055,11 +2055,18 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
   
-  // Periodically log price
+  // Periodically log price off the interaction critical path so the
+  // synchronous price calc + insert can't delay the 3-second ack.
   const userMessages = getUser(userId);
   if (userMessages && userMessages.total_messages % 10 === 0) {
-    const currentPrice = calculateStockPrice(userId, guildId);
-    logPrice(userId, currentPrice, Date.now());
+    setImmediate(() => {
+      try {
+        const currentPrice = calculateStockPrice(userId, guildId);
+        logPrice(userId, currentPrice, Date.now());
+      } catch (e) {
+        logError({ guildId, userId, command: 'price_log', error: e });
+      }
+    });
   }
 
   const command = client.commands.get(commandName);

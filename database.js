@@ -390,7 +390,7 @@ function logTransaction(buyerId, stockUserId, shares, price, type, timestamp) {
 function logPrice(userId, price, timestamp) {
   db.run('INSERT INTO price_history (user_id, price, timestamp) VALUES (?, ?, ?)', 
     [userId, price, timestamp]);
-  saveDatabase();
+  // WAL is checkpointed by the 60s saveDatabase() interval; no sync checkpoint here.
 }
 
 function getPriceHistory(userId) {

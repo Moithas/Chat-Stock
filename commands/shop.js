@@ -20,41 +20,51 @@ const ITEMS_PER_PAGE = 5;
 let _client = null;
 
 // Helper function to safely parse emoji for select menu options
-// Custom emojis like <:name:id> need to be converted to { id, name } format
+// Custom emojis like <:name:id> need to be converted to { id, name } format.
+// Discord rejects custom emoji objects without a valid name/id pair.
 function parseEmojiForSelect(emojiStr) {
-  if (!emojiStr) return '📦';
-  
-  // Check if it's a custom emoji like <:name:123456789> or <a:name:123456789>
-  const customEmojiMatch = emojiStr.match(/^<(a?):(\w+):(\d+)>$/);
+  if (!emojiStr || typeof emojiStr !== 'string') return '📦';
+
+  const normalized = emojiStr.trim();
+
+  // Custom emoji syntax: <:name:id> or <a:name:id>
+  const customEmojiMatch = normalized.match(/^<(a?):([A-Za-z0-9_]+):(\d+)>$/);
   if (customEmojiMatch) {
     const id = customEmojiMatch[3];
-    // Discord rejects custom emojis the bot can't access (COMPONENT_INVALID_EMOJI),
-    // which breaks the whole select menu — fall back unless access is confirmed.
-    if (_client && !_client.emojis.cache.has(id)) return '📦';
+    const name = customEmojiMatch[2];
+    const cachedEmoji = _client?.emojis?.cache?.get(id);
+
+    if (!cachedEmoji || cachedEmoji.id !== id) return '📦';
+
     return {
       animated: customEmojiMatch[1] === 'a',
-      name: customEmojiMatch[2],
+      name: cachedEmoji.name || name,
       id
     };
   }
-  
-  // Check if it's just an emoji ID (numbers only) — only safe if the bot can access it
-  if (/^\d+$/.test(emojiStr)) {
-    if (!_client || !_client.emojis.cache.has(emojiStr)) return '📦';
-    return { id: emojiStr };
+
+  // Numeric-only strings are commonly stored as raw emoji IDs; resolve them safely.
+  if (/^\d+$/.test(normalized)) {
+    const cachedEmoji = _client?.emojis?.cache?.get(normalized);
+    if (!cachedEmoji || !cachedEmoji.name) return '📦';
+
+    return {
+      animated: !!cachedEmoji.animated,
+      name: cachedEmoji.name,
+      id: cachedEmoji.id
+    };
   }
-  
-  // Check if it's an invalid shortcode like :name: (won't work in select menus)
-  if (/^:\w+:$/.test(emojiStr)) {
-    return '📦'; // Fall back to default
+
+  // Invalid shortcode like :name: will not work in select menu options.
+  if (/^:[A-Za-z0-9_]+:$/.test(normalized)) {
+    return '📦';
   }
-  
-  // Otherwise treat it as a unicode emoji or return default
-  if (emojiStr.length <= 8 && !emojiStr.includes(':')) {
-    return emojiStr;
+
+  // Unicode emoji should be used directly.
+  if (normalized.length <= 8 && !normalized.includes(':')) {
+    return normalized;
   }
-  
-  // Invalid format, return default
+
   return '📦';
 }
 
