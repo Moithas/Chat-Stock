@@ -303,8 +303,15 @@ function executePrestige(guildId, userId, totalWealth) {
   db.run('DELETE FROM role_income_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   db.run('DELETE FROM card_cooldowns WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
 
-  // 7. Reset skills XP
-  db.run('UPDATE user_skills SET hack_xp = 0, rob_xp = 0 WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+  // 7. Reset skills XP and clear any in-flight/completed training state so a
+  //    stale pre-prestige training can't complete later or block retraining.
+  db.run(`UPDATE user_skills SET
+      hack_xp = 0, rob_xp = 0,
+      hack_training_start = NULL, hack_training_end = NULL, hack_training_xp = 0,
+      hack_trained_at_level = -1, hack_training_started_at_level = -1,
+      rob_training_start = NULL, rob_training_end = NULL, rob_training_xp = 0,
+      rob_trained_at_level = -1, rob_training_started_at_level = -1
+    WHERE guild_id = ? AND user_id = ?`, [guildId, userId]);
 
   // 8. Reset infamy (clean slate — drops tier, peak, decay/reduced history, probation, and active bounties)
   db.run('DELETE FROM infamy_tracker WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
