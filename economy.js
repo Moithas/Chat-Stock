@@ -384,6 +384,39 @@ function getPlayerCreatedAt(guildId, userId) {
   return result[0].values[0][0] || 0;
 }
 
+// Get when a player forfeited their new-player immunity (0 = not forfeited)
+function getImmunityWaivedAt(guildId, userId) {
+  const db = getDb();
+  const result = db.exec(
+    'SELECT immunity_waived_at FROM balances WHERE guild_id = ? AND user_id = ?',
+    [guildId, userId]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return 0;
+  return result[0].values[0][0] || 0;
+}
+
+// Determine whether a player still has new-player hack/rob immunity.
+// Immunity is computed from created_at + the configured window, and is voided
+// once the player forfeits it (by initiating a hack or rob).
+function isNewPlayerImmune(guildId, userId, immunityDays) {
+  if (!immunityDays || immunityDays <= 0) return { immune: false, immunityEnds: 0 };
+  const createdAt = getPlayerCreatedAt(guildId, userId);
+  if (!createdAt || createdAt <= 0) return { immune: false, immunityEnds: 0 };
+  if (getImmunityWaivedAt(guildId, userId) > 0) return { immune: false, immunityEnds: 0 };
+  const immunityEnds = createdAt + immunityDays * 24 * 60 * 60 * 1000;
+  return { immune: Date.now() < immunityEnds, immunityEnds };
+}
+
+// Permanently forfeit a player's new-player immunity (first forfeit wins).
+function waiveNewPlayerImmunity(guildId, userId) {
+  const db = getDb();
+  ensureBalance(guildId, userId);
+  db.run(
+    'UPDATE balances SET immunity_waived_at = ? WHERE guild_id = ? AND user_id = ? AND (immunity_waived_at IS NULL OR immunity_waived_at = 0)',
+    [Date.now(), guildId, userId]
+  );
+}
+
 // Atomic transfer between two users (for rob, hack, fight, give)
 // Deducts from source and credits to target in a single transaction
 async function atomicTransfer(guildId, fromUserId, toUserId, amount, fromType = 'cash', toType = 'cash', reason = 'Transfer') {
@@ -446,6 +479,9 @@ module.exports = {
   getAllBalances,
   applyFine,
   getPlayerCreatedAt,
+  getImmunityWaivedAt,
+  isNewPlayerImmune,
+  waiveNewPlayerImmunity,
   atomicTransfer,
   MAX_ECONOMY_VALUE
 };

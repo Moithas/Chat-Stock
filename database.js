@@ -172,6 +172,9 @@ async function initDatabase() {
   // Migration: add created_at column to balances for new player immunity tracking
   migrateAddColumn(db, 'balances', 'created_at INTEGER DEFAULT 0');
 
+  // Migration: track when a player forfeited their new-player immunity (0 = still immune-eligible)
+  migrateAddColumn(db, 'balances', 'immunity_waived_at INTEGER DEFAULT 0');
+
   db.run(`
     CREATE TABLE IF NOT EXISTS economy_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

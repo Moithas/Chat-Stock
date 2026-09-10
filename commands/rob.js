@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getBalance, removeMoney, forceRemoveMoney, addMoney, applyFine, getPlayerCreatedAt } = require('../economy');
+const { getBalance, removeMoney, forceRemoveMoney, addMoney, applyFine, getPlayerCreatedAt, isNewPlayerImmune } = require('../economy');
 const { getRobSettings, canRob, canBeRobbed, canRobTarget, recordTargetRobbed, recordGiftProtection, checkGiftProtection, calculateSuccessRate, attemptRob, calculateStolenAmount, calculateFine, recordRob, isUserImmune, hasActiveImmunity } = require('../rob');
 const { getRobBonuses, addXp, checkTrainingComplete } = require('../skills');
 const { hasActiveEffect, getEffectValue, EFFECT_TYPES } = require('../items');
@@ -224,6 +224,19 @@ module.exports = {
     const targetUser = interaction.options.getUser('target');
     const targetId = targetUser.id;
 
+    // Forfeit-immunity gate: if the initiator still has new-player immunity, warn
+    // them (ephemerally) that attacking gives it up. No rob side effects happen
+    // until they confirm and re-run the command.
+    if (robberId !== targetId && !targetUser.bot && getRobSettings(guildId).enabled) {
+      const adminSettings = getAdminSettings(guildId);
+      const mine = isNewPlayerImmune(guildId, robberId, adminSettings.newPlayerImmunityDays);
+      if (mine.immune) {
+        const { promptImmunityForfeit } = require('../newPlayerImmunity');
+        await promptImmunityForfeit(interaction, 'rob', guildId, robberId, mine.immunityEnds);
+        return;
+      }
+    }
+
     // Check if trying to rob self
     if (robberId === targetId) {
       return interaction.reply({
@@ -258,19 +271,13 @@ module.exports = {
       }
     }
     
-    // Check new player immunity
+    // Check new player immunity (waived once the target has initiated an attack)
     const adminSettings = getAdminSettings(guildId);
-    if (adminSettings.newPlayerImmunityDays > 0) {
-      const targetCreatedAt = getPlayerCreatedAt(guildId, targetId);
-      if (targetCreatedAt > 0) {
-        const immunityMs = adminSettings.newPlayerImmunityDays * 24 * 60 * 60 * 1000;
-        const immunityEnds = targetCreatedAt + immunityMs;
-        if (Date.now() < immunityEnds) {
-          return interaction.reply({
-            content: `❌ **${targetUser.username}** is a new player and has rob immunity until <t:${Math.floor(immunityEnds / 1000)}:R>.`
-          });
-        }
-      }
+    const targetImmunity = isNewPlayerImmune(guildId, targetId, adminSettings.newPlayerImmunityDays);
+    if (targetImmunity.immune) {
+      return interaction.reply({
+        content: `❌ **${targetUser.username}** is a new player and has rob immunity until <t:${Math.floor(targetImmunity.immunityEnds / 1000)}:R>.`
+      });
     }
 
     // Check if target has purchased immunity

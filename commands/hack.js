@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getBalance, removeFromBank, addMoney, applyFine, getPlayerCreatedAt } = require('../economy');
+const { getBalance, removeFromBank, addMoney, applyFine, getPlayerCreatedAt, isNewPlayerImmune } = require('../economy');
 const { 
   getHackSettings, 
   canHack, 
@@ -172,11 +172,25 @@ module.exports = {
     ),
   
   async execute(interaction) {
-    await interaction.deferReply();
     const guildId = interaction.guildId;
     const hackerId = interaction.user.id;
     const targetUser = interaction.options.getUser('target');
     const targetId = targetUser.id;
+
+    // Forfeit-immunity gate: if the initiator still has new-player immunity, warn
+    // them (ephemerally) that attacking gives it up. Runs before deferReply so the
+    // warning can be ephemeral and no hack side effects occur until they re-run.
+    if (hackerId !== targetId && !targetUser.bot && getHackSettings(guildId).enabled) {
+      const adminSettings = getAdminSettings(guildId);
+      const mine = isNewPlayerImmune(guildId, hackerId, adminSettings.newPlayerImmunityDays);
+      if (mine.immune) {
+        const { promptImmunityForfeit } = require('../newPlayerImmunity');
+        await promptImmunityForfeit(interaction, 'hack', guildId, hackerId, mine.immunityEnds);
+        return;
+      }
+    }
+
+    await interaction.deferReply();
 
     // Check if trying to hack self
     if (hackerId === targetId) {
@@ -213,19 +227,13 @@ module.exports = {
       }
     }
 
-    // Check new player immunity
+    // Check new player immunity (waived once the target has initiated an attack)
     const adminSettings = getAdminSettings(guildId);
-    if (adminSettings.newPlayerImmunityDays > 0) {
-      const targetCreatedAt = getPlayerCreatedAt(guildId, targetId);
-      if (targetCreatedAt > 0) {
-        const immunityMs = adminSettings.newPlayerImmunityDays * 24 * 60 * 60 * 1000;
-        const immunityEnds = targetCreatedAt + immunityMs;
-        if (Date.now() < immunityEnds) {
-          return interaction.editReply({
-            content: `❌ **${targetUser.username}** is a new player and has hack immunity until <t:${Math.floor(immunityEnds / 1000)}:R>.`
-          });
-        }
-      }
+    const targetImmunity = isNewPlayerImmune(guildId, targetId, adminSettings.newPlayerImmunityDays);
+    if (targetImmunity.immune) {
+      return interaction.editReply({
+        content: `❌ **${targetUser.username}** is a new player and has hack immunity until <t:${Math.floor(targetImmunity.immunityEnds / 1000)}:R>.`
+      });
     }
     
     // Check if target has item-based hack protection (100% = full immunity)
