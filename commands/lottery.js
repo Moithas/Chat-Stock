@@ -7,7 +7,7 @@ const {
   getAllTickets,
   drawLottery,
   getRecentWinners,
-  formatLotteryWinners,
+  buildLotteryWinnerFields,
   getGamblingSettings,
   getLotteryTicketPrice
 } = require('../gambling');
@@ -271,11 +271,7 @@ async function handleDraw(interaction, guildId, userId) {
     });
   }
 
-  if (winners.length > 0) {
-    embed.addFields({ name: '🏅 Winners', value: formatLotteryWinners(winners, getCurrency(guildId)) });
-  } else {
-    embed.addFields({ name: '😢 No Winners', value: 'No one matched 2 or more numbers this draw.' });
-  }
+  embed.addFields(...buildLotteryWinnerFields(winners, getCurrency(guildId)));
 
   // Show new jackpot
   const newInfo = getLotteryInfo(guildId);

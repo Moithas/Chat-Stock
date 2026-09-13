@@ -8,7 +8,7 @@ const { initAdmin, getCurrency } = require('./admin');
 const { initMarketProtection } = require('./market');
 const { initProperty, scheduleCardDistribution } = require('./property');
 const { initEvents, handleMessage: handleEventMessage } = require('./events');
-const { initGambling, getGamblingSettings, getAllTickets, drawLottery, getLotteryInfo, formatLotteryWinners, cleanupStaleBlackjackGames } = require('./gambling');
+const { initGambling, getGamblingSettings, getAllTickets, drawLottery, getLotteryInfo, buildLotteryWinnerFields, cleanupStaleBlackjackGames } = require('./gambling');
 const { initDividends, startDividendScheduler } = require('./dividends');
 const { initWork } = require('./work');
 const { initCrime } = require('./crime');
@@ -135,11 +135,7 @@ function startLotteryScheduler(client) {
                   });
                 }
 
-                if (winners.length > 0) {
-                  embed.addFields({ name: '🏅 Winners', value: formatLotteryWinners(winners, getCurrency(guild.id)) });
-                } else {
-                  embed.addFields({ name: '😢 No Winners', value: 'No one matched 2 or more numbers this draw.' });
-                }
+                embed.addFields(...buildLotteryWinnerFields(winners, getCurrency(guild.id)));
 
                 const newInfo = getLotteryInfo(guild.id);
                 embed.addFields({ name: '💰 New Jackpot', value: `**${newInfo.jackpot.toLocaleString()}** ${getCurrency(guild.id)}` });
