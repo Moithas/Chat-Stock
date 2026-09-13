@@ -7,6 +7,7 @@ const {
   getAllTickets,
   drawLottery,
   getRecentWinners,
+  formatLotteryWinners,
   getGamblingSettings,
   getLotteryTicketPrice
 } = require('../gambling');
@@ -271,24 +272,7 @@ async function handleDraw(interaction, guildId, userId) {
   }
 
   if (winners.length > 0) {
-    // Group winners by matches
-    const by4 = winners.filter(w => w.matches === 4);
-    const by3 = winners.filter(w => w.matches === 3);
-    const by2 = winners.filter(w => w.matches === 2);
-
-    let winnerText = '';
-    
-    if (by4.length > 0) {
-      winnerText += `**🏆 4 Matches (JACKPOT):**\n${by4.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${getCurrency(guildId)}`).join('\n')}\n\n`;
-    }
-    if (by3.length > 0) {
-      winnerText += `**🥈 3 Matches:**\n${by3.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${getCurrency(guildId)}`).join('\n')}\n\n`;
-    }
-    if (by2.length > 0) {
-      winnerText += `**🥉 2 Matches:**\n${by2.map(w => `<@${w.userId}>: ${w.numbers.join('-')} → **${w.prize.toLocaleString()}** ${getCurrency(guildId)}`).join('\n')}`;
-    }
-
-    embed.addFields({ name: '🏅 Winners', value: winnerText || 'None' });
+    embed.addFields({ name: '🏅 Winners', value: formatLotteryWinners(winners, getCurrency(guildId)) });
   } else {
     embed.addFields({ name: '😢 No Winners', value: 'No one matched 2 or more numbers this draw.' });
   }

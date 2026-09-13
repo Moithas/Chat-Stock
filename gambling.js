@@ -1577,6 +1577,41 @@ function resetScratchCardSettings(guildId, cardType) {
   db.run('DELETE FROM scratch_card_settings WHERE guild_id = ? AND card_type = ?', [guildId, cardType]);
 }
 
+// Build a Discord-safe winners field value (embed field values cap at 1024 chars).
+// Groups by match tier and truncates with an "…and N more" summary if needed.
+function formatLotteryWinners(winners, currency) {
+  if (!winners || winners.length === 0) return 'None';
+  const MAX = 1024;
+  const tiers = [
+    { m: 4, label: '\uD83C\uDFC6 4 Matches (JACKPOT)' },
+    { m: 3, label: '\uD83E\uDD48 3 Matches' },
+    { m: 2, label: '\uD83E\uDD49 2 Matches' }
+  ];
+  let text = '';
+  let omitted = 0;
+  for (const tier of tiers) {
+    const group = winners.filter(w => w.matches === tier.m);
+    if (group.length === 0) continue;
+    const header = `**${tier.label}:**\n`;
+    if (text.length + header.length > MAX - 40) { omitted += group.length; continue; }
+    let block = header;
+    for (const w of group) {
+      const nums = Array.isArray(w.numbers) ? w.numbers.join('-') : '';
+      const line = `<@${w.userId}>: ${nums} \u2192 **${(w.prize || 0).toLocaleString()}** ${currency}\n`;
+      if (text.length + block.length + line.length > MAX - 40) { omitted++; continue; }
+      block += line;
+    }
+    text += block + '\n';
+  }
+  text = text.trimEnd();
+  if (omitted > 0) {
+    const summary = `\n\u2026and ${omitted} more winner${omitted === 1 ? '' : 's'}`;
+    if (text.length + summary.length <= MAX) text += summary;
+  }
+  if (text.length > MAX) text = text.slice(0, MAX - 1) + '\u2026';
+  return text || 'None';
+}
+
 module.exports = {
   initGambling,
   // Blackjack
@@ -1632,6 +1667,7 @@ module.exports = {
   drawLottery,
   setJackpot,
   getRecentWinners,
+  formatLotteryWinners,
   LOTTERY_TICKET_PRICE,
   getLotteryTicketPrice,
   LOTTERY_PRIZES,
