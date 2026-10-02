@@ -10,6 +10,7 @@ module.exports = {
     restart_delay: 3000,          // 3s between crash restarts
     max_restarts: 10,             // Max 10 restarts in window
     min_uptime: 10000,            // Must run 10s to count as stable
+    cron_restart: '0 4 * * *',    // Nightly restart at 4 AM to avoid stale gateway sessions
     env: {
       NODE_ENV: 'production'
     }
