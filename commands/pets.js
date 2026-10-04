@@ -8,7 +8,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const {
   getSettings, SPECIES, SHOP_SPECIES, RARITIES, PHASES, FOOD_TYPES,
   getShopStock, getShopRestockTime, removeShopSlot,
-  adoptPet, getPet, getUserPets, getUserPetCount, deletePet, renamePet,
+  adoptPet, getPet, getUserPets, reorderPet, getUserPetCount, deletePet, renamePet,
   getEffectiveStats, processDecay, calculateFoodCost, feedPet,
   // Runaway recovery
   getRunawayPets, getRunawayPet, getRunawayRecoveryCount, getRunawayRecoveryCost,
@@ -112,6 +112,10 @@ module.exports = {
     // Route buttons
     if (customId.startsWith('pet_recover_')) return handleRecoverRunaway(interaction, guildId, userId, settings);
 
+    if (customId.startsWith('pet_reorder_up_')) return handleReorderMove(interaction, guildId, userId, settings, 'up');
+    if (customId.startsWith('pet_reorder_down_')) return handleReorderMove(interaction, guildId, userId, settings, 'down');
+    if (customId.startsWith('pet_reorder_')) return showReorderPanel(interaction, guildId, userId, settings);
+
     if (customId.startsWith('pet_panel_')) {
       const action = customId.split('pet_panel_')[1];
       if (action === 'main' || action.startsWith('main_u_')) return showMainPanel(interaction, guildId, userId, settings, true);
@@ -187,6 +191,7 @@ module.exports = {
     const settings = getSettings(guildId);
 
     if (customId.startsWith('pet_select_view_')) return handleSelectPet(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_reorder_pick_')) return handleReorderPick(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_shop_select_')) return handleShopSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_select_')) return handleBreedSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_partner_select_')) return handleBreedPartnerSelect(interaction, guildId, userId, settings);
@@ -731,11 +736,71 @@ async function showMyPetsPanel(interaction, guildId, userId, settings) {
   const components = [
     new ActionRowBuilder().addComponents(select),
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`pet_reorder_u_${userId}`).setLabel('Reorder').setEmoji('🔀').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
     ),
   ];
 
   return interaction.update({ embeds: [embed], components });
+}
+
+// ================== REORDER PETS ==================
+
+async function showReorderPanel(interaction, guildId, userId, settings, selectedPetId = null) {
+  const pets = getUserPets(guildId, userId);
+  if (pets.length < 2) {
+    return showMyPetsPanel(interaction, guildId, userId, settings);
+  }
+
+  let selId = selectedPetId;
+  if (selId == null || !pets.some(p => p.id === selId)) selId = pets[0].id;
+  const selIndex = pets.findIndex(p => p.id === selId);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x3498DB)
+    .setTitle('🔀 Reorder Pets')
+    .setDescription('Pick a pet, then use ⬆️ / ⬇️ to move it. This order is used everywhere your pets are listed.')
+    .addFields({
+      name: 'Current Order',
+      value: pets.map((p, i) => `**${i + 1}.** ${p.id === selId ? `➡️ **${p.name}**` : p.name}`).join('\n')
+    });
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`pet_reorder_pick_u_${userId}`)
+    .setPlaceholder('Select a pet to move...')
+    .addOptions(pets.map((p, i) => ({
+      label: `${p.name} — Lv.${p.level}`,
+      description: `Position ${i + 1}`,
+      value: `${p.id}`,
+      emoji: SPECIES[p.species]?.emoji,
+      default: p.id === selId
+    })));
+
+  const moveRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_reorder_up_${selId}_u_${userId}`).setLabel('Move Up').setEmoji('⬆️').setStyle(ButtonStyle.Primary).setDisabled(selIndex === 0),
+    new ButtonBuilder().setCustomId(`pet_reorder_down_${selId}_u_${userId}`).setLabel('Move Down').setEmoji('⬇️').setStyle(ButtonStyle.Primary).setDisabled(selIndex === pets.length - 1),
+  );
+
+  const backRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pet_panel_mypets_u_${userId}`).setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success),
+  );
+
+  return interaction.update({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select), moveRow, backRow] });
+}
+
+async function handleReorderPick(interaction, guildId, userId, settings) {
+  const petId = parseInt(interaction.values[0]);
+  return showReorderPanel(interaction, guildId, userId, settings, petId);
+}
+
+async function handleReorderMove(interaction, guildId, userId, settings, direction) {
+  const petId = parseInt(interaction.customId.split('_')[3]);
+  const pet = getPet(petId);
+  if (!pet || pet.owner_id !== userId || pet.guild_id !== guildId) {
+    return showReorderPanel(interaction, guildId, userId, settings);
+  }
+  reorderPet(guildId, userId, petId, direction);
+  return showReorderPanel(interaction, guildId, userId, settings, petId);
 }
 
 async function handleSelectPet(interaction, guildId, userId, settings) {

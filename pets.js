@@ -505,6 +505,8 @@ function initPets(database) {
   migrateAddColumn(db, 'pets', 'bond_streak INTEGER DEFAULT 0');
   migrateAddColumn(db, 'pets', 'last_care_day INTEGER DEFAULT 0');
   migrateAddColumn(db, 'pets', 'variant INTEGER DEFAULT 1');
+  // Migration: user-defined display order for a player's pet roster (0 = legacy/unordered)
+  migrateAddColumn(db, 'pets', 'sort_order INTEGER DEFAULT 0');
   migrateAddColumn(db, 'pet_settings', 'kennel_prices TEXT');
 
   // Migration: add breeding columns
@@ -843,6 +845,8 @@ function adoptPet(guildId, userId, species, name, rarity, sex, shiny, source = '
     pet.is_active = 1;
   }
 
+  if (pet) assignPetSortOrder(guildId, userId, pet.id);
+
   saveDatabase();
   return pet;
 }
@@ -861,7 +865,7 @@ function getPet(petId) {
 
 function getUserPets(guildId, userId) {
   if (!db) return [];
-  const stmt = db.prepare('SELECT * FROM pets WHERE guild_id = ? AND owner_id = ? ORDER BY id');
+  const stmt = db.prepare('SELECT * FROM pets WHERE guild_id = ? AND owner_id = ? ORDER BY sort_order, id');
   stmt.bind([guildId, userId]);
   const pets = [];
   while (stmt.step()) {
@@ -869,6 +873,34 @@ function getUserPets(guildId, userId) {
   }
   stmt.free();
   return pets;
+}
+
+// Place a newly created pet at the bottom of its owner's roster.
+function assignPetSortOrder(guildId, ownerId, petId) {
+  if (!db) return;
+  const stmt = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM pets WHERE guild_id = ? AND owner_id = ? AND id != ?');
+  stmt.bind([guildId, ownerId, petId]);
+  let next = 1;
+  if (stmt.step()) next = stmt.getAsObject().next;
+  stmt.free();
+  db.run('UPDATE pets SET sort_order = ? WHERE id = ?', [next, petId]);
+}
+
+// Move a pet one slot up/down in its owner's list. Normalizes sort_order to a
+// stable 1..N sequence (clearing legacy 0s) then swaps with the neighbor.
+function reorderPet(guildId, userId, petId, direction) {
+  if (!db) return false;
+  const pets = getUserPets(guildId, userId);
+  const idx = pets.findIndex(p => p.id === petId);
+  if (idx === -1) return false;
+  const swapWith = direction === 'up' ? idx - 1 : idx + 1;
+  if (swapWith < 0 || swapWith >= pets.length) return false;
+  [pets[idx], pets[swapWith]] = [pets[swapWith], pets[idx]];
+  for (let i = 0; i < pets.length; i++) {
+    db.run('UPDATE pets SET sort_order = ? WHERE id = ?', [i + 1, pets[i].id]);
+  }
+  saveDatabase();
+  return true;
 }
 
 function getUserPetCount(guildId, userId) {
@@ -1093,6 +1125,8 @@ function recoverRunaway(runawayId) {
   let newPet = null;
   if (stmt.step()) newPet = stmt.getAsObject();
   stmt.free();
+
+  if (newPet) assignPetSortOrder(p.guild_id, p.owner_id, newPet.id);
 
   // Remove the runaway entry
   db.run('DELETE FROM pet_runaways WHERE id = ?', [runawayId]);
@@ -2412,6 +2446,7 @@ module.exports = {
   adoptPet,
   getPet,
   getUserPets,
+  reorderPet,
   getUserPetCount,
   deletePet,
   renamePet,
