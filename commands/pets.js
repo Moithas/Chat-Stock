@@ -144,6 +144,7 @@ module.exports = {
     // Egg buttons
     if (customId.startsWith('pet_egg_shop_')) return showEggShopPanel(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_egg_buy_')) return handleEggBuy(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_egg_warmall_')) return handleEggWarmAll(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_egg_warm_')) return handleEggWarm(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_egg_hatch_')) return handleEggHatch(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_egg_name_')) return handleEggNameButton(interaction, guildId, userId, settings);
@@ -192,6 +193,7 @@ module.exports = {
 
     if (customId.startsWith('pet_select_view_')) return handleSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_reorder_pick_')) return handleReorderPick(interaction, guildId, userId, settings);
+    if (customId.startsWith('pet_egg_select_')) return handleEggSelect(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_shop_select_')) return handleShopSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_select_')) return handleBreedSelectPet(interaction, guildId, userId, settings);
     if (customId.startsWith('pet_breed_partner_select_')) return handleBreedPartnerSelect(interaction, guildId, userId, settings);
@@ -1987,35 +1989,65 @@ async function showMyEggsPanel(interaction, guildId, userId, settings, focusEggI
   }
   embed.setDescription(desc);
 
-  // Build action buttons for each egg (max 5 per row, max 5 rows)
-  const components = [];
-  for (const egg of eggs) {
-    const eggData = EGG_TYPES[egg.egg_type];
-    const ready = now >= egg.hatch_time;
-    const warmCooldownDone = !egg.last_warm_time || (now - egg.last_warm_time) >= 3 * 3600000;
+  // Focused egg (just-warmed, or first in list)
+  const focusEgg = (focusEggId && eggs.find(e => e.id === focusEggId)) || eggs[0];
 
-    const row = new ActionRowBuilder();
-    if (ready) {
-      row.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`pet_egg_hatch_${egg.id}_u_${userId}`)
-          .setLabel(`Hatch ${eggData.name}`)
-          .setEmoji('🐣')
-          .setStyle(ButtonStyle.Success),
-      );
-    } else {
-      row.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`pet_egg_warm_${egg.id}_u_${userId}`)
-          .setLabel(`Warm (${eggData.warmCost.toLocaleString()} ${currency.replace(/<:[^:]+:\d+>/g, '').trim() || 'coins'})`)
-          .setEmoji('🌡️')
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(!warmCooldownDone),
-      );
-    }
-    components.push(row);
-    if (components.length >= 4) break; // Reserve last row for navigation
+  const components = [];
+
+  // Egg selector — scales to Discord's 25-option limit (fixes >4 eggs being hidden)
+  components.push(new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`pet_egg_select_u_${userId}`)
+      .setPlaceholder('Select an egg to warm or hatch...')
+      .addOptions(eggs.slice(0, 25).map(egg => {
+        const ed = EGG_TYPES[egg.egg_type];
+        const rdy = now >= egg.hatch_time;
+        const warmReady = !egg.last_warm_time || (now - egg.last_warm_time) >= 3 * 3600000;
+        return {
+          label: `${ed.name} (ID: ${egg.id})`,
+          description: rdy ? '✅ Ready to hatch' : (warmReady ? '🌡️ Ready to warm' : '⏳ Warming…'),
+          value: `${egg.id}`,
+          emoji: ed.emoji,
+          default: egg.id === focusEgg.id,
+        };
+      }))
+  ));
+
+  // Action buttons for the focused egg (+ Warm All when multiple are ready)
+  const focusData = EGG_TYPES[focusEgg.egg_type];
+  const focusReady = now >= focusEgg.hatch_time;
+  const focusWarmReady = !focusEgg.last_warm_time || (now - focusEgg.last_warm_time) >= 3 * 3600000;
+  const warmEligible = eggs.filter(e => now < e.hatch_time && (!e.last_warm_time || (now - e.last_warm_time) >= 3 * 3600000));
+
+  const actionRow = new ActionRowBuilder();
+  if (focusReady) {
+    actionRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`pet_egg_hatch_${focusEgg.id}_u_${userId}`)
+        .setLabel(`Hatch ${focusData.name}`)
+        .setEmoji('🐣')
+        .setStyle(ButtonStyle.Success),
+    );
+  } else {
+    actionRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`pet_egg_warm_${focusEgg.id}_u_${userId}`)
+        .setLabel(`Warm ${focusData.name} (${focusData.warmCost.toLocaleString()} ${currency.replace(/<:[^:]+:\d+>/g, '').trim() || 'coins'})`)
+        .setEmoji('🌡️')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!focusWarmReady),
+    );
   }
+  if (warmEligible.length > 1) {
+    actionRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`pet_egg_warmall_u_${userId}`)
+        .setLabel(`Warm All Ready (${warmEligible.length})`)
+        .setEmoji('🔥')
+        .setStyle(ButtonStyle.Secondary),
+    );
+  }
+  components.push(actionRow);
 
   const navRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`pet_egg_shop_u_${userId}`).setLabel('Egg Shop').setEmoji('🥚').setStyle(ButtonStyle.Success),
@@ -2025,9 +2057,8 @@ async function showMyEggsPanel(interaction, guildId, userId, settings, focusEggI
 
   // Attach egg image based on focused egg (just warmed) or first egg
   let files = [];
-  const displayEgg = (focusEggId && eggs.find(e => e.id === focusEggId)) || eggs[0];
-  const stage = getEggImageStage(displayEgg);
-  const eggImage = getEggImagePath(displayEgg.egg_type, stage);
+  const stage = getEggImageStage(focusEgg);
+  const eggImage = getEggImagePath(focusEgg.egg_type, stage);
   if (eggImage) {
     const attachment = new AttachmentBuilder(eggImage.filePath, { name: eggImage.fileName });
     embed.setImage(`attachment://${eggImage.fileName}`);
@@ -2077,6 +2108,38 @@ async function handleEggWarm(interaction, guildId, userId, settings) {
 
   // Refresh the eggs panel
   return showMyEggsPanel(interaction, guildId, userId, settings, eggId);
+}
+
+async function handleEggSelect(interaction, guildId, userId, settings) {
+  const eggId = parseInt(interaction.values[0]);
+  return showMyEggsPanel(interaction, guildId, userId, settings, eggId);
+}
+
+async function handleEggWarmAll(interaction, guildId, userId, settings) {
+  const eggs = getUserEggs(guildId, userId);
+  const now = Date.now();
+  const balance = await getBalance(guildId, userId);
+  let budget = balance.total;
+  let warmed = 0;
+
+  for (const egg of eggs) {
+    if (now >= egg.hatch_time) continue; // ready to hatch, not warm
+    const warmReady = !egg.last_warm_time || (now - egg.last_warm_time) >= 3 * 3600000;
+    if (!warmReady) continue;
+    const eggData = EGG_TYPES[egg.egg_type];
+    if (budget < eggData.warmCost) continue;
+    const result = warmEgg(guildId, userId, egg.id);
+    if (result.success) {
+      await removeFromTotal(guildId, userId, result.cost, `Warmed ${eggData.name}`);
+      budget -= result.cost;
+      warmed++;
+    }
+  }
+
+  if (warmed === 0) {
+    return interaction.reply({ content: '❌ No eggs were ready to warm (check cooldowns and your balance).', flags: 64 });
+  }
+  return showMyEggsPanel(interaction, guildId, userId, settings);
 }
 
 // ================== EGG HATCH ==================
