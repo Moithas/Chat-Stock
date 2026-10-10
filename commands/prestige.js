@@ -1,6 +1,7 @@
 // /prestige command — View prestige status, perks, and prestige up
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getBalance } = require('../economy');
+const { getUserActiveBonds } = require('../bank');
 const { getPortfolio, calculateStockPrice } = require('../database');
 const { getTotalPropertyValue } = require('../property');
 const { getCurrency } = require('../admin');
@@ -240,6 +241,13 @@ async function handlePrestigeConfirm(interaction, guildId, userId) {
     });
   }
 
+  // Capture bond roles BEFORE prestige clears the bond rows — prestige deletes
+  // the active_bonds records but can't remove the Discord roles from the DB layer.
+  let bondRoleIds = [];
+  try {
+    bondRoleIds = getUserActiveBonds(guildId, userId).map(b => b.role_id).filter(Boolean);
+  } catch (e) { /* non-fatal */ }
+
   // Execute the prestige
   const result = executePrestige(guildId, userId, totalWealth);
 
@@ -249,6 +257,16 @@ async function handlePrestigeConfirm(interaction, guildId, userId) {
       embeds: [],
       components: []
     });
+  }
+
+  // Strip any leftover bond roles so a bond can't persist past prestige.
+  if (bondRoleIds.length > 0 && interaction.guild) {
+    const member = await interaction.guild.members.fetch(userId).catch(() => null);
+    if (member) {
+      for (const roleId of bondRoleIds) {
+        await member.roles.remove(roleId).catch(() => {});
+      }
+    }
   }
 
   const tier = result.tier;
