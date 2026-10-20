@@ -47,7 +47,7 @@ function getPetDiscount(guildId, userId) {
   // Single-use coupon
   const couponValue = getItemEffectValue(guildId, userId, EFFECT_TYPES.PET_DISCOUNT);
   if (couponValue > 0) discount += couponValue;
-  return Math.min(discount, 15); // Cap at 15% off
+  return Math.min(discount, 30); // Cap at 30% off (matches max Lucky Penny buff)
 }
 
 // Apply discount and consume coupon if used
