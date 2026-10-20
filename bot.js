@@ -2122,6 +2122,21 @@ healthServer.listen(HEALTH_PORT, '127.0.0.1', () => {
   log.info(`Health check listening on 127.0.0.1:${HEALTH_PORT}/health`);
 });
 
+// Temporary: event-loop lag monitor to diagnose interaction response latency.
+try {
+  const { monitorEventLoopDelay } = require('perf_hooks');
+  const __eld = monitorEventLoopDelay({ resolution: 20 });
+  __eld.enable();
+  setInterval(() => {
+    const max = __eld.max / 1e6;
+    const p99 = __eld.percentile(99) / 1e6;
+    const mean = __eld.mean / 1e6;
+    if (max > 200) log.info(`[LoopLag] mean=${mean.toFixed(1)}ms p99=${p99.toFixed(1)}ms max=${max.toFixed(0)}ms (30s window)`);
+    __eld.reset();
+  }, 30000);
+} catch (e) { /* perf_hooks unavailable */ }
+
+
 // === Graceful shutdown ===
 let shuttingDown = false;
 async function gracefulShutdown(signal) {
