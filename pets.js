@@ -98,6 +98,9 @@ const BREEDING_SHINY_CHANCES = {
 
 // ============ PET IMAGES ============
 const PET_IMAGES_DIR = path.join(__dirname, 'assets', 'pets');
+// Public URL for static pet art (repo is public) so Discord fetches images itself
+// instead of the bot re-uploading multi-MB PNGs on every interaction.
+const PET_IMAGE_BASE_URL = 'https://raw.githubusercontent.com/Moithas/Chat-Stock/main/assets/pets';
 const PHASE_NAMES = ['baby', 'juvenile', 'adult', 'elder'];
 const ALL_SPECIES = Object.keys(SPECIES);
 
@@ -243,7 +246,8 @@ async function getPetImage(species, phaseName, variant = 1, shiny = false) {
   if (!imageInfo) return null;
 
   if (!shiny) {
-    return { data: imageInfo.filePath, fileName: imageInfo.fileName, isBuffer: false };
+    // Static art: expose a public URL so Discord fetches it directly (no upload).
+    return { data: imageInfo.filePath, url: `${PET_IMAGE_BASE_URL}/${imageInfo.fileName}`, fileName: imageInfo.fileName, isBuffer: false, isUrl: true };
   }
 
   try {
@@ -252,7 +256,7 @@ async function getPetImage(species, phaseName, variant = 1, shiny = false) {
     return { data: buffer, fileName: shinyFileName, isBuffer: true };
   } catch (e) {
     console.error('Error applying shiny overlay:', e);
-    return { data: imageInfo.filePath, fileName: imageInfo.fileName, isBuffer: false };
+    return { data: imageInfo.filePath, url: `${PET_IMAGE_BASE_URL}/${imageInfo.fileName}`, fileName: imageInfo.fileName, isBuffer: false, isUrl: true };
   }
 }
 

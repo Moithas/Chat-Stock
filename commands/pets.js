@@ -273,6 +273,18 @@ function makeMeter(value, max, emoji) {
   return `${emoji} ${'▓'.repeat(filled)}${'░'.repeat(empty)} ${value}/${max}`;
 }
 
+// Apply a pet image to an embed. Static art uses a direct URL (Discord fetches it,
+// no upload); shiny buffers (and fallbacks) are attached.
+function applyPetImage(embed, petImage) {
+  if (!petImage) return [];
+  if (petImage.isUrl && petImage.url) {
+    embed.setImage(petImage.url);
+    return [];
+  }
+  embed.setImage(`attachment://${petImage.fileName}`);
+  return [new AttachmentBuilder(petImage.data, { name: petImage.fileName })];
+}
+
 // ================== MAIN PANEL ==================
 
 async function showMainPanel(interaction, guildId, userId, settings, isUpdate = false, isDeferred = false, extraMsg = '') {
@@ -896,12 +908,7 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   const __imgT0 = Date.now();
   const petImage = await getPetImage(pet.species, phase.name.toLowerCase(), pet.variant || 1, pet.shiny);
   const __imgMs = Date.now() - __imgT0;
-  let files = [];
-  if (petImage) {
-    const attachment = new AttachmentBuilder(petImage.data, { name: petImage.fileName });
-    embed.setImage(`attachment://${petImage.fileName}`);
-    files.push(attachment);
-  }
+  const files = applyPetImage(embed, petImage);
 
   // Action buttons
   const canPlay = phase.canPlay && playCd <= 0;
