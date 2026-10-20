@@ -400,7 +400,10 @@ async function updateCooldownTracker(guildId) {
     const channel = await discordClient.channels.fetch(settings.channelId);
     if (!channel) return;
     
+    const __embT0 = Date.now();
     const embed = await buildCooldownEmbed(guildId);
+    const __embMs = Date.now() - __embT0;
+    if (__embMs > 150) console.log(`[TrackerPerf] buildCooldownEmbed(sync) ${__embMs}ms`);
     
     // Try to edit existing message
     if (settings.messageId) {
