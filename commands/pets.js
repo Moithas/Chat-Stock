@@ -905,9 +905,7 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
   embed.setDescription(desc);
 
   // Attach pet phase image if available
-  const __imgT0 = Date.now();
   const petImage = await getPetImage(pet.species, phase.name.toLowerCase(), pet.variant || 1, pet.shiny);
-  const __imgMs = Date.now() - __imgT0;
   const files = applyPetImage(embed, petImage);
 
   // Action buttons
@@ -948,10 +946,7 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
   );
 
-  const __upT0 = Date.now();
-  const __detailRes = await interaction.update({ embeds: [embed], components: [row1, row2, row3, row4], files });
-  console.log(`[PetPerf] detail pet=${pet.id} sp=${pet.species} shiny=${pet.shiny ? 1 : 0} imgGen=${__imgMs}ms upload=${Date.now() - __upT0}ms`);
-  return __detailRes;
+  return interaction.update({ embeds: [embed], components: [row1, row2, row3, row4], files });
 }
 
 // ================== PET ACTIONS ==================

@@ -1361,9 +1361,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton() && (interaction.customId.startsWith('pet_panel_') || interaction.customId.startsWith('pet_feed_') || interaction.customId.startsWith('pet_feedmenu_') || interaction.customId.startsWith('pet_play_') || interaction.customId.startsWith('pet_train_') || interaction.customId.startsWith('pet_active_') || interaction.customId.startsWith('pet_dismiss_') || interaction.customId.startsWith('pet_view_') || interaction.customId.startsWith('pet_release_') || interaction.customId.startsWith('pet_rename_') || interaction.customId.startsWith('pet_namebuy_') || interaction.customId.startsWith('pet_buy_') || interaction.customId.startsWith('pet_kennel_') || interaction.customId.startsWith('pet_shop_page_') || interaction.customId.startsWith('pet_egg_') || interaction.customId.startsWith('pet_myeggs_') || interaction.customId.startsWith('pet_breed_') || interaction.customId.startsWith('pet_birth_') || interaction.customId.startsWith('pet_gestating_') || interaction.customId.startsWith('pet_stud_') || interaction.customId.startsWith('pet_transfer_') || interaction.customId.startsWith('pet_trade_') || interaction.customId.startsWith('pet_lineage_') || interaction.customId.startsWith('pet_recover_') || interaction.customId.startsWith('pet_runaways_') || interaction.customId.startsWith('pet_reorder_'))) {
     try {
       const { handleButton } = require('./commands/pets');
-      const __petBtnT0 = Date.now();
       await handleButton(interaction);
-      { const __ms = Date.now() - __petBtnT0; if (__ms > 1500) log.info(`[PetPerf] button ${interaction.customId} ${__ms}ms`); }
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
       logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'pets button', error });
@@ -1380,9 +1378,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isStringSelectMenu() && (interaction.customId.startsWith('pet_select_') || interaction.customId.startsWith('pet_shop_select_') || interaction.customId.startsWith('pet_breed_select_') || interaction.customId.startsWith('pet_breed_partner_select_') || interaction.customId.startsWith('pet_stud_mypet_') || interaction.customId.startsWith('pet_stud_partner_') || interaction.customId.startsWith('pet_transfer_target_') || interaction.customId.startsWith('pet_trade_select_') || interaction.customId.startsWith('pet_trade_partner_') || interaction.customId.startsWith('pet_reorder_pick_') || interaction.customId.startsWith('pet_egg_select_'))) {
     try {
       const { handleSelectMenu } = require('./commands/pets');
-      const __petSelT0 = Date.now();
       await handleSelectMenu(interaction);
-      { const __ms = Date.now() - __petSelT0; if (__ms > 1500) log.info(`[PetPerf] select ${interaction.customId} ${__ms}ms`); }
     } catch (error) {
       if (error.code === 10062 || error.code === 40060) return;
       logError({ guildId: interaction.guildId, userId: interaction.user?.id, command: 'pets select', error });
@@ -2121,20 +2117,6 @@ const healthServer = http.createServer((req, res) => {
 healthServer.listen(HEALTH_PORT, '127.0.0.1', () => {
   log.info(`Health check listening on 127.0.0.1:${HEALTH_PORT}/health`);
 });
-
-// Temporary: event-loop lag monitor to diagnose interaction response latency.
-try {
-  const { monitorEventLoopDelay } = require('perf_hooks');
-  const __eld = monitorEventLoopDelay({ resolution: 20 });
-  __eld.enable();
-  setInterval(() => {
-    const max = __eld.max / 1e6;
-    const p99 = __eld.percentile(99) / 1e6;
-    const mean = __eld.mean / 1e6;
-    if (max > 200) log.info(`[LoopLag] mean=${mean.toFixed(1)}ms p99=${p99.toFixed(1)}ms max=${max.toFixed(0)}ms (30s window)`);
-    __eld.reset();
-  }, 30000);
-} catch (e) { /* perf_hooks unavailable */ }
 
 
 // === Graceful shutdown ===

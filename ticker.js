@@ -324,6 +324,7 @@ async function generateDashboardChart(topStocks, gainers, losers, guildId = null
       const historicalPrice = calculateHistoricalPrice(stock.userId, targetTime, guildId);
       sampled.push(historicalPrice || 100);
     }
+    await new Promise(resolve => setImmediate(resolve));
     
     // Scale historical prices to match actual current price
     // calculateHistoricalPrice is simplified (no streak, supply/demand, etc.)
@@ -432,6 +433,7 @@ async function buildMarketDashboard(guildId = null) {
   // Get users who split in the last 24 hours (exclude from losers since splits aren't negative)
   const recentSplitters = getRecentSplitters(oneDayAgo);
 
+  let processed = 0;
   for (const user of users) {
     const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
     const dayHistory = getPriceHistoryByTimeRange(user.user_id, oneDayAgo);
@@ -453,6 +455,9 @@ async function buildMarketDashboard(guildId = null) {
       changePercent: changePercent,
       recentlySplit: recentSplitters.has(user.user_id)
     });
+
+    // Yield periodically so this full-roster pass never blocks interactions.
+    if (++processed % 25 === 0) await new Promise(resolve => setImmediate(resolve));
   }
 
   // Sort for different categories
