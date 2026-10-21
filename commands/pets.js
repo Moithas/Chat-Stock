@@ -827,6 +827,7 @@ async function handleSelectPet(interaction, guildId, userId, settings) {
 }
 
 async function showPetDetail(interaction, guildId, userId, settings, pet) {
+  const __t0 = Date.now();
   const effective = getEffectiveStats(pet, settings);
   const speciesData = SPECIES[pet.species];
   const rarityData = RARITIES[pet.rarity];
@@ -946,7 +947,10 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
   );
 
-  return interaction.update({ embeds: [embed], components: [row1, row2, row3, row4], files });
+  const __beforeUpdate = Date.now();
+  const __res = await interaction.update({ embeds: [embed], components: [row1, row2, row3, row4], files });
+  console.log(`[DetailPerf] work=${__beforeUpdate - __t0}ms update=${Date.now() - __beforeUpdate}ms`);
+  return __res;
 }
 
 // ================== PET ACTIONS ==================
@@ -1874,6 +1878,7 @@ function abbreviateNumber(n) {
 }
 
 async function handleEggBuy(interaction, guildId, userId, settings) {
+  const __t0 = Date.now();
   const parts = interaction.customId.split('_');
   // pet_egg_buy_<type>_u_<userId>
   const eggType = parts[3];
@@ -1927,7 +1932,10 @@ async function handleEggBuy(interaction, guildId, userId, settings) {
     new ButtonBuilder().setCustomId(`pet_panel_main_u_${userId}`).setLabel('Back').setEmoji('◀️').setStyle(ButtonStyle.Danger),
   );
 
-  return interaction.update({ embeds: [embed], components: [row], files: [] });
+  const __beforeUpdate = Date.now();
+  const __res = await interaction.update({ embeds: [embed], components: [row], files: [] });
+  console.log(`[EggPerf] work=${__beforeUpdate - __t0}ms update=${Date.now() - __beforeUpdate}ms`);
+  return __res;
 }
 
 // ================== MY EGGS PANEL ==================
