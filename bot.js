@@ -2118,6 +2118,18 @@ healthServer.listen(HEALTH_PORT, '127.0.0.1', () => {
   log.info(`Health check listening on 127.0.0.1:${HEALTH_PORT}/health`);
 });
 
+// Temporary: log any event-loop block >300ms with a timestamp, to correlate with slow pet updates.
+try {
+  const { monitorEventLoopDelay } = require('perf_hooks');
+  const __eld = monitorEventLoopDelay({ resolution: 20 });
+  __eld.enable();
+  setInterval(() => {
+    const max = __eld.max / 1e6;
+    if (max > 300) console.log(`[LoopBlock] ${max.toFixed(0)}ms at ${new Date().toISOString()}`);
+    __eld.reset();
+  }, 1000);
+} catch (e) { /* perf_hooks unavailable */ }
+
 
 // === Graceful shutdown ===
 let shuttingDown = false;

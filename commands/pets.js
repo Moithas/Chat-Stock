@@ -949,7 +949,7 @@ async function showPetDetail(interaction, guildId, userId, settings, pet) {
 
   const __beforeUpdate = Date.now();
   const __res = await interaction.update({ embeds: [embed], components: [row1, row2, row3, row4], files });
-  console.log(`[DetailPerf] work=${__beforeUpdate - __t0}ms update=${Date.now() - __beforeUpdate}ms`);
+  console.log(`[DetailPerf] work=${__beforeUpdate - __t0}ms update=${Date.now() - __beforeUpdate}ms at ${new Date().toISOString()}`);
   return __res;
 }
 
@@ -1934,7 +1934,7 @@ async function handleEggBuy(interaction, guildId, userId, settings) {
 
   const __beforeUpdate = Date.now();
   const __res = await interaction.update({ embeds: [embed], components: [row], files: [] });
-  console.log(`[EggPerf] work=${__beforeUpdate - __t0}ms update=${Date.now() - __beforeUpdate}ms`);
+  console.log(`[EggPerf] work=${__beforeUpdate - __t0}ms update=${Date.now() - __beforeUpdate}ms at ${new Date().toISOString()}`);
   return __res;
 }
 
