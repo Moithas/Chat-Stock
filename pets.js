@@ -1721,7 +1721,7 @@ const EGG_TYPES = {
     color: 0x9b59b6,
     settingsKey: 'eggPrismaticPrice',
     warmCost: 5000,
-    shinyChance: 0.5,
+    shinyChance: 0.15,
     hatchHours: 72,
     speciesWeights: [
       { species: 'wolf',    weight: 31 },
@@ -1737,10 +1737,10 @@ const EGG_TYPES = {
       { rarity: 'legendary', weight: 15 },
     ],
     exoticRarity: [
-      { rarity: 'uncommon',  weight: 5 },
-      { rarity: 'rare',      weight: 5 },
-      { rarity: 'epic',      weight: 5 },
-      { rarity: 'legendary', weight: 85 },
+      { rarity: 'uncommon',  weight: 25 },
+      { rarity: 'rare',      weight: 35 },
+      { rarity: 'epic',      weight: 25 },
+      { rarity: 'legendary', weight: 15 },
     ],
   },
 };
