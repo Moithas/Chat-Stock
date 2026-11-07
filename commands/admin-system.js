@@ -869,8 +869,8 @@ function createActivityTiersModal(settings) {
 
 // ==================== TICKER PANEL ====================
 async function showTickerPanel(interaction, guildId) {
-  const channelId = getTickerChannel();
-  const dashSettings = getDashboardSettings();
+  const channelId = getTickerChannel(guildId);
+  const dashSettings = getDashboardSettings(guildId);
   
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
@@ -953,7 +953,7 @@ async function showTickerChannelSelect(interaction, guildId) {
 async function handleTickerChannelSelect(interaction, guildId) {
   const channelId = interaction.values[0];
   
-  setTickerChannel(channelId);
+  setTickerChannel(guildId, channelId);
   logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set ticker channel to <#${channelId}>`);
   
   await interaction.reply({ content: `✅ Ticker channel set to <#${channelId}>`, flags: 64 });
@@ -993,10 +993,10 @@ async function handleTickerThresholdModal(interaction, guildId) {
 
 // ==================== DASHBOARD HANDLERS ====================
 async function handleDashboardToggle(interaction, guildId) {
-  const settings = getDashboardSettings();
+  const settings = getDashboardSettings(guildId);
   const newEnabled = !settings.enabled;
   
-  updateDashboardSettings({ enabled: newEnabled });
+  updateDashboardSettings(guildId, { enabled: newEnabled });
   logAdminAction(guildId, interaction.user.id, interaction.user.username, `${newEnabled ? 'Enabled' : 'Disabled'} market dashboard`);
   
   await interaction.deferUpdate();
@@ -1004,7 +1004,7 @@ async function handleDashboardToggle(interaction, guildId) {
 }
 
 async function handleDashboardEditSettings(interaction, guildId) {
-  const settings = getDashboardSettings();
+  const settings = getDashboardSettings(guildId);
   
   const modal = new ModalBuilder()
     .setCustomId('modal_dashboard_settings')
@@ -1078,7 +1078,7 @@ async function handleDashboardSettingsModal(interaction, guildId) {
     return interaction.reply({ content: '❌ Top movers count must be between 1 and 10', flags: 64 });
   }
   
-  updateDashboardSettings({
+  updateDashboardSettings(guildId, {
     updateIntervalMinutes: updateInterval,
     topStocksCount: topStocksCount,
     topMoversCount: topMoversCount,
@@ -1122,7 +1122,7 @@ async function handleDashboardChannelSelect(interaction, guildId) {
   try {
     const channelId = interaction.values[0];
     
-    setDashboardChannel(channelId);
+    setDashboardChannel(guildId, channelId);
     logAdminAction(guildId, interaction.user.id, interaction.user.username, `Set dashboard channel to <#${channelId}>`);
     
     await interaction.deferUpdate();
@@ -1141,7 +1141,7 @@ async function handleDashboardChannelSelect(interaction, guildId) {
 async function handleDashboardRefresh(interaction, guildId) {
   try {
     await interaction.deferUpdate();
-    await updateDashboard();
+    await updateDashboard(guildId);
     await interaction.followUp({ content: '✅ Dashboard refreshed!', flags: 64 });
   } catch (error) {
     console.error('Error refreshing dashboard:', error);

@@ -1,4 +1,4 @@
-// Crime module for Chat-Stock
+// Crime module for Black Ledger
 // Handles /crime command with risk/reward mechanics
 
 let db = null;

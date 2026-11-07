@@ -134,10 +134,10 @@ function buildPriceBreakdown(guildId, userId, targetUserId, shares, isSelling = 
 }
 
 // Generate price chart
-async function generatePriceChart(userId, username, timeRange, currentPrice) {
+async function generatePriceChart(guildId, userId, username, timeRange, currentPrice) {
   const range = TIME_RANGES[timeRange];
   const startTime = Date.now() - range.ms;
-  let priceData = getPriceHistoryByTimeRange(userId, startTime);
+  let priceData = getPriceHistoryByTimeRange(guildId, userId, startTime);
   
   if (priceData.length < 1) {
     return null; // Not enough data for a chart
@@ -496,9 +496,9 @@ function getRankEmoji(rank) {
 }
 
 async function showStockPanel(interaction, guildId, userId, isUpdate = false, isDeferred = false) {
-  const user = getUser(userId);
+  const user = getUser(guildId, userId);
   const stockPrice = calculateStockPrice(userId, guildId);
-  const portfolio = getPortfolio(userId);
+  const portfolio = getPortfolio(guildId, userId);
   const settings = getDividendSettings(guildId);
   
   // Calculate portfolio stats
@@ -738,9 +738,9 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
   const basePrice = calculateStockPrice(targetUserId, guildId, null, true, 0);
   const lpMod = getLuckyPennyEffect(guildId, viewerId, LP_EFFECT_TYPES.STOCK_PRICES);
   const stockPrice = calculateStockPrice(targetUserId, guildId, null, false, lpMod);
-  const shareholders = getAllStockHolders(targetUserId);
+  const shareholders = getAllStockHolders(guildId, targetUserId);
   const stockRank = getStockRank(targetUserId, guildId);
-  const streakInfo = calculateStreakInfo(targetUserId);
+  const streakInfo = calculateStreakInfo(guildId, targetUserId);
   
   let totalShares = 0;
   for (const holder of shareholders) {
@@ -821,7 +821,7 @@ async function showPriceView(interaction, guildId, targetUserId, chartRange = nu
   // Generate chart if requested (exclude events for consistent charting)
   if (chartRange) {
     const chartPrice = calculateStockPrice(targetUserId, guildId, null, true);
-    const chartUrl = await generatePriceChart(targetUserId, targetUser.username, chartRange, chartPrice);
+    const chartUrl = await generatePriceChart(guildId, targetUserId, targetUser.username, chartRange, chartPrice);
     if (chartUrl) {
       embed.setImage(chartUrl);
       embed.addFields({ 
@@ -940,7 +940,7 @@ async function showBuyAmountButtons(interaction, guildId, userId, targetUserId, 
   } catch (e) {}
   
   // Ensure target user exists in database
-  createUser(targetUserId, username);
+  createUser(guildId, targetUserId, username);
   
   const lpBuyMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
   const currentPrice = calculateStockPrice(targetUserId, guildId, null, false, lpBuyMod);
@@ -1265,7 +1265,7 @@ async function showBuyConfirmationFromModal(interaction, guildId, userId, target
 
 // Show sell confirmation embed with detailed fee/tax breakdown
 async function showSellConfirmation(interaction, guildId, userId, targetUserId, amount, fromModal = false) {
-  const stock = getStock(userId, targetUserId);
+  const stock = getStock(guildId, userId, targetUserId);
   
   if (!stock) {
     const msg = { content: '❌ You don\'t own this stock!', embeds: [], components: [] };
@@ -1413,8 +1413,8 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
   } catch (e) {}
   
   // Ensure users exist in database
-  createUser(userId, interaction.user.username);
-  createUser(targetUserId, username);
+  createUser(guildId, userId, interaction.user.username);
+  createUser(guildId, targetUserId, username);
   
   // Apply Lucky Penny stock price modifier additively with events
   const lpBuyStockMod = getLuckyPennyEffect(guildId, userId, LP_EFFECT_TYPES.STOCK_PRICES);
@@ -1465,8 +1465,8 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
     moneyDeducted = true;
   }
   
-  buyStock(userId, targetUserId, shares, currentPrice);
-  logTransaction(userId, targetUserId, shares, currentPrice, 'BUY', Date.now());
+  buyStock(guildId, userId, targetUserId, shares, currentPrice);
+  logTransaction(guildId, userId, targetUserId, shares, currentPrice, 'BUY', Date.now());
   recordPurchase(guildId, userId, targetUserId, shares, currentPrice);
   recordPriceImpact(guildId, targetUserId, shares);
   
@@ -1533,7 +1533,7 @@ async function executeBuy(interaction, guildId, userId, targetUserId, amount, fr
 }
 
 async function showSellView(interaction, guildId, userId) {
-  const portfolio = getPortfolio(userId);
+  const portfolio = getPortfolio(guildId, userId);
   
   if (portfolio.length === 0) {
     const embed = new EmbedBuilder()
@@ -1600,7 +1600,7 @@ async function showSellAmountButtons(interaction, guildId, userId, targetUserId,
     await interaction.deferUpdate();
   }
   
-  const stock = getStock(userId, targetUserId);
+  const stock = getStock(guildId, userId, targetUserId);
   
   if (!stock) {
     return interaction.editReply({ content: '❌ You don\'t own this stock anymore!', embeds: [], components: [] });
@@ -1679,7 +1679,7 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
   let soldShares = 0;
   let soldPrice = 0;
   try {
-  const stock = getStock(userId, targetUserId);
+  const stock = getStock(guildId, userId, targetUserId);
   
   if (!stock) {
     const msg = { content: '❌ You don\'t own this stock!', embeds: [], components: [] };
@@ -1730,12 +1730,12 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
   
   const netValue = Math.max(0, grossValue - fee - totalTax);
   
-  sellStock(shares, userId, targetUserId);
-  deleteStock(userId, targetUserId);
+  sellStock(guildId, shares, userId, targetUserId);
+  deleteStock(guildId, userId, targetUserId);
   soldShares = shares;
   soldPrice = currentPrice;
   sharesSold = true;
-  logTransaction(userId, targetUserId, shares, currentPrice, 'SELL', Date.now());
+  logTransaction(guildId, userId, targetUserId, shares, currentPrice, 'SELL', Date.now());
   recordPriceImpact(guildId, targetUserId, -shares);
   
   if (isEnabled() && netValue > 0) {
@@ -1801,7 +1801,7 @@ async function executeSell(interaction, guildId, userId, targetUserId, amount, f
     console.error('Error selling stock:', error);
     // Rollback: re-add shares if they were already removed but payment failed
     if (sharesSold) {
-      try { buyStock(userId, targetUserId, soldShares, soldPrice); } catch (e) { console.error('Failed to rollback sell:', e); }
+      try { buyStock(guildId, userId, targetUserId, soldShares, soldPrice); } catch (e) { console.error('Failed to rollback sell:', e); }
     }
     try {
       await interaction.editReply({ content: '❌ Error selling stock.', embeds: [], components: [] });
@@ -1909,26 +1909,30 @@ async function executeStockSplit(interaction, guildId, userId, ratio) {
   }
   
   // Execute the split using the function from dividends.js
-  // It needs a function to update shares - we'll use setShares from database
+  // It needs a function to update shares - we'll use setShares from database.
+  // The split callbacks keep their (stockUserId, ...) contract, so we inject
+  // the current guildId via closures to keep the market per-guild.
   const updateSharesFunc = (ownerId, stockUserId, newShareCount) => {
-    setShares(ownerId, stockUserId, newShareCount);
+    setShares(guildId, ownerId, stockUserId, newShareCount);
   };
+  const getHoldersFunc = (stockUserId) => getAllStockHolders(guildId, stockUserId);
+  const adjustAvgFunc = (stockUserId, multiplier) => adjustAvgBuyPrice(guildId, stockUserId, multiplier);
   
-  const result = executeSplit(guildId, userId, ratio, stockPrice, getAllStockHolders, updateSharesFunc, adjustAvgBuyPrice);
+  const result = executeSplit(guildId, userId, ratio, stockPrice, getHoldersFunc, updateSharesFunc, adjustAvgFunc);
   
   // Apply price modifier to reduce the stock price
   // For a 2:1 split, we multiply price by 0.5 (1/2)
   // For a 3:1 split, we multiply price by 0.333 (1/3)
   // For a 4:1 split, we multiply price by 0.25 (1/4)
-  const currentModifier = getPriceModifier(userId);
+  const currentModifier = getPriceModifier(guildId, userId);
   const newModifier = currentModifier / result.multiplier;
-  setPriceModifier(userId, newModifier);
+  setPriceModifier(guildId, userId, newModifier);
   
   // Use the calculated price from executeSplit (avoids price cache issues)
   const newPrice = result.priceAfter;
   
   // Update ticker's lastKnownPrices to prevent false price drop alert
-  await sendSplitAnnouncement(userId, interaction.user.username, ratio, result.priceBefore, newPrice, result.shareholdersAffected);
+  await sendSplitAnnouncement(guildId, userId, interaction.user.username, ratio, result.priceBefore, newPrice, result.shareholdersAffected);
   
   // Announce the split in the configured channel
   const settings = getDividendSettings(guildId);
@@ -2020,7 +2024,7 @@ async function showPortfolioView(interaction, guildId, targetUserId, isDeferred 
     targetUser = { username: 'Unknown User', displayAvatarURL: () => null };
   }
   
-  const portfolio = getPortfolio(targetUserId);
+  const portfolio = getPortfolio(guildId, targetUserId);
   const isOwnPortfolio = targetUserId === interaction.user.id;
   
   if (portfolio.length === 0) {
@@ -2240,7 +2244,7 @@ async function showShareholdersView(interaction, guildId, targetUserId, isDeferr
     targetUser = { username: 'Unknown User', displayAvatarURL: () => null };
   }
   
-  const shareholders = getAllStockHolders(targetUserId);
+  const shareholders = getAllStockHolders(guildId, targetUserId);
   const currentPrice = calculateStockPrice(targetUserId, guildId);
   
   if (shareholders.length === 0) {

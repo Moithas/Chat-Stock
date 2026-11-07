@@ -66,7 +66,7 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
   const huntTime = huntStatus.reason ? huntStatus.reason.match(/\*\*(.+?)\*\*/)?.[1] || 'soon' : null;
   
   // Check collect status
-  const user = getUser(userId);
+  const user = getUser(guildId, userId);
   let stockBonusReady = false;
   let stockBonusTime = null;
   let stockBonusAmount = 0;
@@ -77,7 +77,7 @@ async function showIncomePanel(interaction, guildId, userId, isUpdate = false) {
     stockBonusTime = collectStatus.timeRemaining ? formatTimeRemaining(collectStatus.timeRemaining) : null;
     
     const db = getDb();
-    const sharesResult = db.exec('SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ? AND owner_id != ?', [userId, userId]);
+    const sharesResult = db.exec('SELECT SUM(shares) as total FROM stocks WHERE guild_id = ? AND stock_user_id = ? AND owner_id != ?', [guildId, userId, userId]);
     const totalSharesOwned = sharesResult.length > 0 && sharesResult[0].values.length > 0 && sharesResult[0].values[0][0] 
       ? sharesResult[0].values[0][0] 
       : 0;
@@ -635,12 +635,12 @@ async function executeCollect(interaction, guildId, userId) {
   let totalAmount = 0;
   
   // Check and collect stock bonus
-  const user = getUser(userId);
+  const user = getUser(guildId, userId);
   if (settings.passiveIncomeEnabled && user) {
     const { canCollect } = canCollectPassiveIncome(guildId, userId);
     if (canCollect) {
       const db = getDb();
-      const sharesResult = db.exec('SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ? AND owner_id != ?', [userId, userId]);
+      const sharesResult = db.exec('SELECT SUM(shares) as total FROM stocks WHERE guild_id = ? AND stock_user_id = ? AND owner_id != ?', [guildId, userId, userId]);
       const totalSharesOwned = sharesResult.length > 0 && sharesResult[0].values.length > 0 && sharesResult[0].values[0][0] 
         ? sharesResult[0].values[0][0] 
         : 0;

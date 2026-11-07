@@ -1,4 +1,4 @@
-// Slut module for Chat-Stock
+// Slut module for Black Ledger
 // Handles /slut command with risk/reward mechanics (adult themed)
 
 let db = null;

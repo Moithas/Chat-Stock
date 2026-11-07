@@ -1,4 +1,4 @@
-// Three Card Poker command for Chat-Stock
+// Three Card Poker command for Black Ledger
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const { 
   getSettings, 

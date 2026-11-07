@@ -203,12 +203,12 @@ function deleteAllUserData(db, guildId, userId) {
   del('DELETE FROM stock_purchases WHERE guild_id = ? AND owner_id = ?', [guildId, userId]);
   del('DELETE FROM bounty_board WHERE guild_id = ? AND (target_user_id = ? OR claimed_by = ?)', [guildId, userId, userId]);
 
-  // === Global tables (no guild_id) — delete user's global stock profile ===
-  del('DELETE FROM stocks WHERE owner_id = ? OR stock_user_id = ?', [userId, userId]);
-  del('DELETE FROM transactions WHERE buyer_id = ? OR stock_user_id = ?', [userId, userId]);
-  del('DELETE FROM price_history WHERE user_id = ?', [userId]);
+  // === Per-guild stock tables — delete user's stock profile in this guild ===
+  del('DELETE FROM stocks WHERE guild_id = ? AND (owner_id = ? OR stock_user_id = ?)', [guildId, userId, userId]);
+  del('DELETE FROM transactions WHERE guild_id = ? AND (buyer_id = ? OR stock_user_id = ?)', [guildId, userId, userId]);
+  del('DELETE FROM price_history WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   del('DELETE FROM gambling_stats WHERE user_id = ?', [userId]);
-  del('DELETE FROM users WHERE user_id = ?', [userId]);
+  del('DELETE FROM users WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
 
   return tablesDeleted;
 }

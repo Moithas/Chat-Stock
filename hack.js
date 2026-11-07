@@ -1,4 +1,4 @@
-// Hack module for Chat-Stock
+// Hack module for Black Ledger
 // Allows users to hack other players' bank balances
 
 const { migrateAddColumn } = require('./database');

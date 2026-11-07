@@ -1,4 +1,4 @@
-// Work module for Chat-Stock
+// Work module for Black Ledger
 // Handles /work command with configurable rewards and flavor texts
 
 const { TTLCache } = require('./cache');

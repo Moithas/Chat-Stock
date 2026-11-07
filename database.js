@@ -95,7 +95,7 @@ class SqlJsStmtCompat {
 }
 
 let db;
-const dbPath = './chatstock.db';
+const dbPath = process.env.DB_PATH || './chatstock.db';
 const backupDir = './backups';
 const MAX_BACKUPS = 5;
 const BACKUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
@@ -104,6 +104,142 @@ const BACKUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 const priceCache = new Map();
 const PRICE_CACHE_TTL = 10_000; // 10 seconds
 
+// Guard: every stock-market function is per-guild. Fail loudly if a caller
+// forgets to pass a guildId rather than silently reading/writing global data.
+function assertGuild(guildId, fnName) {
+  if (!guildId || typeof guildId !== 'string') {
+    throw new Error(`[market] ${fnName}() called without a valid guildId — per-guild isolation requires a guild context`);
+  }
+}
+
+/**
+ * One-time migration: convert the global stock-market tables (users, stocks,
+ * transactions, price_history) to per-guild tables keyed by guild_id. Existing
+ * rows are stamped with LEGACY_GUILD_ID. Idempotent — skips if already migrated.
+ */
+function migratePerGuildMarket(db) {
+  const raw = db.db;
+
+  // Already migrated if users has a guild_id column
+  const userCols = raw.prepare('PRAGMA table_info(users)').all();
+  if (userCols.some(c => c.name === 'guild_id')) return;
+
+  const existingUsers = raw.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+  const legacyGuildId = (process.env.LEGACY_GUILD_ID || '').trim();
+
+  if (existingUsers > 0 && !legacyGuildId) {
+    throw new Error(
+      'Per-guild market migration requires LEGACY_GUILD_ID. Set LEGACY_GUILD_ID in ' +
+      'your .env to the Discord server ID that owns the existing stock-market data, ' +
+      'then restart.'
+    );
+  }
+
+  // Safety: take a full backup of the database file immediately before the
+  // destructive table rebuild (the scheduled 6-hourly backup may be stale and
+  // runs after startup, so it cannot protect this migration).
+  if (existingUsers > 0) {
+    try {
+      if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+      raw.pragma('wal_checkpoint(TRUNCATE)');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const preMigrationPath = path.join(backupDir, `pre-per-guild-migration-${stamp}.db`);
+      fs.copyFileSync(dbPath, preMigrationPath);
+      log.warn(`Pre-migration backup written: ${preMigrationPath}`);
+    } catch (e) {
+      throw new Error(`Aborting per-guild market migration — failed to write a pre-migration backup: ${e.message}`);
+    }
+  }
+
+  log.warn(`Migrating stock market to per-guild schema (stamping existing data with guild ${legacyGuildId || 'N/A'})...`);
+
+  const migrate = raw.transaction(() => {
+    // users
+    raw.exec(`
+      CREATE TABLE users_new (
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        total_messages INTEGER DEFAULT 0,
+        base_value REAL DEFAULT 100.0,
+        last_message_time INTEGER,
+        price_modifier REAL DEFAULT 1.0,
+        streak_tier INTEGER DEFAULT 0,
+        streak_tier_reached INTEGER DEFAULT 0,
+        streak_reset_time INTEGER DEFAULT 0,
+        PRIMARY KEY (guild_id, user_id)
+      );
+    `);
+    raw.prepare(`
+      INSERT INTO users_new (guild_id, user_id, username, total_messages, base_value, last_message_time, price_modifier, streak_tier, streak_tier_reached, streak_reset_time)
+      SELECT ?, user_id, username, total_messages, base_value, last_message_time,
+             COALESCE(price_modifier, 1.0), COALESCE(streak_tier, 0), COALESCE(streak_tier_reached, 0), COALESCE(streak_reset_time, 0)
+      FROM users
+    `).run(legacyGuildId);
+    raw.exec('DROP TABLE users');
+    raw.exec('ALTER TABLE users_new RENAME TO users');
+
+    // stocks
+    raw.exec(`
+      CREATE TABLE stocks_new (
+        guild_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        stock_user_id TEXT NOT NULL,
+        shares INTEGER NOT NULL,
+        avg_buy_price REAL NOT NULL,
+        PRIMARY KEY (guild_id, owner_id, stock_user_id)
+      );
+    `);
+    raw.prepare(`
+      INSERT INTO stocks_new (guild_id, owner_id, stock_user_id, shares, avg_buy_price)
+      SELECT ?, owner_id, stock_user_id, shares, avg_buy_price FROM stocks
+    `).run(legacyGuildId);
+    raw.exec('DROP TABLE stocks');
+    raw.exec('ALTER TABLE stocks_new RENAME TO stocks');
+
+    // transactions
+    raw.exec(`
+      CREATE TABLE transactions_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        buyer_id TEXT NOT NULL,
+        stock_user_id TEXT NOT NULL,
+        shares INTEGER NOT NULL,
+        price REAL NOT NULL,
+        transaction_type TEXT NOT NULL,
+        timestamp INTEGER NOT NULL
+      );
+    `);
+    raw.prepare(`
+      INSERT INTO transactions_new (id, guild_id, buyer_id, stock_user_id, shares, price, transaction_type, timestamp)
+      SELECT id, ?, buyer_id, stock_user_id, shares, price, transaction_type, timestamp FROM transactions
+    `).run(legacyGuildId);
+    raw.exec('DROP TABLE transactions');
+    raw.exec('ALTER TABLE transactions_new RENAME TO transactions');
+
+    // price_history
+    raw.exec(`
+      CREATE TABLE price_history_new (
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        price REAL NOT NULL,
+        timestamp INTEGER NOT NULL
+      );
+    `);
+    raw.prepare(`
+      INSERT INTO price_history_new (guild_id, user_id, price, timestamp)
+      SELECT ?, user_id, price, timestamp FROM price_history
+    `).run(legacyGuildId);
+    raw.exec('DROP TABLE price_history');
+    raw.exec('ALTER TABLE price_history_new RENAME TO price_history');
+  });
+
+  migrate();
+
+  const integrity = raw.prepare('PRAGMA integrity_check').get().integrity_check;
+  log.warn(`Per-guild market migration complete (${existingUsers} user rows). Integrity: ${integrity}`);
+}
+
 // Initialize database
 async function initDatabase() {
   db = new SqlJsCompat(dbPath);
@@ -111,12 +247,17 @@ async function initDatabase() {
   // Create tables
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
-      user_id TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
       username TEXT NOT NULL,
       total_messages INTEGER DEFAULT 0,
       base_value REAL DEFAULT 100.0,
       last_message_time INTEGER,
-      price_modifier REAL DEFAULT 1.0
+      price_modifier REAL DEFAULT 1.0,
+      streak_tier INTEGER DEFAULT 0,
+      streak_tier_reached INTEGER DEFAULT 0,
+      streak_reset_time INTEGER DEFAULT 0,
+      PRIMARY KEY (guild_id, user_id)
     );
   `);
 
@@ -130,17 +271,19 @@ async function initDatabase() {
 
   db.run(`
     CREATE TABLE IF NOT EXISTS stocks (
+      guild_id TEXT NOT NULL,
       owner_id TEXT NOT NULL,
       stock_user_id TEXT NOT NULL,
       shares INTEGER NOT NULL,
       avg_buy_price REAL NOT NULL,
-      PRIMARY KEY (owner_id, stock_user_id)
+      PRIMARY KEY (guild_id, owner_id, stock_user_id)
     );
   `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
       buyer_id TEXT NOT NULL,
       stock_user_id TEXT NOT NULL,
       shares INTEGER NOT NULL,
@@ -152,6 +295,7 @@ async function initDatabase() {
 
   db.run(`
     CREATE TABLE IF NOT EXISTS price_history (
+      guild_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       price REAL NOT NULL,
       timestamp INTEGER NOT NULL
@@ -187,17 +331,21 @@ async function initDatabase() {
     );
   `);
 
+  // Migrate the stock-market tables to the per-guild schema (idempotent; only
+  // runs once on databases created before per-guild isolation).
+  migratePerGuildMarket(db);
+
   // Create indexes for frequently queried columns
   db.run(`CREATE INDEX IF NOT EXISTS idx_balances_guild_user ON balances(guild_id, user_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_stocks_owner ON stocks(owner_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_stocks_stock_user ON stocks(stock_user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_stocks_owner ON stocks(guild_id, owner_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_stocks_stock_user ON stocks(guild_id, stock_user_id)`);
 
   // Clean up any orphaned 0-share rows from wealth tax seizures
   db.run(`DELETE FROM stocks WHERE shares <= 0`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(timestamp)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_buyer ON transactions(buyer_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_user ON price_history(user_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_timestamp ON price_history(timestamp)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(guild_id, timestamp)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_buyer ON transactions(guild_id, buyer_id, timestamp)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_user ON price_history(guild_id, user_id, timestamp)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_timestamp ON price_history(guild_id, timestamp)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_economy_transactions_guild_user ON economy_transactions(guild_id, user_id)`);
 
   // Activity tier settings for diminishing returns
@@ -273,6 +421,22 @@ function createBackup() {
 
     const sizeMB = (fs.statSync(backupPath).size / 1024 / 1024).toFixed(2);
     log.info(`Database backup created: ${backupPath} (${sizeMB} MB) — ${files.length > MAX_BACKUPS ? files.length - MAX_BACKUPS : 0} old backup(s) pruned`);
+
+    // Optional off-host backup: if BACKUP_SYNC_CMD is set, run it after each
+    // backup to copy the backups directory to remote/off-host storage so a disk
+    // failure can't lose both the database and its backups. For example:
+    //   rclone copy ./backups remote:black-ledger-backups
+    //   aws s3 sync ./backups s3://your-bucket/black-ledger
+    const syncCmd = process.env.BACKUP_SYNC_CMD;
+    if (syncCmd) {
+      require('child_process').exec(syncCmd, (err) => {
+        if (err) {
+          log.error(`Off-host backup sync failed: ${err.message}`);
+        } else {
+          log.info('Off-host backup sync completed');
+        }
+      });
+    }
   } catch (error) {
     log.error(`Database backup failed: ${error.message}`);
   }
@@ -285,8 +449,9 @@ setTimeout(() => {
 }, 30000); // Wait 30s for DB to fully initialize
 
 // User functions
-function getUser(userId) {
-  const result = db.exec('SELECT * FROM users WHERE user_id = ?', [userId]);
+function getUser(guildId, userId) {
+  assertGuild(guildId, 'getUser');
+  const result = db.exec('SELECT * FROM users WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   if (result.length === 0 || result[0].values.length === 0) return null;
   
   const cols = result[0].columns;
@@ -295,8 +460,9 @@ function getUser(userId) {
 }
 
 // Get all users
-function getAllUsers() {
-  const result = db.exec('SELECT * FROM users');
+function getAllUsers(guildId) {
+  assertGuild(guildId, 'getAllUsers');
+  const result = db.exec('SELECT * FROM users WHERE guild_id = ?', [guildId]);
   if (result.length === 0 || result[0].values.length === 0) return [];
   
   return result[0].values.map(row => {
@@ -305,15 +471,16 @@ function getAllUsers() {
   });
 }
 
-function createUser(userId, username) {
+function createUser(guildId, userId, username) {
   if (!db) return; // Database not ready yet
+  assertGuild(guildId, 'createUser');
   try {
     // First try to insert the user
-    db.run('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', [userId, username]);
+    db.run('INSERT OR IGNORE INTO users (guild_id, user_id, username) VALUES (?, ?, ?)', [guildId, userId, username]);
     
     // If user exists with "Unknown User" or just their ID as username, update it
     if (username && username !== 'Unknown User' && username !== userId) {
-      db.run("UPDATE users SET username = ? WHERE user_id = ? AND (username = 'Unknown User' OR username = user_id)", [username, userId]);
+      db.run("UPDATE users SET username = ? WHERE guild_id = ? AND user_id = ? AND (username = 'Unknown User' OR username = user_id)", [username, guildId, userId]);
     }
     
     saveDatabase();
@@ -322,19 +489,21 @@ function createUser(userId, username) {
   }
 }
 
-function updateMessageCount(timestamp, userId, baseValueGrowth = 0.075) {
+function updateMessageCount(guildId, timestamp, userId, baseValueGrowth = 0.075) {
   if (!db) return; // Database not ready yet
+  assertGuild(guildId, 'updateMessageCount');
   // Increment message count, update last message time, and grow base_value permanently
-  db.run('UPDATE users SET total_messages = total_messages + 1, last_message_time = ?, base_value = base_value + ? WHERE user_id = ?', [timestamp, baseValueGrowth, userId]);
+  db.run('UPDATE users SET total_messages = total_messages + 1, last_message_time = ?, base_value = base_value + ? WHERE guild_id = ? AND user_id = ?', [timestamp, baseValueGrowth, guildId, userId]);
   // Also log as a transaction for 15-day window tracking
-  db.run("INSERT INTO transactions (buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, 0, 0, 'MESSAGE', ?)",
-    [userId, userId, timestamp]);
+  db.run("INSERT INTO transactions (guild_id, buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, ?, 0, 0, 'MESSAGE', ?)",
+    [guildId, userId, userId, timestamp]);
   saveDatabase();
 }
 
 // Stock functions
-function getPortfolio(ownerId) {
-  const result = db.exec('SELECT * FROM stocks WHERE owner_id = ? AND shares > 0', [ownerId]);
+function getPortfolio(guildId, ownerId) {
+  assertGuild(guildId, 'getPortfolio');
+  const result = db.exec('SELECT * FROM stocks WHERE guild_id = ? AND owner_id = ? AND shares > 0', [guildId, ownerId]);
   if (result.length === 0) return [];
   
   return result[0].values.map(row => {
@@ -343,8 +512,9 @@ function getPortfolio(ownerId) {
   });
 }
 
-function getStock(ownerId, stockUserId) {
-  const result = db.exec('SELECT * FROM stocks WHERE owner_id = ? AND stock_user_id = ?', [ownerId, stockUserId]);
+function getStock(guildId, ownerId, stockUserId) {
+  assertGuild(guildId, 'getStock');
+  const result = db.exec('SELECT * FROM stocks WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?', [guildId, ownerId, stockUserId]);
   if (result.length === 0 || result[0].values.length === 0) return null;
   
   const cols = result[0].columns;
@@ -352,52 +522,58 @@ function getStock(ownerId, stockUserId) {
   return cols.reduce((obj, col, i) => ({ ...obj, [col]: vals[i] }), {});
 }
 
-function buyStock(ownerId, stockUserId, shares, price) {
+function buyStock(guildId, ownerId, stockUserId, shares, price) {
+  assertGuild(guildId, 'buyStock');
   const doBuy = db.transaction(() => {
-    const existing = getStock(ownerId, stockUserId);
+    const existing = getStock(guildId, ownerId, stockUserId);
     
     if (existing) {
       const newShares = existing.shares + shares;
       const newAvgPrice = ((existing.shares * existing.avg_buy_price) + (shares * price)) / newShares;
-      db.run('UPDATE stocks SET shares = ?, avg_buy_price = ? WHERE owner_id = ? AND stock_user_id = ?', 
-        [newShares, newAvgPrice, ownerId, stockUserId]);
+      db.run('UPDATE stocks SET shares = ?, avg_buy_price = ? WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?', 
+        [newShares, newAvgPrice, guildId, ownerId, stockUserId]);
     } else {
-      db.run('INSERT INTO stocks (owner_id, stock_user_id, shares, avg_buy_price) VALUES (?, ?, ?, ?)',
-        [ownerId, stockUserId, shares, price]);
+      db.run('INSERT INTO stocks (guild_id, owner_id, stock_user_id, shares, avg_buy_price) VALUES (?, ?, ?, ?, ?)',
+        [guildId, ownerId, stockUserId, shares, price]);
     }
   });
   doBuy();
   saveDatabase();
 }
 
-function sellStock(shares, ownerId, stockUserId) {
-  db.run('UPDATE stocks SET shares = shares - ? WHERE owner_id = ? AND stock_user_id = ?', 
-    [shares, ownerId, stockUserId]);
+function sellStock(guildId, shares, ownerId, stockUserId) {
+  assertGuild(guildId, 'sellStock');
+  db.run('UPDATE stocks SET shares = shares - ? WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?', 
+    [shares, guildId, ownerId, stockUserId]);
   saveDatabase();
 }
 
-function deleteStock(ownerId, stockUserId) {
-  db.run('DELETE FROM stocks WHERE owner_id = ? AND stock_user_id = ? AND shares <= 0', 
-    [ownerId, stockUserId]);
+function deleteStock(guildId, ownerId, stockUserId) {
+  assertGuild(guildId, 'deleteStock');
+  db.run('DELETE FROM stocks WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ? AND shares <= 0', 
+    [guildId, ownerId, stockUserId]);
   saveDatabase();
 }
 
 // Transaction logging
-function logTransaction(buyerId, stockUserId, shares, price, type, timestamp) {
-  db.run('INSERT INTO transactions (buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
-    [buyerId, stockUserId, shares, price, type, timestamp]);
+function logTransaction(guildId, buyerId, stockUserId, shares, price, type, timestamp) {
+  assertGuild(guildId, 'logTransaction');
+  db.run('INSERT INTO transactions (guild_id, buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [guildId, buyerId, stockUserId, shares, price, type, timestamp]);
   saveDatabase();
 }
 
 // Price history
-function logPrice(userId, price, timestamp) {
-  db.run('INSERT INTO price_history (user_id, price, timestamp) VALUES (?, ?, ?)', 
-    [userId, price, timestamp]);
+function logPrice(guildId, userId, price, timestamp) {
+  assertGuild(guildId, 'logPrice');
+  db.run('INSERT INTO price_history (guild_id, user_id, price, timestamp) VALUES (?, ?, ?, ?)', 
+    [guildId, userId, price, timestamp]);
   // WAL is checkpointed by the 60s saveDatabase() interval; no sync checkpoint here.
 }
 
-function getPriceHistory(userId) {
-  const result = db.exec('SELECT * FROM price_history WHERE user_id = ? ORDER BY timestamp DESC LIMIT 20', [userId]);
+function getPriceHistory(guildId, userId) {
+  assertGuild(guildId, 'getPriceHistory');
+  const result = db.exec('SELECT * FROM price_history WHERE guild_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT 20', [guildId, userId]);
   if (result.length === 0) return [];
   
   return result[0].values.map(row => {
@@ -407,10 +583,11 @@ function getPriceHistory(userId) {
 }
 
 // Get price history within a time range for charting
-function getPriceHistoryByTimeRange(userId, startTime) {
+function getPriceHistoryByTimeRange(guildId, userId, startTime) {
+  assertGuild(guildId, 'getPriceHistoryByTimeRange');
   const result = db.exec(
-    'SELECT * FROM price_history WHERE user_id = ? AND timestamp >= ? ORDER BY timestamp ASC',
-    [userId, startTime]
+    'SELECT * FROM price_history WHERE guild_id = ? AND user_id = ? AND timestamp >= ? ORDER BY timestamp ASC',
+    [guildId, userId, startTime]
   );
   if (result.length === 0) return [];
   
@@ -423,8 +600,9 @@ function getPriceHistoryByTimeRange(userId, startTime) {
 // Calculate activity streak and bonus (with 7-day expiration at max tier)
 // Pure streak calculation — NO side effects, safe to call from anywhere
 // Used by calculateStockPrice, stock panel display, etc.
-function calculateStreakInfo(userId) {
-  const user = getUser(userId);
+function calculateStreakInfo(guildId, userId) {
+  assertGuild(guildId, 'calculateStreakInfo');
+  const user = getUser(guildId, userId);
   if (!user) return { days: 0, tier: 0, bonus: 0 };
   
   const oneDayMs = 24 * 60 * 60 * 1000;
@@ -438,8 +616,8 @@ function calculateStreakInfo(userId) {
   
   // Get all message timestamps since cutoff
   const messagesResult = db.exec(
-    "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK') ORDER BY timestamp DESC",
-    [userId, cutoffTime]
+    "SELECT timestamp FROM transactions WHERE guild_id = ? AND buyer_id = ? AND timestamp > ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK') ORDER BY timestamp DESC",
+    [guildId, userId, cutoffTime]
   );
   
   // Build a set of days (as day numbers from epoch) that have activity
@@ -495,8 +673,9 @@ function calculateStreakInfo(userId) {
 
 // Full streak info with side effects — ONLY call from message handler in bot.js
 // Handles DB writes for tier tracking, expiration, and announcements
-function getStreakInfo(userId) {
-  const user = getUser(userId);
+function getStreakInfo(guildId, userId) {
+  assertGuild(guildId, 'getStreakInfo');
+  const user = getUser(guildId, userId);
   if (!user) return { days: 0, tier: 0, bonus: 0, newTier: false };
   
   const oneDayMs = 24 * 60 * 60 * 1000;
@@ -504,7 +683,7 @@ function getStreakInfo(userId) {
   const now = Date.now();
   
   // Get the pure calculation first
-  const info = calculateStreakInfo(userId);
+  const info = calculateStreakInfo(guildId, userId);
   const streakDays = info.days;
   
   // Recalculate currentTier from days (need the raw tier before expiration check)
@@ -520,8 +699,8 @@ function getStreakInfo(userId) {
   if (currentTier === 3 && storedTier === 3 && tierReachedTime > 0) {
     if (now - tierReachedTime >= sevenDaysMs) {
       // Gold expired — reset entire streak
-      db.run('UPDATE users SET streak_tier = 0, streak_tier_reached = 0, streak_reset_time = ? WHERE user_id = ?', 
-        [now, userId]);
+      db.run('UPDATE users SET streak_tier = 0, streak_tier_reached = 0, streak_reset_time = ? WHERE guild_id = ? AND user_id = ?', 
+        [now, guildId, userId]);
       saveDatabase();
       return { days: 0, tier: 0, bonus: 0, expired: true, newTier: false };
     }
@@ -532,13 +711,13 @@ function getStreakInfo(userId) {
   if (currentTier > storedTier) {
     newTier = true;
     const reachedTime = currentTier === 3 ? now : 0; // Only track time for max tier
-    db.run('UPDATE users SET streak_tier = ?, streak_tier_reached = ? WHERE user_id = ?', 
-      [currentTier, reachedTime, userId]);
+    db.run('UPDATE users SET streak_tier = ?, streak_tier_reached = ? WHERE guild_id = ? AND user_id = ?', 
+      [currentTier, reachedTime, guildId, userId]);
     saveDatabase();
   } else if (currentTier < storedTier) {
     // User lost their streak, update stored tier
-    db.run('UPDATE users SET streak_tier = ?, streak_tier_reached = 0 WHERE user_id = ?', 
-      [currentTier, userId]);
+    db.run('UPDATE users SET streak_tier = ?, streak_tier_reached = 0 WHERE guild_id = ? AND user_id = ?', 
+      [currentTier, guildId, userId]);
     saveDatabase();
   }
   
@@ -635,7 +814,8 @@ function calculateDailyContribution(messageCount, settings) {
 }
 
 // Calculate stock price (guildId optional - for price impact delay and market events)
-function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excludeEvents = false, lpModifier = 0) {
+function calculateStockPrice(userId, guildId, excludeBuyerId = null, excludeEvents = false, lpModifier = 0) {
+  assertGuild(guildId, 'calculateStockPrice');
   // Check price cache first
   const cacheKey = `${userId}:${guildId || 'null'}${excludeBuyerId ? `:ex${excludeBuyerId}` : ''}${excludeEvents ? ':noev' : ''}${lpModifier ? `:lp${lpModifier}` : ''}`;
   const cached = priceCache.get(cacheKey);
@@ -643,7 +823,7 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
     return cached.price;
   }
 
-  const user = getUser(userId);
+  const user = getUser(guildId, userId);
   if (!user) return 100.0;
 
   // Get activity tier settings
@@ -656,8 +836,8 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
   if (tierSettings.enabled) {
     // Get messages grouped by day within the window
     const messagesResult = db.exec(
-      "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK') ORDER BY timestamp ASC",
-      [userId, windowAgo]
+      "SELECT timestamp FROM transactions WHERE guild_id = ? AND buyer_id = ? AND timestamp > ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK') ORDER BY timestamp ASC",
+      [guildId, userId, windowAgo]
     );
     
     if (messagesResult.length > 0 && messagesResult[0].values.length > 0) {
@@ -683,8 +863,8 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
   } else {
     // Legacy flat rate system (disabled diminishing returns)
     const recentMessagesResult = db.exec(
-      "SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK')",
-      [userId, windowAgo]
+      "SELECT COUNT(*) as count FROM transactions WHERE guild_id = ? AND buyer_id = ? AND timestamp > ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK')",
+      [guildId, userId, windowAgo]
     );
     
     let recentMessages = user.total_messages;
@@ -697,7 +877,7 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
   }
   
   // Get streak info (pure calculation — no side effects)
-  const streakInfo = calculateStreakInfo(userId);
+  const streakInfo = calculateStreakInfo(guildId, userId);
   const streakBonus = streakInfo.bonus;
   
   // Base value grows permanently per message (rate configurable via admin panel, default 0.075)
@@ -720,11 +900,11 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
   let shareQuery, shareParams;
   if (excludeBuyerId) {
     // Exclude a specific buyer's shares from demand calculation (prevents self-pump-and-dump)
-    shareQuery = 'SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ? AND owner_id != ?';
-    shareParams = [userId, excludeBuyerId];
+    shareQuery = 'SELECT SUM(shares) as total FROM stocks WHERE guild_id = ? AND stock_user_id = ? AND owner_id != ?';
+    shareParams = [guildId, userId, excludeBuyerId];
   } else {
-    shareQuery = 'SELECT SUM(shares) as total FROM stocks WHERE stock_user_id = ?';
-    shareParams = [userId];
+    shareQuery = 'SELECT SUM(shares) as total FROM stocks WHERE guild_id = ? AND stock_user_id = ?';
+    shareParams = [guildId, userId];
   }
   const result = db.exec(shareQuery, shareParams);
   let totalShares = result.length > 0 && result[0].values.length > 0 ? result[0].values[0][0] : 0;
@@ -788,7 +968,8 @@ function calculateStockPrice(userId, guildId = null, excludeBuyerId = null, excl
 
 // Get top stocks by value
 function getLeaderboard(limit = 10, guildId = null) {
-  const usersResult = db.exec('SELECT * FROM users');
+  assertGuild(guildId, 'getLeaderboard');
+  const usersResult = db.exec('SELECT * FROM users WHERE guild_id = ?', [guildId]);
   
   if (usersResult.length === 0 || usersResult[0].values.length === 0) return [];
   
@@ -798,7 +979,7 @@ function getLeaderboard(limit = 10, guildId = null) {
   });
 
   // Batch-fetch all share counts in one query
-  const allSharesResult = db.exec('SELECT stock_user_id, SUM(shares) as total FROM stocks WHERE shares > 0 GROUP BY stock_user_id');
+  const allSharesResult = db.exec('SELECT stock_user_id, SUM(shares) as total FROM stocks WHERE guild_id = ? AND shares > 0 GROUP BY stock_user_id', [guildId]);
   const sharesMap = new Map();
   if (allSharesResult.length > 0) {
     for (const row of allSharesResult[0].values) {
@@ -830,7 +1011,8 @@ function getLeaderboard(limit = 10, guildId = null) {
 
 // Get a user's rank on the stock price leaderboard
 function getStockRank(userId, guildId = null) {
-  const usersResult = db.exec('SELECT * FROM users');
+  assertGuild(guildId, 'getStockRank');
+  const usersResult = db.exec('SELECT * FROM users WHERE guild_id = ?', [guildId]);
   
   if (usersResult.length === 0 || usersResult[0].values.length === 0) return null;
   
@@ -855,8 +1037,9 @@ function getStockRank(userId, guildId = null) {
 
 // Get a user's rank on the portfolio value leaderboard
 function getPortfolioRank(userId, guildId = null) {
+  assertGuild(guildId, 'getPortfolioRank');
   // Batch-fetch all holdings in one query
-  const allStocksResult = db.exec('SELECT owner_id, stock_user_id, shares FROM stocks WHERE shares > 0');
+  const allStocksResult = db.exec('SELECT owner_id, stock_user_id, shares FROM stocks WHERE guild_id = ? AND shares > 0', [guildId]);
   if (!allStocksResult.length || !allStocksResult[0].values.length) return null;
 
   // Group by owner
@@ -897,10 +1080,11 @@ function getDb() {
 }
 
 // Get all shareholders of a specific stock (for splits/dividends)
-function getAllStockHolders(stockUserId) {
+function getAllStockHolders(guildId, stockUserId) {
+  assertGuild(guildId, 'getAllStockHolders');
   const result = db.exec(
-    'SELECT owner_id, shares, avg_buy_price FROM stocks WHERE stock_user_id = ? AND shares > 0',
-    [stockUserId]
+    'SELECT owner_id, shares, avg_buy_price FROM stocks WHERE guild_id = ? AND stock_user_id = ? AND shares > 0',
+    [guildId, stockUserId]
   );
   
   if (result.length === 0) return [];
@@ -913,40 +1097,45 @@ function getAllStockHolders(stockUserId) {
 }
 
 // Set exact share count (for splits)
-function setShares(ownerId, stockUserId, newShares) {
+function setShares(guildId, ownerId, stockUserId, newShares) {
+  assertGuild(guildId, 'setShares');
   if (newShares <= 0) {
-    db.run('DELETE FROM stocks WHERE owner_id = ? AND stock_user_id = ?', [ownerId, stockUserId]);
+    db.run('DELETE FROM stocks WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?', [guildId, ownerId, stockUserId]);
   } else {
-    db.run('UPDATE stocks SET shares = ? WHERE owner_id = ? AND stock_user_id = ?', 
-      [newShares, ownerId, stockUserId]);
+    db.run('UPDATE stocks SET shares = ? WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?', 
+      [newShares, guildId, ownerId, stockUserId]);
   }
   saveDatabase();
 }
 
 // Adjust avg_buy_price after split (price / multiplier)
-function adjustAvgBuyPrice(stockUserId, multiplier) {
-  db.run('UPDATE stocks SET avg_buy_price = avg_buy_price / ? WHERE stock_user_id = ?',
-    [multiplier, stockUserId]);
+function adjustAvgBuyPrice(guildId, stockUserId, multiplier) {
+  assertGuild(guildId, 'adjustAvgBuyPrice');
+  db.run('UPDATE stocks SET avg_buy_price = avg_buy_price / ? WHERE guild_id = ? AND stock_user_id = ?',
+    [multiplier, guildId, stockUserId]);
   saveDatabase();
 }
 
 // Update price modifier for a user (used by splits)
 // Clamped to [0.0001, 10000] to prevent runaway values from repeated splits
-function setPriceModifier(userId, modifier) {
+function setPriceModifier(guildId, userId, modifier) {
+  assertGuild(guildId, 'setPriceModifier');
   modifier = Math.max(0.0001, Math.min(10000, modifier));
-  db.run('UPDATE users SET price_modifier = ? WHERE user_id = ?', [modifier, userId]);
+  db.run('UPDATE users SET price_modifier = ? WHERE guild_id = ? AND user_id = ?', [modifier, guildId, userId]);
   saveDatabase();
 }
 
 // Get current price modifier
-function getPriceModifier(userId) {
-  const user = getUser(userId);
+function getPriceModifier(guildId, userId) {
+  assertGuild(guildId, 'getPriceModifier');
+  const user = getUser(guildId, userId);
   return user ? (user.price_modifier || 1.0) : 1.0;
 }
 
 // Admin: Add shares to a user's portfolio
-function adminAddShares(ownerId, stockUserId, shares, avgPrice) {
-  const existing = getStock(ownerId, stockUserId);
+function adminAddShares(guildId, ownerId, stockUserId, shares, avgPrice) {
+  assertGuild(guildId, 'adminAddShares');
+  const existing = getStock(guildId, ownerId, stockUserId);
   
   if (existing) {
     // Calculate new average price
@@ -954,19 +1143,20 @@ function adminAddShares(ownerId, stockUserId, shares, avgPrice) {
     const totalValue = (existing.shares * existing.avg_buy_price) + (shares * avgPrice);
     const newAvgPrice = totalValue / totalShares;
     
-    db.run('UPDATE stocks SET shares = ?, avg_buy_price = ? WHERE owner_id = ? AND stock_user_id = ?',
-      [totalShares, newAvgPrice, ownerId, stockUserId]);
+    db.run('UPDATE stocks SET shares = ?, avg_buy_price = ? WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?',
+      [totalShares, newAvgPrice, guildId, ownerId, stockUserId]);
   } else {
-    db.run('INSERT INTO stocks (owner_id, stock_user_id, shares, avg_buy_price) VALUES (?, ?, ?, ?)',
-      [ownerId, stockUserId, shares, avgPrice]);
+    db.run('INSERT INTO stocks (guild_id, owner_id, stock_user_id, shares, avg_buy_price) VALUES (?, ?, ?, ?, ?)',
+      [guildId, ownerId, stockUserId, shares, avgPrice]);
   }
   saveDatabase();
   return true;
 }
 
 // Admin: Remove shares from a user's portfolio
-function adminRemoveShares(ownerId, stockUserId, shares) {
-  const existing = getStock(ownerId, stockUserId);
+function adminRemoveShares(guildId, ownerId, stockUserId, shares) {
+  assertGuild(guildId, 'adminRemoveShares');
+  const existing = getStock(guildId, ownerId, stockUserId);
   
   if (!existing) return { success: false, reason: 'User does not own this stock' };
   if (existing.shares < shares) return { success: false, reason: `User only has ${existing.shares} shares` };
@@ -974,10 +1164,10 @@ function adminRemoveShares(ownerId, stockUserId, shares) {
   const newShares = existing.shares - shares;
   
   if (newShares <= 0) {
-    db.run('DELETE FROM stocks WHERE owner_id = ? AND stock_user_id = ?', [ownerId, stockUserId]);
+    db.run('DELETE FROM stocks WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?', [guildId, ownerId, stockUserId]);
   } else {
-    db.run('UPDATE stocks SET shares = ? WHERE owner_id = ? AND stock_user_id = ?',
-      [newShares, ownerId, stockUserId]);
+    db.run('UPDATE stocks SET shares = ? WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?',
+      [newShares, guildId, ownerId, stockUserId]);
   }
   saveDatabase();
   return { success: true, newShares };
@@ -1029,5 +1219,6 @@ module.exports = {
   updateActivityTierSettings,
   calculateDailyContribution,
   migrateAddColumn,
+  migratePerGuildMarket,
   shutdownDatabase
 };

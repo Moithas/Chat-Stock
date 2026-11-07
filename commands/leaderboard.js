@@ -196,7 +196,8 @@ async function buildPortfolioLeaderboard(guildId, page = 0) {
 
   // Batch-fetch all stock holdings in one query instead of per-user
   const allStocksResult = db.exec(
-    'SELECT s.owner_id, s.stock_user_id, s.shares, s.avg_buy_price, u.username FROM stocks s JOIN users u ON s.owner_id = u.user_id WHERE s.shares > 0'
+    'SELECT s.owner_id, s.stock_user_id, s.shares, s.avg_buy_price, u.username FROM stocks s JOIN users u ON s.owner_id = u.user_id AND u.guild_id = s.guild_id WHERE s.guild_id = ? AND s.shares > 0',
+    [guildId]
   );
 
   if (!allStocksResult.length || !allStocksResult[0].values.length) {

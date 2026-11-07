@@ -6,9 +6,9 @@ const { getSupportServerUrl } = require('../admin');
 // Help page content
 const helpPages = {
   overview: {
-    title: '📊 Chat-Stock Overview',
+    title: '📊 Black Ledger Overview',
     color: 0x5865F2,
-    description: `Welcome to **Chat-Stock** - a full economy game built around server activity!\n\nEvery member is a tradeable stock. Chat more to increase your value, invest in active members, and grow your wealth through various activities.`,
+    description: `Welcome to **Black Ledger** - a full economy game built around server activity!\n\nEvery member is a tradeable stock. Chat more to increase your value, invest in active members, and grow your wealth through various activities.`,
     fields: [
       {
         name: '🎯 Getting Started',
@@ -858,7 +858,7 @@ function buildHelpEmbed(pageKey) {
     .setTitle(page.title)
     .setDescription(page.description)
     .setTimestamp()
-    .setFooter({ text: 'Chat-Stock Economy Bot • Use the menu to browse topics' });
+    .setFooter({ text: 'Black Ledger Economy Bot • Use the menu to browse topics' });
   
   for (const field of page.fields) {
     embed.addFields(field);
@@ -920,7 +920,7 @@ function isUserAdmin(member) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('help')
-    .setDescription('Learn how Chat-Stock works - comprehensive game guide'),
+    .setDescription('Learn how Black Ledger works - comprehensive game guide'),
 
   async execute(interaction) {
     const isAdmin = isUserAdmin(interaction.member);

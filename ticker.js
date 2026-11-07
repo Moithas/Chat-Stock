@@ -6,25 +6,19 @@ const { getCurrency } = require('./admin');
 
 
 
-// Store reference to Discord client and channel ID
+// Store reference to Discord client
 let discordClient = null;
-let tickerChannelId = process.env.TICKER_CHANNEL_ID || null;
-let dashboardChannelId = process.env.DASHBOARD_CHANNEL_ID || null; // Separate channel for dashboard
 
 // Store the dashboard message ID so we can edit it (per guild)
 const dashboardMessages = new Map(); // guildId -> messageId
 
-// Dashboard settings cache
-let dashboardSettings = {
-  enabled: true,
-  updateIntervalMinutes: 3,
-  deleteAndRepost: true, // If true, deletes old message and posts new one to stay at bottom
-  showChart: false,
-  topStocksCount: 10,
-  topMoversCount: 5
-};
+// Per-guild settings cache (guildId -> settings object)
+const settingsCache = new Map();
 
-// Track last known prices for comparison
+// Per-guild timestamp of the last dashboard update (guildId -> ms)
+const lastDashboardUpdate = new Map();
+
+// Track last known prices for comparison, keyed by `${guildId}:${userId}`
 const lastKnownPrices = new Map();
 
 // Threshold for significant price movement (percentage)
@@ -33,118 +27,201 @@ const PRICE_CHANGE_THRESHOLD = 10; // 10% change triggers alert
 // Dashboard update interval reference (so we can change it)
 let dashboardIntervalId = null;
 
-// Guards against overlapping async dashboard runs (setInterval fires on a fixed
-// schedule regardless of completion; overlap compounds CPU and starves the WS).
-let isUpdatingDashboard = false;
+// Guards against overlapping async dashboard runs per guild (the shared loop
+// fires on a fixed schedule regardless of completion; overlap compounds CPU).
+const updatingGuilds = new Set();
 
-// Initialize dashboard settings table
+// Default settings used when a guild has no stored row yet
+const DEFAULT_SETTINGS = {
+  enabled: true,
+  updateIntervalMinutes: 3,
+  deleteAndRepost: true, // If true, deletes old message and posts new one to stay at bottom
+  showChart: false,
+  topStocksCount: 10,
+  topMoversCount: 5,
+  dashboardChannelId: null,
+  tickerChannelId: null
+};
+
+// Initialize (and migrate) the per-guild dashboard settings table
 function initDashboardSettings() {
-  const db = getDb();
-  if (!db) return;
-  
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dashboard_settings (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      enabled INTEGER DEFAULT 1,
-      update_interval_minutes INTEGER DEFAULT 3,
-      delete_and_repost INTEGER DEFAULT 1,
-      show_chart INTEGER DEFAULT 0,
-      top_stocks_count INTEGER DEFAULT 10,
-      top_movers_count INTEGER DEFAULT 5,
-      dashboard_channel_id TEXT
-    )
-  `);
-  
-  // Insert default if not exists
-  db.run(`INSERT OR IGNORE INTO dashboard_settings (id) VALUES (1)`);
-  
-  // Load settings
-  loadDashboardSettings();
-}
+  const wrapper = getDb();
+  if (!wrapper) return;
+  const raw = wrapper.db;
 
-function loadDashboardSettings() {
-  const db = getDb();
-  if (!db) return;
-  
-  const result = db.exec(`SELECT * FROM dashboard_settings WHERE id = 1`);
-  if (result.length > 0 && result[0].values.length > 0) {
-    const row = result[0].values[0];
-    const cols = result[0].columns;
-    const data = cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
-    
-    dashboardSettings = {
-      enabled: data.enabled === 1,
-      updateIntervalMinutes: data.update_interval_minutes || 3,
-      deleteAndRepost: data.delete_and_repost === 1,
-      showChart: data.show_chart === 1,
-      topStocksCount: data.top_stocks_count || 10,
-      topMoversCount: data.top_movers_count || 5
-    };
-    
-    // Override channel if set in database
-    if (data.dashboard_channel_id) {
-      dashboardChannelId = data.dashboard_channel_id;
+  const migrate = raw.transaction(() => {
+    const info = raw.prepare('PRAGMA table_info(dashboard_settings)').all();
+    const hasTable = info.length > 0;
+    const colNames = info.map(c => c.name);
+    const isOldSchema = hasTable && colNames.includes('id') && !colNames.includes('guild_id');
+
+    let oldRow = null;
+    if (isOldSchema) {
+      oldRow = raw.prepare('SELECT * FROM dashboard_settings WHERE id = 1').get();
+      raw.exec('DROP TABLE dashboard_settings');
     }
-  }
-}
 
-function saveDashboardSettings() {
-  const db = getDb();
-  if (!db) return;
-  
-  db.run(`
-    UPDATE dashboard_settings SET
-      enabled = ?,
-      update_interval_minutes = ?,
-      delete_and_repost = ?,
-      show_chart = ?,
-      top_stocks_count = ?,
-      top_movers_count = ?,
-      dashboard_channel_id = ?
-    WHERE id = 1
-  `, [
-    dashboardSettings.enabled ? 1 : 0,
-    dashboardSettings.updateIntervalMinutes,
-    dashboardSettings.deleteAndRepost ? 1 : 0,
-    dashboardSettings.showChart ? 1 : 0,
-    dashboardSettings.topStocksCount,
-    dashboardSettings.topMoversCount,
-    dashboardChannelId
-  ]);
-  
+    raw.exec(`
+      CREATE TABLE IF NOT EXISTS dashboard_settings (
+        guild_id TEXT PRIMARY KEY,
+        enabled INTEGER DEFAULT 1,
+        update_interval_minutes INTEGER DEFAULT 3,
+        delete_and_repost INTEGER DEFAULT 1,
+        show_chart INTEGER DEFAULT 0,
+        top_stocks_count INTEGER DEFAULT 10,
+        top_movers_count INTEGER DEFAULT 5,
+        dashboard_channel_id TEXT,
+        ticker_channel_id TEXT
+      )
+    `);
+
+    const legacyGuildId = (process.env.LEGACY_GUILD_ID || '').trim();
+
+    if (isOldSchema) {
+      // Migrated from the old single-row schema: copy the display settings into
+      // a single per-guild row if a legacy guild id is configured.
+      if (legacyGuildId) {
+        const tickerChannelId = process.env.TICKER_CHANNEL_ID || null;
+        const dashboardChannelId = (oldRow && oldRow.dashboard_channel_id) || process.env.DASHBOARD_CHANNEL_ID || null;
+        raw.prepare(`
+          INSERT OR IGNORE INTO dashboard_settings
+            (guild_id, enabled, update_interval_minutes, delete_and_repost, show_chart, top_stocks_count, top_movers_count, dashboard_channel_id, ticker_channel_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          legacyGuildId,
+          oldRow && oldRow.enabled != null ? oldRow.enabled : 1,
+          oldRow && oldRow.update_interval_minutes != null ? oldRow.update_interval_minutes : 3,
+          oldRow && oldRow.delete_and_repost != null ? oldRow.delete_and_repost : 1,
+          oldRow && oldRow.show_chart != null ? oldRow.show_chart : 0,
+          oldRow && oldRow.top_stocks_count != null ? oldRow.top_stocks_count : 10,
+          oldRow && oldRow.top_movers_count != null ? oldRow.top_movers_count : 5,
+          dashboardChannelId,
+          tickerChannelId
+        );
+      }
+    } else if (!hasTable && legacyGuildId) {
+      // Fresh install: optionally seed one legacy guild row from env channels.
+      const tickerChannelId = process.env.TICKER_CHANNEL_ID || null;
+      const dashboardChannelId = process.env.DASHBOARD_CHANNEL_ID || null;
+      raw.prepare(`
+        INSERT OR IGNORE INTO dashboard_settings (guild_id, dashboard_channel_id, ticker_channel_id)
+        VALUES (?, ?, ?)
+      `).run(legacyGuildId, dashboardChannelId, tickerChannelId);
+    }
+  });
+
+  migrate();
   saveDatabase();
 }
 
-function getDashboardSettings() {
-  return { ...dashboardSettings, dashboardChannelId };
-}
-
-function updateDashboardSettings(newSettings) {
-  if (newSettings.enabled !== undefined) dashboardSettings.enabled = newSettings.enabled;
-  if (newSettings.updateIntervalMinutes !== undefined) dashboardSettings.updateIntervalMinutes = newSettings.updateIntervalMinutes;
-  if (newSettings.deleteAndRepost !== undefined) dashboardSettings.deleteAndRepost = newSettings.deleteAndRepost;
-  if (newSettings.showChart !== undefined) dashboardSettings.showChart = newSettings.showChart;
-  if (newSettings.topStocksCount !== undefined) dashboardSettings.topStocksCount = newSettings.topStocksCount;
-  if (newSettings.topMoversCount !== undefined) dashboardSettings.topMoversCount = newSettings.topMoversCount;
-  if (newSettings.dashboardChannelId !== undefined) dashboardChannelId = newSettings.dashboardChannelId;
-  
-  saveDashboardSettings();
-  
-  // Restart the dashboard interval if interval changed
-  if (newSettings.updateIntervalMinutes !== undefined) {
-    restartDashboardInterval();
+// Read a raw settings row for a guild (or null if none)
+function readSettingsRow(guildId) {
+  const db = getDb();
+  if (!db) return null;
+  const result = db.exec('SELECT * FROM dashboard_settings WHERE guild_id = ?', [guildId]);
+  if (result.length > 0 && result[0].values.length > 0) {
+    const row = result[0].values[0];
+    const cols = result[0].columns;
+    return cols.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {});
   }
+  return null;
 }
 
-function setDashboardChannel(channelId) {
-  dashboardChannelId = channelId;
-  saveDashboardSettings();
+function rowToSettings(data) {
+  return {
+    enabled: data.enabled === 1,
+    updateIntervalMinutes: data.update_interval_minutes || 3,
+    deleteAndRepost: data.delete_and_repost === 1,
+    showChart: data.show_chart === 1,
+    topStocksCount: data.top_stocks_count || 10,
+    topMoversCount: data.top_movers_count || 5,
+    dashboardChannelId: data.dashboard_channel_id || null,
+    tickerChannelId: data.ticker_channel_id || null
+  };
+}
+
+// Persist a guild's settings (insert or update) and flush to disk
+function persistSettings(guildId, settings) {
+  const db = getDb();
+  if (!db) return;
+  db.run(`
+    INSERT INTO dashboard_settings
+      (guild_id, enabled, update_interval_minutes, delete_and_repost, show_chart, top_stocks_count, top_movers_count, dashboard_channel_id, ticker_channel_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      enabled = excluded.enabled,
+      update_interval_minutes = excluded.update_interval_minutes,
+      delete_and_repost = excluded.delete_and_repost,
+      show_chart = excluded.show_chart,
+      top_stocks_count = excluded.top_stocks_count,
+      top_movers_count = excluded.top_movers_count,
+      dashboard_channel_id = excluded.dashboard_channel_id,
+      ticker_channel_id = excluded.ticker_channel_id
+  `, [
+    guildId,
+    settings.enabled ? 1 : 0,
+    settings.updateIntervalMinutes,
+    settings.deleteAndRepost ? 1 : 0,
+    settings.showChart ? 1 : 0,
+    settings.topStocksCount,
+    settings.topMoversCount,
+    settings.dashboardChannelId || null,
+    settings.tickerChannelId || null
+  ]);
+  saveDatabase();
+}
+
+function getDashboardSettings(guildId) {
+  if (settingsCache.has(guildId)) return settingsCache.get(guildId);
+  const data = readSettingsRow(guildId);
+  const settings = data ? rowToSettings(data) : { ...DEFAULT_SETTINGS };
+  settingsCache.set(guildId, settings);
+  return settings;
+}
+
+// Resolve the channel used for alerts/announcements for a guild
+function getAlertChannelId(guildId) {
+  const settings = getDashboardSettings(guildId);
+  return settings.tickerChannelId || settings.dashboardChannelId;
+}
+
+function updateDashboardSettings(guildId, newSettings) {
+  const settings = getDashboardSettings(guildId);
+  if (newSettings.enabled !== undefined) settings.enabled = newSettings.enabled;
+  if (newSettings.updateIntervalMinutes !== undefined) settings.updateIntervalMinutes = newSettings.updateIntervalMinutes;
+  if (newSettings.deleteAndRepost !== undefined) settings.deleteAndRepost = newSettings.deleteAndRepost;
+  if (newSettings.showChart !== undefined) settings.showChart = newSettings.showChart;
+  if (newSettings.topStocksCount !== undefined) settings.topStocksCount = newSettings.topStocksCount;
+  if (newSettings.topMoversCount !== undefined) settings.topMoversCount = newSettings.topMoversCount;
+  if (newSettings.dashboardChannelId !== undefined) settings.dashboardChannelId = newSettings.dashboardChannelId;
+  if (newSettings.tickerChannelId !== undefined) settings.tickerChannelId = newSettings.tickerChannelId;
+
+  settingsCache.set(guildId, settings);
+  persistSettings(guildId, settings);
+}
+
+function setDashboardChannel(guildId, channelId) {
+  const settings = getDashboardSettings(guildId);
+  settings.dashboardChannelId = channelId;
+  settingsCache.set(guildId, settings);
+  persistSettings(guildId, settings);
+}
+
+function setTickerChannel(guildId, channelId) {
+  const settings = getDashboardSettings(guildId);
+  settings.tickerChannelId = channelId;
+  settingsCache.set(guildId, settings);
+  persistSettings(guildId, settings);
+}
+
+function getTickerChannel(guildId) {
+  return getDashboardSettings(guildId).tickerChannelId;
 }
 
 // Generate a sparkline chart URL for a single stock
 async function generateSparkline(userId, username, priceChange, guildId = null) {
   const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-  let priceData = getPriceHistoryByTimeRange(userId, oneDayAgo);
+  let priceData = getPriceHistoryByTimeRange(guildId, userId, oneDayAgo);
   const currentPrice = calculateStockPrice(userId, guildId, null, true);
   
   // Add current price
@@ -194,7 +271,7 @@ async function generateSparkline(userId, username, priceChange, guildId = null) 
 // This recalculates based on message activity up to that timestamp
 function calculateHistoricalPrice(userId, asOfTimestamp, guildId = null) {
   const db = getDb();
-  const user = getUser(userId);
+  const user = getUser(guildId, userId);
   if (!user) return 100.0;
   
   // Get activity tier settings
@@ -207,8 +284,8 @@ function calculateHistoricalPrice(userId, asOfTimestamp, guildId = null) {
   if (tierSettings.enabled) {
     // Get messages within the window AS OF the target timestamp
     const messagesResult = db.exec(
-      "SELECT timestamp FROM transactions WHERE buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK') ORDER BY timestamp ASC",
-      [userId, windowAgo, asOfTimestamp]
+      "SELECT timestamp FROM transactions WHERE guild_id = ? AND buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK') ORDER BY timestamp ASC",
+      [guildId, userId, windowAgo, asOfTimestamp]
     );
     
     if (messagesResult.length > 0 && messagesResult[0].values.length > 0) {
@@ -260,8 +337,8 @@ function calculateHistoricalPrice(userId, asOfTimestamp, guildId = null) {
   } else {
     // Legacy flat rate system
     const recentMessagesResult = db.exec(
-      "SELECT COUNT(*) as count FROM transactions WHERE buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK')",
-      [userId, windowAgo, asOfTimestamp]
+      "SELECT COUNT(*) as count FROM transactions WHERE guild_id = ? AND buyer_id = ? AND timestamp > ? AND timestamp <= ? AND transaction_type IN ('MESSAGE', 'MC_BLOCK')",
+      [guildId, userId, windowAgo, asOfTimestamp]
     );
     
     let recentMessages = 0;
@@ -414,7 +491,8 @@ async function generateDashboardChart(topStocks, gainers, losers, guildId = null
 
 // Build the market dashboard
 async function buildMarketDashboard(guildId = null) {
-  const users = getAllUsers();
+  const settings = getDashboardSettings(guildId);
+  const users = getAllUsers(guildId);
   if (!users || users.length === 0) return null;
 
   const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
@@ -422,7 +500,7 @@ async function buildMarketDashboard(guildId = null) {
   const db = getDb();
 
   // Traditional market cap is price multiplied by outstanding shares.
-  const sharesResult = db.exec('SELECT stock_user_id, SUM(shares) as total FROM stocks WHERE shares > 0 GROUP BY stock_user_id');
+  const sharesResult = db.exec('SELECT stock_user_id, SUM(shares) as total FROM stocks WHERE guild_id = ? AND shares > 0 GROUP BY stock_user_id', [guildId]);
   const sharesMap = new Map();
   if (sharesResult.length > 0) {
     for (const row of sharesResult[0].values) {
@@ -436,7 +514,7 @@ async function buildMarketDashboard(guildId = null) {
   let processed = 0;
   for (const user of users) {
     const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
-    const dayHistory = getPriceHistoryByTimeRange(user.user_id, oneDayAgo);
+    const dayHistory = getPriceHistoryByTimeRange(guildId, user.user_id, oneDayAgo);
     const totalShares = sharesMap.get(user.user_id) || 0;
     
     let dayAgoPrice = currentPrice;
@@ -461,10 +539,10 @@ async function buildMarketDashboard(guildId = null) {
   }
 
   // Sort for different categories
-  const topByPrice = [...stockData].sort((a, b) => b.currentPrice - a.currentPrice).slice(0, dashboardSettings.topStocksCount);
-  const gainers = [...stockData].filter(s => s.changePercent > 0).sort((a, b) => b.changePercent - a.changePercent).slice(0, dashboardSettings.topMoversCount);
+  const topByPrice = [...stockData].sort((a, b) => b.currentPrice - a.currentPrice).slice(0, settings.topStocksCount);
+  const gainers = [...stockData].filter(s => s.changePercent > 0).sort((a, b) => b.changePercent - a.changePercent).slice(0, settings.topMoversCount);
   // Exclude recent splitters from losers - splits cause price drops but aren't negative events
-  const losers = [...stockData].filter(s => s.changePercent < 0 && !s.recentlySplit).sort((a, b) => a.changePercent - b.changePercent).slice(0, dashboardSettings.topMoversCount);
+  const losers = [...stockData].filter(s => s.changePercent < 0 && !s.recentlySplit).sort((a, b) => a.changePercent - b.changePercent).slice(0, settings.topMoversCount);
 
   // Market summary
   const totalMarketCap = stockData.reduce((sum, s) => sum + (s.currentPrice * s.totalShares), 0);
@@ -473,17 +551,17 @@ async function buildMarketDashboard(guildId = null) {
 
   // Generate the chart (if enabled)
   let chartUrl = null;
-  if (dashboardSettings.showChart) {
+  if (settings.showChart) {
     chartUrl = await generateDashboardChart(topByPrice, gainers, losers, guildId);
   }
 
   // Build embed
   const embed = new EmbedBuilder()
     .setColor(avgChange >= 0 ? 0x00c853 : 0xff5252)
-    .setTitle('📊 CHAT-STOCK MARKET DASHBOARD')
-    .setDescription(`**Live Market Data** • Updates every ${dashboardSettings.updateIntervalMinutes} minute${dashboardSettings.updateIntervalMinutes !== 1 ? 's' : ''}`)
+    .setTitle('📊 Black Ledger MARKET DASHBOARD')
+    .setDescription(`**Live Market Data** • Updates every ${settings.updateIntervalMinutes} minute${settings.updateIntervalMinutes !== 1 ? 's' : ''}`)
     .setTimestamp()
-    .setFooter({ text: 'Chat-Stock Market Dashboard' });
+    .setFooter({ text: 'Black Ledger Market Dashboard' });
 
   if (chartUrl) {
     embed.setImage(chartUrl);
@@ -498,7 +576,7 @@ async function buildMarketDashboard(guildId = null) {
     return `${medal} **${s.username}** • ${Math.round(s.currentPrice).toLocaleString()} ${getCurrency(guildId)} ${changeEmoji} ${changeStr}`;
   }).join('\n');
 
-  embed.addFields({ name: `💰 Top ${dashboardSettings.topStocksCount} Stocks`, value: topStocksText || 'No data', inline: false });
+  embed.addFields({ name: `💰 Top ${settings.topStocksCount} Stocks`, value: topStocksText || 'No data', inline: false });
 
   // Gainers & Losers side by side
   const gainersText = gainers.length > 0 
@@ -557,30 +635,32 @@ async function cleanupOldDashboardMessages(channel) {
   }
 }
 
-// Update or create the dashboard message
-async function updateDashboard() {
-  if (!discordClient || !dashboardSettings.enabled) return;
-  
+// Update or create the dashboard message for a single guild
+async function updateDashboard(guildId) {
+  if (!discordClient) return;
+
+  const settings = getDashboardSettings(guildId);
+  if (!settings.enabled) return;
+
   // Use dashboard channel if set, otherwise fall back to ticker channel
-  const channelId = dashboardChannelId || tickerChannelId;
+  const channelId = settings.dashboardChannelId || settings.tickerChannelId;
   if (!channelId) return;
 
-  // Skip if a previous run is still in flight so runs can never overlap.
-  if (isUpdatingDashboard) return;
-  isUpdatingDashboard = true;
+  // Skip if a previous run for this guild is still in flight so runs can never overlap.
+  if (updatingGuilds.has(guildId)) return;
+  updatingGuilds.add(guildId);
 
   try {
     const channel = await discordClient.channels.fetch(channelId);
     if (!channel) return;
 
-    const guildId = channel.guild?.id || 'global';
     const embed = await buildMarketDashboard(guildId);
     if (!embed) return;
 
     const existingMsgId = dashboardMessages.get(guildId);
 
     // Delete-and-repost mode: always delete old and post new to stay at bottom
-    if (dashboardSettings.deleteAndRepost) {
+    if (settings.deleteAndRepost) {
       // Try to delete old message by ID if we have it
       if (existingMsgId) {
         try {
@@ -630,43 +710,60 @@ async function updateDashboard() {
     }
     console.error('Error updating dashboard:', error);
   } finally {
-    isUpdatingDashboard = false;
+    updatingGuilds.delete(guildId);
   }
 }
 
-// Start or restart the dashboard update loop
+// Iterate every enabled guild and update the dashboards whose own
+// updateIntervalMinutes has elapsed since their last update.
+async function runDashboardTick() {
+  const db = getDb();
+  if (!db) return;
+
+  const result = db.exec('SELECT guild_id FROM dashboard_settings WHERE enabled = 1');
+  if (result.length === 0 || result[0].values.length === 0) return;
+
+  const now = Date.now();
+  for (const row of result[0].values) {
+    const guildId = row[0];
+    const settings = getDashboardSettings(guildId);
+    const intervalMs = settings.updateIntervalMinutes * 60 * 1000;
+    const last = lastDashboardUpdate.get(guildId) || 0;
+
+    if (now - last >= intervalMs) {
+      lastDashboardUpdate.set(guildId, now);
+      try {
+        await updateDashboard(guildId);
+      } catch (e) {
+        console.error(`Error updating dashboard for guild ${guildId}:`, e.message);
+      }
+    }
+  }
+}
+
+// Start or restart the shared dashboard update loop (one timer for all guilds)
 function restartDashboardInterval() {
   // Clear existing interval
   if (dashboardIntervalId) {
     clearInterval(dashboardIntervalId);
     dashboardIntervalId = null;
   }
-  
-  if (!dashboardSettings.enabled) {
-    console.log('📊 Dashboard disabled');
-    return;
-  }
-  
-  const intervalMs = dashboardSettings.updateIntervalMinutes * 60 * 1000;
-  
-  // Start new interval
-  dashboardIntervalId = setInterval(updateDashboard, intervalMs);
-  
-  console.log(`📊 Dashboard interval set to ${dashboardSettings.updateIntervalMinutes} minutes`);
+
+  // One shared tick every 60s; per-guild cadence is enforced inside the tick.
+  dashboardIntervalId = setInterval(runDashboardTick, 60 * 1000);
+
+  console.log('📊 Dashboard loop running (per-guild cadence)');
 }
 
 // Start the dashboard update loop
 function startDashboard() {
-  const channelId = dashboardChannelId || tickerChannelId;
-  if (!channelId || !dashboardSettings.enabled) return;
-  
-  // Initial update after 5s
-  setTimeout(updateDashboard, 5000);
-  
-  // Start the interval
+  // Initial update after 5s (iterating all guilds)
+  setTimeout(runDashboardTick, 5000);
+
+  // Start the shared interval
   restartDashboardInterval();
-  
-  console.log(`📊 Market dashboard started (updates every ${dashboardSettings.updateIntervalMinutes} minutes)`);
+
+  console.log('📊 Market dashboard started (per-guild updates)');
 }
 
 function initTicker(client) {
@@ -674,11 +771,6 @@ function initTicker(client) {
   
   // Initialize dashboard settings from database
   initDashboardSettings();
-  
-  if (!tickerChannelId && !dashboardChannelId) {
-    console.log('⚠️ TICKER_CHANNEL_ID not set in .env - Stock ticker disabled');
-    return;
-  }
   
   console.log('📈 Stock ticker initialized');
   
@@ -692,62 +784,63 @@ function initTicker(client) {
   scheduleWeeklyReport();
 }
 
-function setTickerChannel(channelId) {
-  tickerChannelId = channelId;
-}
-
 async function checkPriceMovements() {
-  if (!discordClient || !tickerChannelId) return;
-  
-  const users = getAllUsers();
-  if (!users || users.length === 0) return;
-  
-  // Get the guildId from the ticker channel for proper price calculation
-  let guildId = null;
-  try {
-    const channel = await discordClient.channels.fetch(tickerChannelId);
-    if (channel && channel.guild) {
-      guildId = channel.guild.id;
-    }
-  } catch (error) {
-    // Channel fetch failed, continue without guildId
-  }
-  
-  const alerts = [];
-  
-  for (const user of users) {
-    const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
-    const lastPrice = lastKnownPrices.get(user.user_id);
-    
-    if (lastPrice) {
-      const changePercent = ((currentPrice - lastPrice) / lastPrice) * 100;
-      
-      if (Math.abs(changePercent) >= PRICE_CHANGE_THRESHOLD) {
-        alerts.push({
-          userId: user.user_id,
-          username: user.username,
-          oldPrice: lastPrice,
-          newPrice: currentPrice,
-          changePercent: changePercent
-        });
+  if (!discordClient) return;
+
+  const db = getDb();
+  if (!db) return;
+
+  const result = db.exec('SELECT guild_id FROM dashboard_settings');
+  if (result.length === 0 || result[0].values.length === 0) return;
+
+  for (const row of result[0].values) {
+    const guildId = row[0];
+    const channelId = getAlertChannelId(guildId);
+    if (!channelId) continue;
+
+    const users = getAllUsers(guildId);
+    if (!users || users.length === 0) continue;
+
+    const alerts = [];
+
+    for (const user of users) {
+      const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
+      const key = `${guildId}:${user.user_id}`;
+      const lastPrice = lastKnownPrices.get(key);
+
+      if (lastPrice) {
+        const changePercent = ((currentPrice - lastPrice) / lastPrice) * 100;
+
+        if (Math.abs(changePercent) >= PRICE_CHANGE_THRESHOLD) {
+          alerts.push({
+            userId: user.user_id,
+            username: user.username,
+            oldPrice: lastPrice,
+            newPrice: currentPrice,
+            changePercent: changePercent
+          });
+        }
       }
+
+      // Update last known price
+      lastKnownPrices.set(key, currentPrice);
     }
-    
-    // Update last known price
-    lastKnownPrices.set(user.user_id, currentPrice);
-  }
-  
-  // Send alerts
-  for (const alert of alerts) {
-    await sendPriceAlert(alert);
+
+    // Send alerts for this guild
+    for (const alert of alerts) {
+      await sendPriceAlert(guildId, alert);
+    }
   }
 }
 
-async function sendPriceAlert(alert) {
-  if (!discordClient || !tickerChannelId) return;
-  
+async function sendPriceAlert(guildId, alert) {
+  if (!discordClient) return;
+
+  const channelId = getAlertChannelId(guildId);
+  if (!channelId) return;
+
   try {
-    const channel = await discordClient.channels.fetch(tickerChannelId);
+    const channel = await discordClient.channels.fetch(channelId);
     if (!channel) return;
     
     const isPositive = alert.changePercent > 0;
@@ -765,7 +858,7 @@ async function sendPriceAlert(alert) {
         { name: 'Change', value: `${isPositive ? '+' : ''}${alert.changePercent.toFixed(2)}%`, inline: true }
       )
       .setTimestamp()
-      .setFooter({ text: 'Chat-Stock Ticker' });
+      .setFooter({ text: 'Black Ledger Ticker' });
     
     await channel.send({ embeds: [embed] });
   } catch (error) {
@@ -798,25 +891,38 @@ function scheduleWeeklyReport() {
 }
 
 async function sendEarningsReport() {
-  if (!discordClient || !tickerChannelId) return;
-  
+  if (!discordClient) return;
+
+  const db = getDb();
+  if (!db) return;
+
+  const result = db.exec('SELECT guild_id FROM dashboard_settings');
+  if (result.length === 0 || result[0].values.length === 0) return;
+
+  for (const row of result[0].values) {
+    const guildId = row[0];
+    await sendGuildEarningsReport(guildId);
+  }
+}
+
+async function sendGuildEarningsReport(guildId) {
+  const channelId = getAlertChannelId(guildId);
+  if (!channelId) return;
+
   try {
-    const channel = await discordClient.channels.fetch(tickerChannelId);
+    const channel = await discordClient.channels.fetch(channelId);
     if (!channel) return;
     
-    const users = getAllUsers();
+    const users = getAllUsers(guildId);
     if (!users || users.length === 0) return;
     
     // Calculate weekly changes
     const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
     const stockChanges = [];
     
-    // Get guildId from the channel for proper price calculation
-    const guildId = channel.guild?.id || null;
-    
     for (const user of users) {
       const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
-      const weekHistory = getPriceHistoryByTimeRange(user.user_id, oneWeekAgo);
+      const weekHistory = getPriceHistoryByTimeRange(guildId, user.user_id, oneWeekAgo);
       
       let weekAgoPrice = currentPrice; // Default if no history
       if (weekHistory.length > 0) {
@@ -850,7 +956,7 @@ async function sendEarningsReport() {
       .setTitle('📊 Weekly Earnings Report')
       .setDescription(`**Week of ${new Date(oneWeekAgo).toLocaleDateString()} - ${new Date().toLocaleDateString()}**\n\nHere's how the market performed this week!`)
       .setTimestamp()
-      .setFooter({ text: 'Chat-Stock Weekly Report' });
+      .setFooter({ text: 'Black Ledger Weekly Report' });
     
     // Top Gainers
     if (gainers.length > 0) {
@@ -904,24 +1010,22 @@ async function triggerEarningsReport() {
   await sendEarningsReport();
 }
 
-// Get current ticker channel ID
-function getTickerChannel() {
-  return tickerChannelId;
-}
-
 // Send stock split announcement (this replaces the price drop alert since split causes the drop)
 // Note: The main split announcement is handled in stock.js - this just updates tracking to prevent duplicate alerts
-async function sendSplitAnnouncement(userId, username, ratio, oldPrice, newPrice, shareholderCount) {
+async function sendSplitAnnouncement(guildId, userId, username, ratio, oldPrice, newPrice, shareholderCount) {
   // Update last known price to prevent a second alert from the price change
-  lastKnownPrices.set(userId, newPrice);
+  lastKnownPrices.set(`${guildId}:${userId}`, newPrice);
 }
 
 // Send streak milestone announcement
-async function sendStreakAnnouncement(userId, username, streakDays, tier) {
-  if (!discordClient || !tickerChannelId) return;
-  
+async function sendStreakAnnouncement(guildId, userId, username, streakDays, tier) {
+  if (!discordClient) return;
+
+  const channelId = getAlertChannelId(guildId);
+  if (!channelId) return;
+
   try {
-    const channel = await discordClient.channels.fetch(tickerChannelId);
+    const channel = await discordClient.channels.fetch(channelId);
     if (!channel) return;
     
     const tierInfo = {
@@ -933,8 +1037,6 @@ async function sendStreakAnnouncement(userId, username, streakDays, tier) {
     const info = tierInfo[tier];
     if (!info) return;
     
-    // Get guildId from channel for proper price calculation
-    const guildId = channel.guild?.id || null;
     const currentPrice = calculateStockPrice(userId, guildId);
     
     const embed = new EmbedBuilder()
@@ -947,7 +1049,7 @@ async function sendStreakAnnouncement(userId, username, streakDays, tier) {
         { name: '💰 Current Price', value: `${Math.round(currentPrice).toLocaleString()} ${getCurrency(guildId)}`, inline: true }
       )
       .setTimestamp()
-      .setFooter({ text: tier === 3 ? 'Chat-Stock Ticker • Gold streak expires after 7 days' : 'Chat-Stock Ticker • Keep the streak going!' });
+      .setFooter({ text: tier === 3 ? 'Black Ledger Ticker • Gold streak expires after 7 days' : 'Black Ledger Ticker • Keep the streak going!' });
     
     await channel.send({ embeds: [embed] });
     
@@ -957,15 +1059,16 @@ async function sendStreakAnnouncement(userId, username, streakDays, tier) {
 }
 
 // Send streak expiration announcement
-async function sendStreakExpiredAnnouncement(userId, username) {
-  if (!discordClient || !tickerChannelId) return;
-  
+async function sendStreakExpiredAnnouncement(guildId, userId, username) {
+  if (!discordClient) return;
+
+  const channelId = getAlertChannelId(guildId);
+  if (!channelId) return;
+
   try {
-    const channel = await discordClient.channels.fetch(tickerChannelId);
+    const channel = await discordClient.channels.fetch(channelId);
     if (!channel) return;
     
-    // Get guildId from channel for proper price calculation
-    const guildId = channel.guild?.id || null;
     const currentPrice = calculateStockPrice(userId, guildId);
     
     const embed = new EmbedBuilder()
@@ -977,7 +1080,7 @@ async function sendStreakExpiredAnnouncement(userId, username) {
         { name: '📈 Bonus Lost', value: '-7%', inline: true }
       )
       .setTimestamp()
-      .setFooter({ text: 'Chat-Stock Ticker • Start a new streak to earn bonuses again!' });
+      .setFooter({ text: 'Black Ledger Ticker • Start a new streak to earn bonuses again!' });
     
     await channel.send({ embeds: [embed] });
     
@@ -989,12 +1092,12 @@ async function sendStreakExpiredAnnouncement(userId, username) {
 // Refresh all last known prices to current values
 // Call this after market events to prevent false alerts
 async function refreshLastKnownPrices(guildId = null) {
-  const users = getAllUsers();
+  const users = getAllUsers(guildId);
   if (!users || users.length === 0) return;
   
   for (const user of users) {
     const currentPrice = calculateStockPrice(user.user_id, guildId, null, true);
-    lastKnownPrices.set(user.user_id, currentPrice);
+    lastKnownPrices.set(`${guildId}:${user.user_id}`, currentPrice);
   }
   
   console.log(`📊 Refreshed last known prices for ${users.length} users (market event adjustment)`);

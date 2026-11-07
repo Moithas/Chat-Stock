@@ -1,4 +1,4 @@
-// Rob module for Chat-Stock
+// Rob module for Black Ledger
 // Allows users to rob other players' cash
 
 const { migrateAddColumn } = require('./database');

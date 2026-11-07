@@ -1,4 +1,4 @@
-// Video Poker game module for Chat-Stock
+// Video Poker game module for Black Ledger
 // Supports Jacks or Better, Deuces Wild, Bonus Poker
 
 const { TTLCache } = require('./cache');

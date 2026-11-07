@@ -1,4 +1,4 @@
-// Bank module for Chat-Stock
+// Bank module for Black Ledger
 // Handles loans with interest and savings bonds
 
 const { migrateAddColumn } = require('./database');

@@ -27,7 +27,7 @@ const adminCommandChannels = require('./admin-command-channels');
 async function showDashboard(interaction) {
   const embed = new EmbedBuilder()
     .setColor(0x2b2d31)
-    .setTitle('⚙️ Chat-Stock Admin Dashboard')
+    .setTitle('⚙️ Black Ledger Admin Dashboard')
     .setDescription('Manage all bot systems from one place. Select a module below.')
     .addFields(
       { name: '💰 Economy',    value: 'Wealth tax, bank & dividends',    inline: true },
@@ -44,7 +44,7 @@ async function showDashboard(interaction) {
       { name: '🐾 Pets',         value: 'Pet system & shop settings',      inline: true },
       { name: '⚙️ Settings',    value: 'Admin role, currency & logs',     inline: true }
     )
-    .setFooter({ text: 'Chat-Stock Admin • 23 configurable modules' });
+    .setFooter({ text: 'Black Ledger Admin • 23 configurable modules' });
 
   const select = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()

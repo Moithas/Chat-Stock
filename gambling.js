@@ -1,4 +1,4 @@
-// Gambling module for Chat-Stock
+// Gambling module for Black Ledger
 // Handles blackjack and roulette games
 
 const { migrateAddColumn } = require('./database');

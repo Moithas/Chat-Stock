@@ -1,128 +1,127 @@
-Chat-Stock Discord Bot
-A Discord bot that creates a stock market based on user chat activity! The more users chat, the more their "stock" is worth. Buy and sell shares of your favorite chatters!
-Features
+# Black Ledger
 
-📈 Dynamic Stock Prices - Stock value increases with chat activity
-💰 Buy & Sell System - Trade user stocks with slash commands
-📊 Portfolio Tracking - View your holdings and profit/loss
-🏆 Leaderboard - See the top stocks in your server
-📉 Market Forces - Supply and demand affects stock prices
-💾 SQLite Database - All data stored locally
+**Black Ledger** is a full-featured Discord economy bot. Every member of your
+server is a tradeable "stock" whose value rises with activity — buy low, sell
+high, and build wealth through a deep economy of jobs, gambling, PvP, property,
+pets, and more. Everything is per-server, works out of the box with sensible
+defaults, and is configurable by admins.
 
-Setup Instructions
-1. Install Dependencies
-In your terminal, run:
-bashnpm install
-This will install all required packages (discord.js, dotenv, better-sqlite3).
-2. Configure Your Bot
+> All currency, stocks, items, and rewards are **entirely virtual** and have no
+> real-world monetary value. See the [Terms of Service](./TERMS_OF_SERVICE.txt)
+> and [Privacy Policy](./PRIVACY_POLICY.txt).
 
-Copy .env.example to a new file called .env:
+---
 
-bash   copy .env.example .env
+## Features
 
-Open .env and fill in your details:
+- 📈 **Stock market** — Members are tradeable stocks priced by chat activity, supply/demand, and market events.
+- 💹 **Dividends & splits** — Passive income for shareholders, with automatic stock splits.
+- 💼 **Economy** — `/work`, `/crime`, banking, loans, bonds, wealth tax, and prestige.
+- 🎰 **Gambling** — Blackjack, video poker, three-card poker, in-between, let-it-ride, scratchcards, lottery, and more.
+- ⚔️ **PvP** — Rob, hack, fight, and investigate other players, with infamy and bounties.
+- 🏠 **Property & items** — Own property, collect cards, trade items, and run VIP rooms.
+- 🐾 **Pets** — Hatch, raise, and battle collectible pets.
+- 🗺️ **Dungeons & hunts** — PvE runs with loot.
+- 🛠️ **Admin panel** — 20+ configurable modules via `/admin`, plus health and usage monitoring.
 
-DISCORD_TOKEN - Your bot token from Discord Developer Portal
-GUILD_ID - Your Discord server ID (right-click server icon → Copy Server ID)
-UBB_API_KEY - (Optional) UnbelievaBoat API key for economy integration
+Run `/help` in Discord for the full, always-up-to-date command catalog.
 
+---
 
+## Requirements
 
-3. Enable Developer Mode in Discord
-To get your Guild ID:
+- [Node.js](https://nodejs.org/) 18 or newer
+- A Discord application + bot token ([Developer Portal](https://discord.com/developers/applications))
 
-Open Discord Settings → Advanced
-Enable "Developer Mode"
-Right-click your server icon → Copy Server ID
+---
 
-4. Invite Your Bot
-Create an invite link with these permissions:
+## Setup
 
-Bot permissions: Send Messages, Read Messages, Use Slash Commands
-OAuth2 URL Generator in Discord Developer Portal
-Required scopes: bot, applications.commands
+### 1. Install dependencies
 
-5. Start the Bot
-bashnpm start
-You should see:
-✅ Logged in as YourBot#1234
-🔄 Registering slash commands...
-✅ Slash commands registered!
-Available Commands
+```bash
+npm install
+```
 
-/buy @user [shares] - Buy shares of a user's stock
-/sell @user [shares] - Sell shares you own
-/portfolio [@user] - View stock portfolio
-/price [@user] - Check current stock price
-/leaderboard - View top 10 stocks
+### 2. Configure environment
 
-How It Works
-Stock Value Calculation
+Copy the example file and fill in your values:
 
-Base Value: Starts at 100 coins
-Activity Multiplier: +1% per message sent by the user
-Demand Multiplier: More shares owned = higher price (up to 50% boost)
+```bash
+cp .env.example .env
+```
 
-Example:
+At minimum set `DISCORD_TOKEN`. See [.env.example](./.env.example) for all options.
 
-User has sent 50 messages
-10 shares of their stock are held by others
-Base price: 100 coins
-Activity: 100 × 1.50 = 150 coins (50% increase)
-Demand: 150 × 1.05 = 157.5 coins (5% increase)
-Final Price: 157.5 coins per share
+> **Upgrading an existing database?** The stock market is isolated per server. If
+> your `chatstock.db` predates this, set `LEGACY_GUILD_ID` in `.env` to the server
+> ID that owns the existing market data before the first start — the bot performs a
+> one-time migration that stamps all existing market data with that server, and
+> refuses to start (to avoid orphaning data) if the variable is missing. A backup is
+> written to `backups/` before any schema change. Fresh installs can leave it unset.
 
-UnbelievaBoat Integration (TODO)
-The bot has placeholder code for UnbelievaBoat integration in:
+### 3. Enable required intents
 
-commands/buy.js - Check balance before purchase
-commands/sell.js - Add coins after sale
+In the Developer Portal → your app → **Bot**, enable:
 
-To enable:
+- **Server Members Intent**
+- **Message Content Intent**
 
-Get API key from UnbelievaBoat dashboard
-Add to .env file
-Implement the API calls (examples in comments)
+### 4. Invite the bot
 
-File Structure
-Chat-Stock/
-├── bot.js              # Main bot file
-├── database.js         # Database functions
-├── package.json        # Dependencies
-├── .env                # Your configuration (create this!)
-├── .env.example        # Template for .env
-├── README.md           # This file
-├── commands/
-│   ├── buy.js         # Buy command
-│   ├── sell.js        # Sell command
-│   ├── portfolio.js   # Portfolio command
-│   ├── price.js       # Price command
-│   └── leaderboard.js # Leaderboard command
-└── chatstock.db       # SQLite database (auto-created)
-Troubleshooting
-Bot not responding to commands?
+Use the OAuth2 URL Generator with scopes `bot` and `applications.commands`, and
+grant the permissions the bot needs (Send Messages, Embed Links, Attach Files,
+Use Application Commands, Manage Channels for VIP rooms, and Manage Roles for
+role-granting items).
 
-Make sure you've enabled Message Content Intent in Discord Developer Portal
-Check that GUILD_ID is correct in .env
-Restart the bot after making changes
+### 5. Run
 
-Database errors?
+```bash
+npm start
+```
 
-Delete chatstock.db and restart the bot (will reset all data)
+Slash commands register automatically whenever their definitions change.
 
-Commands not showing up?
+---
 
-Wait a few minutes for Discord to sync
-Try kicking and re-inviting the bot
+## Running in production
 
-Future Enhancements
+A [PM2](https://pm2.keymetrics.io/) config is included:
 
- Complete UnbelievaBoat economy integration
- Add dividends based on chat activity
- Stock splits when prices get too high
- Market events (crashes, booms)
- Trading history graphs
- Short selling mechanics
+```bash
+pm2 start ecosystem.config.js
+```
 
-Support
-For issues or questions, check the Discord.js documentation at https://discord.js.org
+It handles auto-restart, a memory ceiling, graceful shutdown, and a nightly
+restart to keep the gateway session fresh.
+
+A health endpoint is exposed on `127.0.0.1:${HEALTH_PORT}/health` (default port
+`8080`) returning status, uptime, guild count, ping, and memory usage.
+
+---
+
+## Data & privacy
+
+Black Ledger stores only the data needed to run its features (Discord IDs,
+usernames, and in-game state) in a local SQLite database. It does **not** store
+message content. Players can remove their data with `/deletedata`. Full details
+are in the [Privacy Policy](./PRIVACY_POLICY.txt).
+
+### Backups
+
+The bot writes automatic SQLite backups to [backups/](./backups) on startup and
+every 6 hours, keeping the most recent copies. These live on the same host, so
+for production set `BACKUP_SYNC_CMD` in your `.env` to ship each backup to
+off-host storage (e.g. `rclone` or `aws s3 sync`) — otherwise a disk failure
+would lose both the database and its backups. See [.env.example](./.env.example).
+
+---
+
+## Support
+
+Questions, bug reports, or data requests: join the support server at
+<https://discord.gg/3PnT5BknaP>.
+
+## License
+
+MIT — see [package.json](./package.json).

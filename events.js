@@ -1,4 +1,6 @@
 
+const fs = require('fs');
+const path = require('path');
 const { migrateAddColumn } = require('./database');
 const { TTLCache } = require('./cache');
 
@@ -14,8 +16,17 @@ const activeVaults = new Map();
 // Message counters per guild (guild_id -> { eventCounter, eventTarget, truckCounter, truckTarget })
 const messageCounters = new Map();
 
-// Vault image URL
-const VAULT_IMAGE = 'https://cdn.discordapp.com/attachments/1418772691166560256/1456469066456760340/vault.png?ex=69587a05&is=69572885&hm=8e684a51af13d21e8167d5b95915b7f6d386478f3b00810bae9a46ce4812b238&';
+// Vault image — served from a locally committed asset so it renders in every
+// guild and never expires. If the file is absent, embeds simply omit the image.
+const VAULT_IMAGE_PATH = path.join(__dirname, 'assets', 'vault.png');
+const VAULT_IMAGE_URL = 'attachment://vault.png';
+const hasVaultImage = fs.existsSync(VAULT_IMAGE_PATH);
+
+function buildVaultImage() {
+  if (!hasVaultImage) return null;
+  const { AttachmentBuilder } = require('discord.js');
+  return new AttachmentBuilder(VAULT_IMAGE_PATH, { name: 'vault.png' });
+}
 
 // Default events with flavor text
 const DEFAULT_EVENTS = [
@@ -921,9 +932,11 @@ async function spawnVault(guildId) {
       .setColor(0xFFD700)
       .setTitle('🏦 VAULT OPENED!')
       .setDescription('**A vault has been discovered!**\n\nFirst 3 people to claim it get rewarded!')
-      .setImage(VAULT_IMAGE)
       .setFooter({ text: 'Quick! This disappears in 60 seconds!' })
       .setTimestamp();
+
+    const vaultFile = buildVaultImage();
+    if (vaultFile) embed.setImage(VAULT_IMAGE_URL);
     
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -933,7 +946,9 @@ async function spawnVault(guildId) {
         .setStyle(ButtonStyle.Success)
     );
     
-    const message = await channel.send({ embeds: [embed], components: [row] });
+    const sendOptions = { embeds: [embed], components: [row] };
+    if (vaultFile) sendOptions.files = [vaultFile];
+    const message = await channel.send(sendOptions);
     
     // Record spawn time for reaction timing
     const spawnTime = Date.now();
@@ -1154,9 +1169,11 @@ async function spawnVault(guildId) {
         .setColor(0x808080)
         .setTitle('🏦 VAULT CLOSED!')
         .setDescription(`The vault has been sealed!\n\n**Results:**\n${resultsText}`)
-        .setImage(VAULT_IMAGE)
         .setTimestamp();
-      
+
+      const endVaultFile = buildVaultImage();
+      if (endVaultFile) endEmbed.setImage(VAULT_IMAGE_URL);
+    
       const disabledRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('vault_grab_disabled')
@@ -1167,7 +1184,9 @@ async function spawnVault(guildId) {
       );
       
       try {
-        await message.edit({ embeds: [endEmbed], components: [disabledRow] });
+        const editOptions = { embeds: [endEmbed], components: [disabledRow] };
+        if (endVaultFile) editOptions.files = [endVaultFile];
+        await message.edit(editOptions);
       } catch (e) {
         // Message may have been deleted
       }

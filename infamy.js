@@ -501,8 +501,8 @@ function snapshotPortfolio(guildId, eventName) {
     const holdings = db.exec(`
       SELECT s.owner_id as holder_id, s.stock_user_id, s.shares
       FROM stocks s
-      WHERE s.shares > 0
-    `);
+      WHERE s.guild_id = ? AND s.shares > 0
+    `, [guildId]);
 
     if (holdings.length === 0 || holdings[0].values.length === 0) return;
 

@@ -37,7 +37,7 @@ module.exports = {
       } catch (e) { /* table may not exist */ }
     };
     try {
-      const usersResult = db.exec('SELECT user_id, username FROM users');
+      const usersResult = db.exec('SELECT user_id, username FROM users WHERE guild_id = ?', [guildId]);
       if (usersResult.length && usersResult[0].values.length) {
         for (const [uid, uname] of usersResult[0].values) {
           candidateIds.add(String(uid));
@@ -49,7 +49,7 @@ module.exports = {
     collectIds('SELECT DISTINCT user_id FROM fighter_stats WHERE guild_id = ?', [guildId]);
     collectIds('SELECT DISTINCT user_id FROM prestige WHERE guild_id = ?', [guildId]);
     collectIds('SELECT DISTINCT user_id FROM dungeon_tracker WHERE guild_id = ?', [guildId]);
-    collectIds('SELECT DISTINCT owner_id FROM stocks');
+    collectIds('SELECT DISTINCT owner_id FROM stocks WHERE guild_id = ?', [guildId]);
 
     if (candidateIds.size === 0) {
       return interaction.editReply({ content: '✅ No users found in database.' });
@@ -66,8 +66,8 @@ module.exports = {
         keptCount++;
       } catch (error) {
         // User is not in the guild anymore
-        const shareholders = getAllStockHolders(userId);
-        const portfolio = getPortfolio(userId);
+        const shareholders = getAllStockHolders(guildId, userId);
+        const portfolio = getPortfolio(guildId, userId);
         
         // Calculate liquidation value if they have shareholders
         let liquidationValue = 0;
@@ -215,7 +215,7 @@ module.exports.handlePurgeButton = async function(interaction) {
     
     // === LIQUIDATION PHASE ===
     // Compensate shareholders before deleting data
-    const shareholders = getAllStockHolders(userId);
+    const shareholders = getAllStockHolders(guildId, userId);
     if (shareholders.length > 0) {
       const currentPrice = calculateStockPrice(userId, guildId);
       let userCompensation = 0;
@@ -260,7 +260,7 @@ module.exports.handlePurgeButton = async function(interaction) {
     }
     
     // Count portfolio holdings being deleted
-    const portfolio = getPortfolio(userId);
+    const portfolio = getPortfolio(guildId, userId);
     results.stocksDeleted += portfolio.filter(p => p.stock_user_id !== userId).length;
     
     // === PURGE PHASE ===
@@ -268,13 +268,13 @@ module.exports.handlePurgeButton = async function(interaction) {
     // single missing/renamed table can't abort the entire batch (which
     // previously caused the loop to stop after the first user).
     const deletes = [
-      ['users', 'DELETE FROM users WHERE user_id = ?', [userId]],
+      ['users', 'DELETE FROM users WHERE guild_id = ? AND user_id = ?', [guildId, userId]],
       ['balances', 'DELETE FROM balances WHERE user_id = ?', [userId]],
-      ['stocks', 'DELETE FROM stocks WHERE owner_id = ? OR stock_user_id = ?', [userId, userId]],
-      ['transactions', 'DELETE FROM transactions WHERE buyer_id = ? OR stock_user_id = ?', [userId, userId]],
+      ['stocks', 'DELETE FROM stocks WHERE guild_id = ? AND (owner_id = ? OR stock_user_id = ?)', [guildId, userId, userId]],
+      ['transactions', 'DELETE FROM transactions WHERE guild_id = ? AND (buyer_id = ? OR stock_user_id = ?)', [guildId, userId, userId]],
       ['economy_transactions', 'DELETE FROM economy_transactions WHERE user_id = ?', [userId]],
       ['stock_purchases', 'DELETE FROM stock_purchases WHERE owner_id = ? OR stock_user_id = ?', [userId, userId]],
-      ['price_history', 'DELETE FROM price_history WHERE user_id = ?', [userId]],
+      ['price_history', 'DELETE FROM price_history WHERE guild_id = ? AND user_id = ?', [guildId, userId]],
       ['work_history', 'DELETE FROM work_history WHERE user_id = ?', [userId]],
       ['work_tracker', 'DELETE FROM work_tracker WHERE user_id = ?', [userId]],
       ['crime_history', 'DELETE FROM crime_history WHERE user_id = ?', [userId]],

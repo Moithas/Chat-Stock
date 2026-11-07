@@ -1,12 +1,12 @@
-Chat-Stock — Privacy Policy
+Black Ledger — Privacy Policy
 
 Last Updated: March 16, 2026
 
-This Privacy Policy explains what data Chat-Stock collects, how it is used, and your rights regarding that data. By using Chat-Stock, you agree to the practices described below.
+This Privacy Policy explains what data Black Ledger collects, how it is used, and your rights regarding that data. By using Black Ledger, you agree to the practices described below.
 
 1. Data We Collect
 
-Chat-Stock collects and stores the following data when you interact with the bot:
+Black Ledger collects and stores the following data when you interact with the bot:
 
 a) Automatically Collected:
 - Your Discord user ID
@@ -58,7 +58,7 @@ Automated backups of the database are created periodically for data integrity pu
 
 5. Data Retention
 
-- Your data is retained as long as you are a member of a server using Chat-Stock.
+- Your data is retained as long as you are a member of a server using Black Ledger.
 - Server administrators may reset all player data for their server at any time via the admin panel.
 - If the bot is removed from a server, stored data for that server may persist until manually purged.
 
@@ -84,7 +84,7 @@ Administrators cannot view individual player data beyond what is visible through
 
 8. Children's Privacy
 
-Chat-Stock does not knowingly collect data from users under the minimum age required by Discord's Terms of Service. If you believe a minor is using the bot in violation of Discord's age requirements, please report it to Discord directly.
+Black Ledger does not knowingly collect data from users under the minimum age required by Discord's Terms of Service. If you believe a minor is using the bot in violation of Discord's age requirements, please report it to Discord directly.
 
 9. Data Security
 
@@ -97,8 +97,12 @@ However, no system is completely secure. We cannot guarantee absolute protection
 
 10. Changes to This Policy
 
-We may update this Privacy Policy at any time. Continued use of Chat-Stock after changes are posted constitutes acceptance of the revised policy. Material changes will be announced via the support server when possible.
+We may update this Privacy Policy at any time. Continued use of Black Ledger after changes are posted constitutes acceptance of the revised policy. Material changes will be announced via the support server when possible.
 
-11. Contact
+11. Payments and Premium
+
+If you purchase optional premium features, billing is handled entirely by a third-party payment provider (for example, Discord's in-app purchase system). We do not receive or store your card number, billing address, or other full payment details. We only receive confirmation of your entitlement (whether a server or account has an active premium subscription) so we can enable the corresponding features. For how your payment data is handled, refer to the privacy policy of the payment provider you purchase through.
+
+12. Contact
 
 For privacy questions, data requests, or concerns, join our support server: https://discord.gg/3PnT5BknaP

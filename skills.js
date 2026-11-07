@@ -1,4 +1,4 @@
-// Skills module for Chat-Stock
+// Skills module for Black Ledger
 // Manages XP, levels, and training for /hack and /rob
 
 const { migrateAddColumn } = require('./database');

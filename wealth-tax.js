@@ -1,4 +1,4 @@
-// Wealth Tax System for Chat-Stock
+// Wealth Tax System for Black Ledger
 // Collects periodic taxes on total net worth and adds to lottery jackpot
 
 const { getDb } = require('./database');
@@ -298,7 +298,7 @@ async function collectWealthTax(guildId) {
       // Force-liquidate stocks if still owing (start with lowest price)
       let stocksSold = [];
       if (remaining > 0) {
-        const portfolio = getPortfolio(user.userId);
+        const portfolio = getPortfolio(guildId, user.userId);
         
         // Create sortable portfolio with prices
         const portfolioWithPrices = portfolio.map(stock => ({
@@ -321,14 +321,14 @@ async function collectWealthTax(guildId) {
             // Remove shares from stocks table
             const db = require('./database').getDb();
             db.run(
-              'UPDATE stocks SET shares = shares - ? WHERE owner_id = ? AND stock_user_id = ?',
-              [sharesToSell, user.userId, stock.stock_user_id]
+              'UPDATE stocks SET shares = shares - ? WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?',
+              [sharesToSell, guildId, user.userId, stock.stock_user_id]
             );
             
             // Clean up 0-share rows
             db.run(
-              'DELETE FROM stocks WHERE owner_id = ? AND stock_user_id = ? AND shares <= 0',
-              [user.userId, stock.stock_user_id]
+              'DELETE FROM stocks WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ? AND shares <= 0',
+              [guildId, user.userId, stock.stock_user_id]
             );
             
             // Consume from stock_purchases for capital gains tracking

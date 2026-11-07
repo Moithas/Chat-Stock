@@ -35,3 +35,4 @@ build/
 
 # Command registration cache
 .command-hash
+.guild-commands-cleared

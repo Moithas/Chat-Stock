@@ -51,7 +51,7 @@ module.exports = {
     
     const db = getDb();
 
-    const user = getUser(targetUserId);
+    const user = getUser(guildId, targetUserId);
     if (!user) {
       return interaction.reply({
         content: `❌ User ${targetUsername} not found in database.`,
@@ -60,10 +60,10 @@ module.exports = {
     }
 
     // Get all shareholders of this user's stock (people who own shares in the target)
-    const shareholders = getAllStockHolders(targetUserId);
+    const shareholders = getAllStockHolders(guildId, targetUserId);
     
     // Get the target's portfolio (stocks they own in others)
-    const portfolio = getPortfolio(targetUserId);
+    const portfolio = getPortfolio(guildId, targetUserId);
 
     if (shareholders.length === 0 && portfolio.length === 0) {
       return interaction.reply({
@@ -111,11 +111,11 @@ module.exports = {
         }
         
         // Delete this shareholder's holding of the target's stock
-        db.run('DELETE FROM stocks WHERE owner_id = ? AND stock_user_id = ?', [holder.ownerId, targetUserId]);
+        db.run('DELETE FROM stocks WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?', [guildId, holder.ownerId, targetUserId]);
       }
       
       // Also delete target's self-held shares if any
-      db.run('DELETE FROM stocks WHERE owner_id = ? AND stock_user_id = ?', [targetUserId, targetUserId]);
+      db.run('DELETE FROM stocks WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?', [guildId, targetUserId, targetUserId]);
     }
 
     // 2. Delete all stocks the target owns in OTHER people (no compensation)
@@ -124,7 +124,7 @@ module.exports = {
         // Skip self-owned stock (already handled above)
         if (holding.stock_user_id === targetUserId) continue;
         
-        db.run('DELETE FROM stocks WHERE owner_id = ? AND stock_user_id = ?', [targetUserId, holding.stock_user_id]);
+        db.run('DELETE FROM stocks WHERE guild_id = ? AND owner_id = ? AND stock_user_id = ?', [guildId, targetUserId, holding.stock_user_id]);
         results.stocksDeleted++;
       }
     }

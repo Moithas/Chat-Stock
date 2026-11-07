@@ -1,4 +1,4 @@
-// Items module for Chat-Stock
+// Items module for Black Ledger
 // Manages shop items, user inventory, and active effects
 
 const { migrateAddColumn } = require('./database');

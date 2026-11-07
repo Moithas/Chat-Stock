@@ -1,4 +1,4 @@
-// Dividends & Stock Splits module for Chat-Stock
+// Dividends & Stock Splits module for Black Ledger
 // Handles dividend payouts and user-controlled stock splits
 
 let db = null;
@@ -1049,7 +1049,7 @@ function startDividendScheduler(client) {
         const { applyIncomeMultiplier } = require('./prestige');
         
         // Get all unique stock users
-        const allUsers = getAllUsers();
+        const allUsers = getAllUsers(guildId);
         if (!allUsers || allUsers.length === 0) {
           console.log(`💰 No users found for dividend payouts in ${guild.name}`);
           setLastPayoutTime(guildId, Date.now());
@@ -1076,7 +1076,7 @@ function startDividendScheduler(client) {
             // Skip stocks below minimum price threshold
             if (stockPrice < settings.minPriceForDividend) continue;
             
-            const shareholders = getAllStockHolders(stockUser.user_id);
+            const shareholders = getAllStockHolders(guildId, stockUser.user_id);
             if (!shareholders || shareholders.length === 0) continue;
             
             for (const holder of shareholders) {
@@ -1184,7 +1184,7 @@ function startDividendScheduler(client) {
                   { name: '🏢 Server', value: guild.name, inline: true }
                 )
                 .setTimestamp()
-                .setFooter({ text: 'Chat Stock Dividend System' });
+                .setFooter({ text: 'Black Ledger Dividend System' });
               
               await channel.send({ embeds: [embed] });
             }

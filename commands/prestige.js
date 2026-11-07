@@ -14,7 +14,7 @@ const {
 
 function calculateTotalWealth(guildId, userId) {
   const balance = getBalance(guildId, userId);
-  const portfolio = getPortfolio(userId);
+  const portfolio = getPortfolio(guildId, userId);
   let portfolioValue = 0;
   for (const stock of portfolio) {
     portfolioValue += calculateStockPrice(stock.stock_user_id, guildId) * stock.shares;

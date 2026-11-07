@@ -528,29 +528,37 @@ client.once('clientReady', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     
     try {
-      log.info('Command definitions changed — registering slash commands...');
-      
-      // Clear global commands (to prevent duplicates with guild commands)
+      log.info('Command definitions changed — registering global slash commands...');
+
+      // Register commands globally. Global commands apply to every server the
+      // bot is in (including servers that join later) and scale to any number
+      // of guilds, unlike per-guild registration which is rate-limited at scale.
       await rest.put(
         Routes.applicationCommands(client.user.id),
-        { body: [] }
+        { body: commands }
       );
-      log.info('Cleared global commands');
-      
-      // Register per-guild for instant availability (no duplicates)
-      for (const guild of client.guilds.cache.values()) {
-        try {
-          await rest.put(
-            Routes.applicationGuildCommands(client.user.id, guild.id),
-            { body: commands }
-          );
-          log.info(`Slash commands registered for guild: ${guild.name}`);
-        } catch (guildError) {
-          console.error(`Error registering commands for guild ${guild.name}:`, guildError.message);
+      log.info(`Registered ${commands.length} global slash commands`);
+
+      // One-time migration: clear leftover per-guild commands from the previous
+      // per-guild registration approach so they don't duplicate the global set.
+      const guildCleanupMarker = path.join(__dirname, '.guild-commands-cleared');
+      if (!fs.existsSync(guildCleanupMarker)) {
+        log.info('Clearing legacy per-guild commands (one-time migration to global commands)...');
+        for (const guild of client.guilds.cache.values()) {
+          try {
+            await rest.put(
+              Routes.applicationGuildCommands(client.user.id, guild.id),
+              { body: [] }
+            );
+          } catch (guildError) {
+            console.error(`Error clearing guild commands for ${guild.name}:`, guildError.message);
+          }
         }
+        fs.writeFileSync(guildCleanupMarker, new Date().toISOString());
+        log.info('Legacy per-guild commands cleared');
       }
-      
-      require('fs').writeFileSync(hashFile, commandHash);
+
+      fs.writeFileSync(hashFile, commandHash);
       log.info('Command hash saved — future restarts will skip registration');
     } catch (error) {
       console.error('Error registering commands:', error);
@@ -747,9 +755,12 @@ client.on('messageCreate', async (message) => {
   const userId = message.author.id;
   const username = message.author.username;
   const guildId = message.guildId;
+
+  // Stock market is per-guild; ignore DMs (no guild context)
+  if (!guildId) return;
   
   // Create user if doesn't exist
-  createUser(userId, username);
+  createUser(guildId, userId, username);
   
   // Check anti-spam before counting message
   const { shouldCount } = shouldCountMessage(guildId, userId, message.content);
@@ -761,23 +772,23 @@ client.on('messageCreate', async (message) => {
   
   // Update message count
   const spamSettings = getSpamSettings(guildId);
-  updateMessageCount(Date.now(), userId, spamSettings.baseValueGrowth);
+  updateMessageCount(guildId, Date.now(), userId, spamSettings.baseValueGrowth);
   
   // Check for streak milestones and announce
-  const streakInfo = getStreakInfo(userId);
+  const streakInfo = getStreakInfo(guildId, userId);
   if (streakInfo.newTier && streakInfo.tier > 0) {
     // Announce new streak tier
-    sendStreakAnnouncement(userId, username, streakInfo.days, streakInfo.tier);
+    sendStreakAnnouncement(guildId, userId, username, streakInfo.days, streakInfo.tier);
   } else if (streakInfo.expired) {
     // Announce streak expiration
-    sendStreakExpiredAnnouncement(userId, username);
+    sendStreakExpiredAnnouncement(guildId, userId, username);
   }
   
   // Periodically log price (every 10 messages to avoid spam)
-  const userMessages = getUser(userId);
+  const userMessages = getUser(guildId, userId);
   if (userMessages && userMessages.total_messages % 10 === 0) {
     const currentPrice = calculateStockPrice(userId, guildId);
-    logPrice(userId, currentPrice, Date.now());
+    logPrice(guildId, userId, currentPrice, Date.now());
   }
   
   // Handle event message counting (vault, market events)
@@ -792,9 +803,12 @@ client.on('messageReactionAdd', async (reaction, user) => {
   const userId = user.id;
   const username = user.username;
   const guildId = reaction.message.guildId;
+
+  // Per-guild only; ignore DM reactions
+  if (!guildId) return;
   
   // Create user if doesn't exist
-  createUser(userId, username);
+  createUser(guildId, userId, username);
   
   // Check if reaction should count (respects same cooldown as buttons)
   const { shouldCount } = shouldCountButtonInteraction(guildId, userId);
@@ -802,7 +816,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
   if (shouldCount) {
     // Count this reaction as activity
     const spamSettings = getSpamSettings(guildId);
-    updateMessageCount(Date.now(), userId, spamSettings.baseValueGrowth);
+    updateMessageCount(guildId, Date.now(), userId, spamSettings.baseValueGrowth);
   }
 });
 
@@ -814,8 +828,8 @@ client.on('interactionCreate', async (interaction) => {
     const username = interaction.user.username;
     const guildId = interaction.guildId;
     
-    // Create user if doesn't exist
-    createUser(userId, username);
+    // Create user if doesn't exist (per-guild; skip DM commands)
+    if (guildId) createUser(guildId, userId, username);
     
     // Note: message count is tracked later in the main command handler (avoid double-counting)
     
@@ -832,19 +846,19 @@ client.on('interactionCreate', async (interaction) => {
     const userId = interaction.user.id;
     const guildId = interaction.guildId;
     
-    // Create user if doesn't exist
-    createUser(userId, interaction.user.username);
-    
-    // Check if button interaction should count (respects cooldown)
-    const { shouldCount, reason } = shouldCountButtonInteraction(guildId, userId);
-    
-    if (shouldCount) {
-      // Count this interaction as activity
-      const spamSettings = getSpamSettings(guildId);
-      updateMessageCount(Date.now(), userId, spamSettings.baseValueGrowth);
-    } else if (reason) {
-      // Optionally log the cooldown reason for debugging
-      // console.log(`[ANTISPAM] Button interaction blocked for ${interaction.user.username}: ${reason}`);
+    // Per-guild only; skip DM interactions
+    if (guildId) {
+      // Create user if doesn't exist
+      createUser(guildId, userId, interaction.user.username);
+      
+      // Check if button interaction should count (respects cooldown)
+      const { shouldCount, reason } = shouldCountButtonInteraction(guildId, userId);
+      
+      if (shouldCount) {
+        // Count this interaction as activity
+        const spamSettings = getSpamSettings(guildId);
+        updateMessageCount(guildId, Date.now(), userId, spamSettings.baseValueGrowth);
+      }
     }
   }
 
@@ -2019,9 +2033,12 @@ client.on('interactionCreate', async (interaction) => {
   const guildId = interaction.guildId;
   const commandName = interaction.commandName;
   
-  createUser(userId, username);
-  const cmdSpamSettings = getSpamSettings(guildId);
-  updateMessageCount(Date.now(), userId, cmdSpamSettings.baseValueGrowth);
+  // Stock-market activity tracking is per-guild; skip for DM commands
+  if (guildId) {
+    createUser(guildId, userId, username);
+    const cmdSpamSettings = getSpamSettings(guildId);
+    updateMessageCount(guildId, Date.now(), userId, cmdSpamSettings.baseValueGrowth);
+  }
   
   // Check command rate limit (separate from built-in cooldowns)
   const cooldownCheck = checkCommandCooldown(guildId, userId, commandName);
@@ -2039,12 +2056,12 @@ client.on('interactionCreate', async (interaction) => {
   
   // Periodically log price off the interaction critical path so the
   // synchronous price calc + insert can't delay the 3-second ack.
-  const userMessages = getUser(userId);
+  const userMessages = guildId ? getUser(guildId, userId) : null;
   if (userMessages && userMessages.total_messages % 10 === 0) {
     setImmediate(() => {
       try {
         const currentPrice = calculateStockPrice(userId, guildId);
-        logPrice(userId, currentPrice, Date.now());
+        logPrice(guildId, userId, currentPrice, Date.now());
       } catch (e) {
         logError({ guildId, userId, command: 'price_log', error: e });
       }

@@ -338,8 +338,8 @@ function processSync(guildId, adminId, text) {
       for (let i = 0; i < synthCount; i++) {
         const syntheticTs = synthCount === 1 ? joinedAt : Math.round(joinedAt + i * stride);
         db.run(
-          "INSERT INTO transactions (buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, 0, 0, 'MC_BLOCK', ?)",
-          [link.discord_id, link.discord_id, syntheticTs]
+          "INSERT INTO transactions (guild_id, buyer_id, stock_user_id, shares, price, transaction_type, timestamp) VALUES (?, ?, ?, 0, 0, 'MC_BLOCK', ?)",
+          [guildId, link.discord_id, link.discord_id, syntheticTs]
         );
       }
     }
@@ -361,8 +361,8 @@ function processSync(guildId, adminId, text) {
 
     if (blocksAfterCap > 0) {
       // Credit base_value
-      db.run('UPDATE users SET base_value = base_value + ? WHERE user_id = ?',
-        [blocksAfterCap, link.discord_id]);
+      db.run('UPDATE users SET base_value = base_value + ? WHERE guild_id = ? AND user_id = ?',
+        [blocksAfterCap, guildId, link.discord_id]);
       addDailyCredit(guildId, link.discord_id, dateUtc, blocksAfterCap);
       sessionsCredited++;
       totalReward += blocksAfterCap;

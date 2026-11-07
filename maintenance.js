@@ -1,4 +1,4 @@
-// Maintenance module for Chat-Stock
+// Maintenance module for Black Ledger
 // Handles database cleanup, error monitoring, and command rate limiting
 
 let db = null;

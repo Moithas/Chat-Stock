@@ -330,7 +330,7 @@ function getAllBalances(guildId) {
   const result = db.exec(
     `SELECT b.user_id, u.username, b.cash, b.bank 
      FROM balances b 
-     LEFT JOIN users u ON b.user_id = u.user_id 
+     LEFT JOIN users u ON b.user_id = u.user_id AND u.guild_id = b.guild_id 
      WHERE b.guild_id = ? 
      ORDER BY (b.cash + b.bank) DESC`,
     [guildId]

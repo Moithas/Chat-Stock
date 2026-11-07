@@ -22,7 +22,7 @@ function getOverviewData(guildId, userId, user) {
   const balance = getBalance(guildId, userId);
   
   // Portfolio value
-  const portfolio = getPortfolio(userId);
+  const portfolio = getPortfolio(guildId, userId);
   let portfolioValue = 0;
   for (const stock of portfolio) {
     portfolioValue += calculateStockPrice(stock.stock_user_id, guildId) * stock.shares;
@@ -46,7 +46,7 @@ function getOverviewData(guildId, userId, user) {
       }
 
       // Batch-fetch all stock holdings in one query
-      const allStocks = db.exec('SELECT owner_id, stock_user_id, shares FROM stocks WHERE shares > 0');
+      const allStocks = db.exec('SELECT owner_id, stock_user_id, shares FROM stocks WHERE guild_id = ? AND shares > 0', [guildId]);
       const ownerHoldings = new Map();
       if (allStocks.length > 0) {
         for (const row of allStocks[0].values) {
@@ -85,8 +85,8 @@ function getOverviewData(guildId, userId, user) {
   let accountAge = 'Unknown';
   try {
     const firstTx = db.exec(
-      'SELECT MIN(timestamp) as first_time FROM transactions WHERE buyer_id = ? AND timestamp > 0',
-      [userId]
+      'SELECT MIN(timestamp) as first_time FROM transactions WHERE guild_id = ? AND buyer_id = ? AND timestamp > 0',
+      [guildId, userId]
     );
     if (firstTx.length > 0 && firstTx[0].values[0][0]) {
       const firstTime = firstTx[0].values[0][0];
@@ -103,7 +103,7 @@ function getFinanceData(guildId, userId) {
   const balance = getBalance(guildId, userId);
   
   // Portfolio value
-  const portfolio = getPortfolio(userId);
+  const portfolio = getPortfolio(guildId, userId);
   let portfolioValue = 0;
   for (const stock of portfolio) {
     portfolioValue += calculateStockPrice(stock.stock_user_id, guildId) * stock.shares;
@@ -127,7 +127,7 @@ function getFinanceData(guildId, userId) {
   } catch (e) {}
   
   // Chat streak
-  const streak = calculateStreakInfo(userId);
+  const streak = calculateStreakInfo(guildId, userId);
   const streakTier = streak.tier === 3 ? '🥇 Gold' : streak.tier === 2 ? '🥈 Silver' : streak.tier === 1 ? '🥉 Bronze' : 'None';
   
   // Wealth tax paid (lifetime)
@@ -206,14 +206,14 @@ function getStockData(guildId, userId) {
   const db = getDb();
   
   // Portfolio
-  const portfolio = getPortfolio(userId);
+  const portfolio = getPortfolio(guildId, userId);
   let portfolioValue = 0;
   for (const stock of portfolio) {
     portfolioValue += calculateStockPrice(stock.stock_user_id, guildId) * stock.shares;
   }
   
   // Shareholders
-  const shareholders = getAllStockHolders(userId);
+  const shareholders = getAllStockHolders(guildId, userId);
   
   // Stock price
   const currentPrice = calculateStockPrice(userId, guildId);
@@ -782,7 +782,7 @@ function buildUserSelect(currentUserId) {
 }
 
 function buildEmbed(category, guildId, userId, displayName, avatarUrl) {
-  const user = getUser(userId);
+  const user = getUser(guildId, userId);
   
   switch (category) {
     case 'finance': return buildFinanceEmbed(guildId, userId, displayName, avatarUrl);

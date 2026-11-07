@@ -1,4 +1,4 @@
-// Three Card Poker game module for Chat-Stock
+// Three Card Poker game module for Black Ledger
 // Handles game logic, hand evaluation, and payouts
 
 const { getDb } = require('./database');
