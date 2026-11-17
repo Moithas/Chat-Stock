@@ -1,38 +1,8 @@
-# Dependencies
 node_modules/
-
-# Environment variables (contains your bot token!)
-.env
-
-# Database files
-*.db
-*.db-shm
-*.db-wal
-*.sqlite
-*.sqlite3
-
-# Backups
-backups/
-
-# Logs
+*.bak
 *.log
-npm-debug.log*
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-
-# Build output
-dist/
-build/
-
-# Environment
-.env.local
-
-# Command registration cache
-.command-hash
-.guild-commands-cleared
+temp-query.*
+typescript
+chatstock.db
+chatstock.db.manual-*
+.env

@@ -1,1 +1,0 @@
-const db = require(" better-sqlite3\)(\chatstock.db\, {readonly:true}); console.log(JSON.stringify(db.prepare(\SELECT * FROM stock_purchases WHERE owner_id = ?\).all(\1378073247282761869\), null, 2));
