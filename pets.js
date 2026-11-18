@@ -92,7 +92,7 @@ const BREEDING_RARITY_TABLE = {
 
 const BREEDING_SHINY_CHANCES = {
   none: 0.01,   // Neither parent shiny
-  one: 0.05,    // One parent shiny
+  one: 0.75,    // One parent shiny
   both: 0.15,   // Both parents shiny
 };
 
