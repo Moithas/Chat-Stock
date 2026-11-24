@@ -4,5 +4,10 @@ node_modules/
 temp-query.*
 typescript
 chatstock.db
+chatstock.db-shm
+chatstock.db-wal
+chatstock.db-journal
 chatstock.db.manual-*
+backups/
+.command-hash
 .env
